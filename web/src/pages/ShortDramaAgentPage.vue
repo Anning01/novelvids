@@ -22,7 +22,11 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
+import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
+import type { EpisodePacing } from '@/types'
+import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
 import { useAuthStore } from '@/features/auth/authStore'
+import ImageModelSelect from '@/components/ImageModelSelect.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
@@ -104,6 +108,7 @@ function readProjectMeta(): AgentProjectMeta {
 const project = ref(readProjectMeta())
 const novel = ref<Novel | null>(null)
 const manuscriptLength = ref(0)
+const hasAnalysisContent = computed(() => manuscriptLength.value > 0 || (novel.value?.total_chapters || 0) > 0)
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -176,12 +181,18 @@ const selectedEpisode = computed(() => {
 type EpisodeView = 'source' | 'screenplay'
 const episodeViews = ref<Record<number, EpisodeView>>({})
 const episodeView = computed(() => selectedEpisode.value &&
-  (episodeViews.value[selectedEpisode.value.id] ?? (selectedEpisode.value.screenplay ? 'screenplay' : 'source')))
+  (episodeViews.value[selectedEpisode.value.id] ?? (selectedEpisode.value.screenplay || !selectedEpisode.value.content?.trim() ? 'screenplay' : 'source')))
 const generatingScripts = ref<Record<number, boolean>>({})
 const scriptRequests = new AbortController()
 const adapting = computed(() => Object.keys(generatingScripts.value).length > 0)
 
 function taskKey(id: number) { return `novelvids:screenplay:${projectId.value}:${id}` }
+
+async function saveEpisodePacing(id: number, pacing: EpisodePacing) {
+  const { data } = await api.updateChapter(id, { episode_pacing: pacing })
+  chapterDetails.value[id] = data
+  notice.success(tr('本集设置已保存'))
+}
 
 async function generateScreenplay(id: number, existingTask = sessionStorage.getItem(taskKey(id))) {
   if (generatingScripts.value[id] || (!existingTask && (!canEdit.value || editing.value))) return
@@ -245,12 +256,12 @@ const analysisRunning = computed(() => {
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
 })
 const analysisStatus = computed(() => {
-  if (analysisRunning.value && analysisResult.value) return tr('分析已完成，封面生成中')
-  if (startingAnalysis.value || analysisRunning.value) return tr('正在理解故事并准备封面')
+  if (analysisRunning.value && analysisTask.value?.response_data?.cover_status === 'pending') return tr('分析已完成，封面生成中')
+  if (startingAnalysis.value || analysisRunning.value) return tr('正在理解故事')
   if (analysisResult.value) return tr('剧本分析完成')
   if (analysisTask.value?.status === TaskStatusEnum.FAILED) return tr('分析失败')
   if (hasScriptPreview.value) return tr('剧本已载入')
-  return manuscriptLength.value ? tr('准备分析') : tr('待添加分集')
+  return hasAnalysisContent.value ? tr('准备分析') : tr('待添加分集')
 })
 async function loadProject(): Promise<boolean> {
   if (!Number.isFinite(projectId.value) || projectId.value <= 0) return false
@@ -390,14 +401,40 @@ async function pollAnalysis(taskId: string) {
   }
 }
 
+const coverModelId = ref('')
+const generatingCover = ref(false)
+const coverError = ref('')
+const hasCover = computed(() => Boolean(project.value.coverPreview || project.value.cover || analysisResult.value?.cover))
+
+async function generateCover() {
+  if (!canEdit.value || !coverModelId.value || generatingCover.value || startingAnalysis.value || analysisRunning.value) return
+  generatingCover.value = true
+  coverError.value = ''
+  try {
+    const { data } = await api.generateNovelCover(projectId.value, Number(coverModelId.value))
+    const task = await pollUntilTerminal(async signal => (await api.task(data.id, signal)).data, {
+      signal: scriptRequests.signal, intervalMs: 1200,
+      terminalStatuses: new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED]),
+    })
+    if (task.status !== TaskStatusEnum.COMPLETED || task.response_data?.cover_status !== 'ready') {
+      throw new Error(task.error_message || String(task.response_data?.cover_error || tr('封面生成未完成')))
+    }
+    await loadProject()
+  } catch (error) {
+    if (!scriptRequests.signal.aborted) coverError.value = (error as Error).message
+  } finally {
+    generatingCover.value = false
+  }
+}
+
 async function startAnalysis() {
-  if (!canEdit.value || startingAnalysis.value || analysisRunning.value) return
+  if (!canEdit.value || startingAnalysis.value || analysisRunning.value || generatingCover.value) return
   startingAnalysis.value = true
   analysisError.value = ''
   try {
     const response = await api.analyzeNovel(projectId.value)
     analysisTask.value = response.data
-    notice.success(tr('AI 已开始提取类型、大纲和关键人物，并生成 1K 封面'))
+    notice.success(tr('AI 已开始提取类型、大纲和关键人物'))
     await pollAnalysis(response.data.id)
   } catch (error) {
     analysisError.value = error instanceof Error ? error.message : tr('分析未能开始，请重试')
@@ -758,22 +795,31 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />{{ tr('保存修改') }}</AppButton>
           </template>
           <template v-else>
-            <AppButton v-if="canEdit && manuscriptLength > 0" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+            <div v-if="canEdit && novel" class="cover-generation-actions">
+              <ImageModelSelect v-model="coverModelId" :label="tr('封面生图模型')" :empty-label="tr('选择封面模型')"
+                :disabled="generatingCover || analysisRunning || startingAnalysis" />
+              <AppButton variant="secondary" size="sm" type="button" :loading="generatingCover"
+                :disabled="!coverModelId || analysisRunning || startingAnalysis" @click="generateCover">
+                {{ hasCover ? tr('重新生成封面') : tr('生成封面') }}
+              </AppButton>
+              <small v-if="coverError" class="cover-generation-error" role="alert">{{ coverError }}</small>
+            </div>
+            <AppButton v-if="canEdit && hasAnalysisContent" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis || generatingCover" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
             <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration || adapting" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
       </div>
 
-      <section v-if="(!hasScriptPreview && manuscriptLength > 0) || analysisRunning || startingAnalysis || analysisError || (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult)" class="analysis-progress-card" :class="{ 'is-failed': (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult) || analysisError }" role="status">
+      <section v-if="(!hasScriptPreview && hasAnalysisContent) || analysisRunning || startingAnalysis || analysisError || (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult)" class="analysis-progress-card" :class="{ 'is-failed': (analysisTask?.status === TaskStatusEnum.FAILED && !analysisResult) || analysisError }" role="status">
         <span><RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="25" /><FileText v-else :size="25" /></span>
         <div>
           <h2>{{ analysisStatus }}</h2>
           <p v-if="analysisError">{{ analysisError }}</p>
-          <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物并生成封面。正文已保存，可以先阅读章节；完成后会自动更新。') }}</p>
+          <p v-else-if="analysisRunning || startingAnalysis">{{ tr('正在理解故事、识别关键人物。正文已保存，分析完成后会自动更新。') }}</p>
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
         </div>
-        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
+        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="generatingCover" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
         <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
 
@@ -846,10 +892,14 @@ onBeforeUnmount(() => {
         <header>
           <h2>{{ tr('分集剧情') }}</h2>
           <div v-if="canEdit && !editing" class="episode-actions">
-            <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增集') }}</AppButton>
+            <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增一集') }}</AppButton>
             <AppButton v-if="selectedEpisodeBrief" variant="ghost" size="sm" :disabled="episodeBusy" @click="removeEpisode">{{ tr('删除本集') }}</AppButton>
           </div>
         </header>
+        <div v-if="!chapters.length && !chaptersLoading" class="episode-empty-state">
+          <p>{{ tr('新增一集开始写剧本，也可以和创作助手一起构思。') }}</p>
+          <AppButton v-if="canEdit" variant="soft" size="sm" @click="useCreationAgentWorkspace().editTargets(projectId, 0, [])">{{ tr('与助手开始创作') }}</AppButton>
+        </div>
         <div ref="episodeTabs" class="episode-tabs" role="tablist" :aria-label="tr('分集剧情')" tabindex="0">
           <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
           <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? tr('加载中…') : tr('继续滚动加载') }}</span>
@@ -870,7 +920,11 @@ onBeforeUnmount(() => {
               <button type="button" :aria-pressed="episodeView === 'source'" @click="episodeViews[selectedEpisode.id] = 'source'">{{ tr('原文') }}</button>
               <button type="button" :aria-pressed="episodeView === 'screenplay'" @click="episodeViews[selectedEpisode.id] = 'screenplay'">{{ tr('导演剧本') }}</button>
             </div>
-            <AppButton v-if="canEdit && selectedEpisode.content?.trim()" variant="primary" size="sm"
+            <EpisodePacingDialog v-if="canEdit" :key="selectedEpisode.id"
+              :pacing="selectedEpisode.episode_pacing" :episode="episodeDisplayLabel(selectedEpisode)"
+              :disabled="editing || selectedEpisodeLoading || generatingScripts[selectedEpisode.id]"
+              :save="(pacing) => saveEpisodePacing(selectedEpisode!.id, pacing)" />
+            <AppButton v-if="canEdit && selectedEpisode.content?.trim()" class="generate-screenplay" variant="primary" size="sm"
               :disabled="editing" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
               {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : selectedEpisode.screenplay ? tr('重新生成本集剧本') : tr('生成本集剧本') }}
             </AppButton>
@@ -892,7 +946,7 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
-      <AppButton v-if="selectedEpisodeBrief" class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />{{ tr('确认分析，进入设定') }}</span><ArrowRight :size="18" /></AppButton>
+      <AppButton v-if="selectedEpisodeBrief" class="continue-button" variant="primary" size="lg" block type="button" @click="continueToSettings"><span><Sparkles :size="18" />{{ tr('进入资产设定') }}</span><ArrowRight :size="18" /></AppButton>
       </template>
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />
@@ -908,6 +962,8 @@ onBeforeUnmount(() => {
 .tag-editor textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; }
 .tag-editor textarea:focus-visible { outline: 2px solid var(--app-accent); }
 
+.episode-empty-state { padding: 20px; border: 1px dashed var(--app-border); border-radius: 12px; color: var(--app-text-secondary); }
+.episode-empty-state p { margin: 0 0 12px; line-height: 1.7; }
 .episode-doc-tools { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
 .episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
 .episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
@@ -936,7 +992,9 @@ onBeforeUnmount(() => {
 .genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .tag-editor { display: grid; width: min(620px, 100%); gap: 5px; margin-top: 13px; }
 .tag-editor > span { color: #777c8d; font-size: 9px; font-weight: 650; }
-.analysis-hero-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.cover-generation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cover-generation-error { flex-basis: 100%; color: var(--creation-danger); }
+.analysis-hero-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .secondary-action { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 9px; color: #626879; background: #f3f4f8; cursor: pointer; font-size: 11px; }
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }

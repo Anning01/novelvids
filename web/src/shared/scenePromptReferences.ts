@@ -35,6 +35,8 @@ export function buildVideoInputImageReferences(
   assets: VideoInputAssetImageSource[],
   media: VideoReferenceMedia[],
   maxImages = Infinity,
+  includeSelected = false,
+  mediaPrompt = prompt,
 ): VideoInputImageReference[] {
   const sourcesByName = new Map<string, VideoInputAssetImageSource>()
   for (const source of assets) {
@@ -70,8 +72,13 @@ export function buildVideoInputImageReferences(
     orderedAssets.push(source)
   }
 
+  if (includeSelected) {
+    orderedAssets.push(...assets.filter(asset => !seenAssetIds.has(asset.assetId))
+      .sort((left, right) => left.assetId - right.assetId))
+  }
+
   const referencedUploads = new Set(
-    referencedVideoMedia(prompt, media)
+    referencedVideoMedia(mediaPrompt, media)
       .filter(reference => reference.type === 'image')
       .map(reference => reference.url),
   )

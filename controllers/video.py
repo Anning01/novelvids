@@ -402,9 +402,10 @@ class VideoController(CRUDBase[Video, dict, dict]):
         asset_prompt = general + "\n" + prompt if prompt_model else prompt
         try:
             subjects = await resolve_assets(
-                asset_prompt, novel_id, chapter_number=scene.chapter.number,
+                (general or prompt) if prompt_model else asset_prompt, novel_id, chapter_number=scene.chapter.number,
                 selected_asset_ids=[asset.id for asset in scene.assets],
                 selected_variant_ids=normalize_selected_variant_ids(metadata.get("asset_variant_ids")),
+                **({"include_selected": True} if prompt_model and req.generation_mode == "reference" else {}),
             )
         except ValueError as error:
             raise HTTPException(409, detail=str(error)) from None
@@ -639,7 +640,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 reference_audios=audio_urls,
                 return_last_frame=selection.return_last_frame,
                 team_id=team_id,
-                **({"platform_request_key":video_metadata["platform_request_key"]} if config.api_protocol=="novelvids" else {}),
+                **({"platform_request_key":video_metadata["platform_request_key"], "billing_video_id": video.id} if config.api_protocol=="novelvids" else {}),
             )
         except VideoProviderError as error:
             # 供应商在提交阶段直接拒绝请求时也创建失败记录，让异常在预览区可见，
@@ -720,6 +721,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 AiTaskTypeEnum.video.value, team_id=team_id
             )
 
+        if metadata.get("legacy_video_query"):
+            from services.video.ark_migration import legacy_query_config
+            config = legacy_query_config(config) or config
         generator = get_generator(config)
         if config.api_protocol == "novelvids" and metadata.get("download_retry_pending"):
             result = await generator.query(video.external_task_id, refresh=True)
@@ -898,14 +902,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
     @staticmethod
     async def _consume_balance(record, team_id, user_id=None) -> None:
-        if record is None or team_id is None:
-            return
-        from services.balance import accumulate_member_cost, consume
-
-        # 团队自己的 Key 不扣团队余额；成员累计消耗照记
-        if record.cost_source != "team_key":
-            await consume(team_id, record.cost, usage_record_id=record.id)
-        await accumulate_member_cost(team_id, user_id, record.cost)
+        from services.billing.recorder import _consume_team_balance
+        await _consume_team_balance(record, team_id, user_id)
 
     async def remove(self, video_id: int) -> None:
         instance = await self.get(video_id)

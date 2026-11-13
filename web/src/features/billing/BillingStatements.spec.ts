@@ -99,3 +99,17 @@ it('translates the billing view when language changes', async () => {
   expect(wrapper.text()).toContain('Actual deductions')
   expect(wrapper.text()).toContain('Export all details')
 })
+
+
+it('keeps the full long source name accessible in the compact table without changing exact charges', async () => {
+  const longName = '山峰间的云海缓慢流动，镜头跟随人物穿过街道。'.repeat(12)
+  vi.mocked(api.billingStatements).mockResolvedValue({code:0,message:'',data:{
+    ...statement(),items:[{...statement().items[0]!,novel_name:longName}],
+  }})
+  const wrapper = mount(BillingStatements,{props:{compact:true}})
+  await flushPromises()
+  expect(wrapper.get('.statement-project-name').attributes('title')).toBe(longName)
+  expect(wrapper.get('.statement-project-name').text()).toBe(longName)
+  expect(wrapper.get('.statement-table').text()).toContain('¥0.123456')
+  wrapper.unmount()
+})

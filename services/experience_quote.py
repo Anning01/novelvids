@@ -108,9 +108,11 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
             reference_selection = image_selection(reference_config.image_model_type, clarity=None, aspect_ratio=payload.aspect_ratio,
                 output_format='png', generation_count=1)
             ref_pricing = _price(reference_config.pricing, 'image', reference_selection.clarity)
-            total += compute_image_cost(1, reference_selection.clarity, ref_pricing)
+            reference_total = compute_image_cost(1, reference_selection.clarity, ref_pricing)
+            total += reference_total
             ref_undiscounted = {**ref_pricing, 'discount': 1}
-            original_total += compute_image_cost(1, reference_selection.clarity, ref_undiscounted)
+            reference_original = compute_image_cost(1, reference_selection.clarity, ref_undiscounted)
+            original_total += reference_original
         if not total.is_finite() or total < 0:
             raise ValueError(localized_message('无法确认预计价格，请联系管理员'))
         target_pricing = pricing if payload.task_type == 'video' else image_pricing

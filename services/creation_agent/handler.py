@@ -53,8 +53,10 @@ async def authorize_run(params: dict) -> AuthContext:
 
 
 def configured_model(config, limits: AgentConfiguration, *, structured_output=True):
+    from services.billing.platform import is_platform_model, platform_text_client
+    client_options = {"http_client": platform_text_client(config)} if is_platform_model(config) else {}
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
-                         max_retries=0, timeout=None)
+                         max_retries=0, timeout=None, **client_options)
     extra_body = {}
     if structured_output and getattr(config, 'supports_json_output', False):
         extra_body['response_format'] = {'type': 'json_object'}
@@ -72,6 +74,8 @@ def configured_model(config, limits: AgentConfiguration, *, structured_output=Tr
 
 def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = False) -> str:
     """Return actionable fixed copy without disclosing a provider's error payload."""
+    if any(call.get("platform_balance_insufficient") for call in calls):
+        return localized_message("API 平台账户可用额度不足，请前往 API 平台检查余额和限额")
     if turn_limited and ('Unknown tool name' in message or 'Exceeded maximum retries' in message):
         message = '本轮模型调用次数已达到配置上限'
     if any(marker in message for marker in ('上下文超过配置上限', 'Context exceeds the limit', 'Context limit exceeded')):

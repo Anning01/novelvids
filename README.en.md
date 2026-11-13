@@ -5,7 +5,7 @@
 <h1 align="center">NovelVids · 猫影短剧</h1>
 
 <p align="center">
-  <strong>An open-source workspace for illustrated stories and short dramas, available online or on your own server.</strong>
+  <strong>An open-source local workspace for illustrated stories and short dramas, with your own models or the NovelVids developer platform.</strong>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">Create online</a> · <a href="#quick-start">Get started</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
+  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#quick-start">Get started</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
 
 ## Join the community
@@ -40,13 +40,13 @@ Join the **NovelVids · 猫影短剧 WeChat group** to discuss AI animation, sho
   Group QR codes expire after 7 days. If this one has expired, check the latest version of the repository home page.
 </p>
 
-## Create online
+## NovelVids service
 
 **[Open the NovelVids commercial service →](https://shortdramas.xiazq.com)**
 
-Sign in with Qiling through WeChat. Start with an image or video idea, add reference material, or develop a story into a short drama. The hosted service provides model selection, team collaboration, usage records and top-ups. Generation fees follow the displayed estimates and actual usage.
+Sign in with Qiling through WeChat. The new developer platform provides a model catalog, API documentation, API keys, usage records and top-ups. See Local studio and developer platform for project migration.
 
-The hosted service uses the source code and creative rules in this repository. Self-hosting includes the same Qiling sign-in, team management, usage billing and WeChat Pay integrations. Each operator configures their own services.
+This repository provides the creative workspace and creative rules. The developer platform is maintained separately as [Cat API](https://github.com/Anning01/cat-api). Workspace accounts, teams and balances are managed by the local deployment; platform accounts and model API billing are managed independently by Cat API.
 
 ## Video tutorial
 
@@ -88,7 +88,7 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 - **Editable steps.** Keep prompts and generation versions. Revise one shot before deciding whether to generate it again.
 - **Shared capabilities for buttons and chat.** The assistant orchestrates creation; image and video models generate the media. Tasks and usage remain recorded.
 - **Customizable creative rules.** One Chinese skill pack guides story analysis, assets, images and storyboards, with Chinese or English output selected by system language.
-- **Choose how to use it.** Create online or deploy the same application with your own models and storage.
+- **Choose your models.** Keep projects on your computer and connect your own model provider or the NovelVids developer platform.
 
 ### Current interface
 
@@ -108,7 +108,7 @@ Screenshots use public example projects in the current Chinese interface. Englis
 
 ## Quick start
 
-1. Open the **[NovelVids commercial service](https://shortdramas.xiazq.com)**, read the agreements and sign in with Qiling through WeChat.
+1. Start the local studio using the steps below. In **Settings → Model configuration**, add your own model or enter the NovelVids platform Base URL, model ID and API key.
 2. Choose an image or video model, enter a visual idea, add references and review the estimate. For a series, import a story through Short dramas and continue into assets and storyboards.
 3. Review generated versions, revise shots, organize resources and manage finished episodes in the works library. Projects and costs belong to the currently selected team.
 
@@ -145,8 +145,8 @@ docker compose exec backend ffprobe -version
 Use `docker compose exec backend ffprobe -version` to check that the video tools are ready.
 
 - **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
-- **No login by default:** intended for personal local use. Before public exposure, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=password`, `SUPER_ADMIN_USERNAME` and `SUPER_ADMIN_PASSWORD` through environment variables, and enable HTTPS.
-- **Qiling sign-in:** Set `AUTH_ENABLED=true`, `AUTH_PROVIDER=qiling` and `QILING_API_BASE_URL` to your Qiling HTTPS endpoint. To accept new accounts, set `QILING_SIGNUP_ENABLED=true` and fill in the operator, policy and third-party disclosures under `LEGAL_*` in Compose.
+- **Initial studio sign-in:** A fresh studio starts with username `admin`, password `123456`, and a local balance of CNY `999999` for its default team. Set your own `SUPER_ADMIN_PASSWORD` and enable HTTPS before public exposure. For personal use on your machine, you can set `AUTH_ENABLED=false`.
+- **Qiling sign-in on the API platform:** On `NOVELVIDS_ROLE=platform`, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=qiling` and `QILING_API_BASE_URL` to your Qiling HTTPS endpoint. To accept new accounts, set `QILING_SIGNUP_ENABLED=true` and fill in the operator, policy and third-party disclosures under `LEGAL_*` in Compose. Self-hosted studios use their own username and password when sign-in is enabled.
 - **WeChat Pay and remote media processing:** To enable top-ups, configure the backend with your own `WECHAT_PAY_*` merchant settings and point the callback URL to `/api/payment/wechat/notify` on your site. Use a Compose override to mount the key files read-only at their configured container paths. Remake jobs run locally by default. To use an installed media worker, set `REMAKE_MEDIA_SSH_HOST` and configure backend SSH credentials and a verified host key.
 - **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See Local development below.
 
@@ -154,9 +154,11 @@ Use `docker compose exec backend ffprobe -version` to check that the video tools
 
 ### Local studio and developer platform
 
-The default `NOVELVIDS_ROLE=studio` runs the creative workspace. Use **Export project** in the project menu and **Import project** in another local studio to restore a new project. The exporting browser downloads cloud media directly from storage, which must permit cross-origin reads from the studio origin.
+This repository runs the creative workspace with `NOVELVIDS_ROLE=studio` by default. Deploy the developer platform from the separate [Cat API repository](https://github.com/Anning01/cat-api). Use **Export project** in the project menu and **Import project** in another local studio to restore a new project. The exporting browser downloads cloud media directly from storage, which must permit cross-origin reads from the studio origin.
 
-`NOVELVIDS_ROLE=platform` requires `AUTH_ENABLED=true`. Its console provides usage, recharge, a model catalog, API keys and developer documentation. Legacy projects remain available for export. For hosted text inference, use an OpenAI-compatible model configured with the platform’s `/v1` base URL, a catalog model ID and a console-issued API key. The platform serves streaming and non-streaming `POST /v1/chat/completions`, `GET /v1/models` and `GET /v1/requests/{id}`. For image generation, select the Cat Shadow platform protocol, image model type and ID from the catalog. Developers can use `POST /v1/images/generations` to receive output URLs. The catalog indicates which configurations support reference image URLs. For remote video, use the platform protocol, submit `POST /v1/videos`, and poll `GET /v1/videos/{id}`. The studio downloads completed video directly to local storage. Reuse the same `Idempotency-Key` when retrying a logical request. Route both `/api/` and `/v1/` to the platform backend and retain legacy media download paths. Verify migration and handle in-flight jobs before switching an existing hosted studio.
+Create a key for **Local Cat Shadow Studio** in the platform console. As a studio super administrator, open **Model configuration → Connect to the platform**, enter the key, and sync the models. The studio uses `https://shortdramas.xiazq.com/v1` by default. Set `STUDIO_PLATFORM_BASE_URL` to use a different platform address. The studio downloads completed videos directly to local storage.
+
+The legacy `NOVELVIDS_ROLE=platform` role remains for existing deployments. New installations should deploy the studio and Cat API separately. Users of the retired online studio can download a complete project package from [Historical project migration](https://shortdramas.xiazq.com/#/legacy-works) and import it into a local studio. Preserve original projects and media, allow time for migration and notify users before switching services.
 
 ## Creative workflow
 

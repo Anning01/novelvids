@@ -84,7 +84,12 @@ export interface ProjectOverviewSummary {
   unknown_duration_count: number
 }
 export interface ProjectOverview { items: ProjectOverviewItem[]; summary: ProjectOverviewSummary }
-export interface Chapter { id: number; novel_id: number; number: number; name: string; content?: string; screenplay?: string | null; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
+export interface EpisodePacing {
+  preset: 'compact' | 'fast' | 'smart' | 'slow' | 'detailed'
+  max_seconds?: number | null
+}
+
+export interface Chapter { episode_pacing?: EpisodePacing | null; id: number; novel_id: number; number: number; name: string; content?: string; screenplay?: string | null; status?: TaskStatusEnum; workflow_status?: number; created_at: string; updated_at: string }
 export interface AssetVariant { id: number; asset_id: number; name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; images: string[]; image_thumbnails?: Array<string | null>; image_previews?: Array<string | null>; metadata?: Record<string, unknown>; created_at: string; updated_at: string }
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; main_image_thumbnail?: string | null; main_image_preview?: string | null; angle_image_1?: string; angle_image_1_thumbnail?: string | null; angle_image_1_preview?: string | null; angle_image_2?: string; angle_image_2_thumbnail?: string | null; angle_image_2_preview?: string | null; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
@@ -149,7 +154,7 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'unified_video' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
+export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
 export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
 export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
@@ -249,7 +254,7 @@ export interface GenerationCapabilities {
   video_protocols?: Partial<Record<VideoGenerationModelType, Array<{ value: ImageApiProtocol; label: string; resolutions: string[] }>>>
   video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
 }
-export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team'; team_id?: number | null; created_at: string; updated_at: string }
+export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; max_context_characters?: number | null; thinking?: 'enabled' | 'disabled' | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team' | 'studio_platform'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; source?: 'system' | 'upload'; duration?: number | null; team_id?: number | null; is_active: boolean; created_at: string; updated_at: string }
 export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }
@@ -508,6 +513,9 @@ export interface BillingRecord {
   pricing_snapshot?: Record<string, unknown> | null
   usage: Record<string, unknown>
   cost: number
+  platform_cost?: string | null
+  local_charge?: string | null
+  settlement_status?: 'legacy' | 'pending' | 'settled' | 'review'
   currency: string
   status: number
   duration_seconds?: number | null
@@ -525,12 +533,15 @@ export interface BillingRecord {
 export interface BillingSummary {
   total_cost: number
   total_records: number
+  platform_cost?: string
+  local_charge?: string
+  pending_records?: number
   by_billing_type: Array<{ billing_type: string; cost: number }>
   by_task_type: Array<{ task_type: number; cost: number }>
-  by_model: Array<{ model: string; cost: number }>
+  by_model: Array<{ model: string; cost: number; record_count?: number }>
   daily_trend: Array<{ date: string; cost: number }>
 }
-export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number }
+export interface BillingProject { novel_id: number; novel_name: string; total_cost: number; record_count: number; pending_records?: number }
 export interface BillingStatementFilters {
   team_id?: number
   user_id?: number

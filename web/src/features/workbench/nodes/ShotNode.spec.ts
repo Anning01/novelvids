@@ -151,7 +151,7 @@ it.each(['light', 'dark'])('switches the editable prompt and binds a generated s
   })
   try {
     const toggle = wrapper.get('footer button')
-    expect(wrapper.get('header button[aria-label="生成故事版"]').text()).toContain('逐镜线稿故事版')
+    expect(wrapper.get('header button[aria-label="生成故事版"]').text()).toContain('生成故事版')
     await toggle.trigger('click'); await flushPromises()
     expect(toggle.text()).toContain('使用通用 Prompt')
     expect(wrapper.get('output').text()).toBe('模型稿')

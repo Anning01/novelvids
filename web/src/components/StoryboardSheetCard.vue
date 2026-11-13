@@ -4,12 +4,14 @@ import { api, sleep } from '@/api'
 import { tr } from '@/i18n'
 import { GalleryHorizontalEnd } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
+import ImageModelSelect from './ImageModelSelect.vue'
 import type { Scene } from '@/types'
 const props = defineProps<{ scene: Scene; enabled: boolean; canUse?: boolean; beforeGenerate?: () => Promise<void> }>()
 const emit = defineEmits<{ updated: [scene: Scene]; use: []; submitted: [taskId: string] }>()
 const busy = ref(false)
 const submitting = ref(false)
 const error = ref('')
+const imageModelId = ref('')
 let controller: AbortController | null = null
 const sheet = computed(() => props.scene.metadata?.storyboard_sheet as {image_url?: string; previous_image_url?: string; task_id?: string; status?: string} | undefined)
 const image = computed(() => sheet.value?.image_url || sheet.value?.previous_image_url)
@@ -40,12 +42,12 @@ async function follow(taskId: string) {
   }
 }
 async function generate() {
-  if (busy.value || submitting.value) return
+  if (busy.value || submitting.value || !imageModelId.value) return
   submitting.value = true
   error.value = ''
   try {
     await props.beforeGenerate?.()
-    const task = (await api.generateStoryboardSheet(props.scene.id)).data
+    const task = (await api.generateStoryboardSheet(props.scene.id, Number(imageModelId.value))).data
     emit('submitted', task.id)
     await follow(task.id)
   } catch (caught) { error.value = (caught as Error).message }
@@ -60,8 +62,10 @@ onBeforeUnmount(() => controller?.abort())
 
 <template>
   <div class="sheet-actions">
-    <AppButton v-if="enabled" variant="secondary" size="sm" :aria-label="image ? tr('重新生成故事版') : tr('生成故事版')" :title="image ? tr('重新生成故事版') : tr('生成故事版')" :loading="busy || submitting" :disabled="busy || submitting" @click="generate">
-      <GalleryHorizontalEnd v-if="!busy && !submitting" :size="15" />{{ busy || submitting ? tr('生成中') : tr('逐镜线稿故事版') }}
+    <ImageModelSelect v-if="enabled" v-model="imageModelId" :label="tr('线稿生图模型')"
+      :empty-label="tr('请选择生图模型')" :disabled="busy || submitting" />
+    <AppButton v-if="enabled" variant="secondary" size="sm" :aria-label="image ? tr('重新生成故事版') : tr('生成故事版')" :title="image ? tr('重新生成故事版') : tr('生成故事版')" :loading="busy || submitting" :disabled="busy || submitting || !imageModelId" @click="generate">
+      <GalleryHorizontalEnd v-if="!busy && !submitting" :size="15" />{{ busy || submitting ? tr('生成中') : image ? tr('重新生成故事版') : tr('生成故事版') }}
     </AppButton>
     <AppButton v-if="image && canUse" variant="ghost" size="sm" @click="emit('use')">{{ tr('使用故事版参考') }}</AppButton>
     <small v-if="error" role="alert">{{ error }}</small>
@@ -69,6 +73,6 @@ onBeforeUnmount(() => controller?.abort())
 </template>
 
 <style scoped>
-.sheet-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
-small { color:var(--app-danger); }
+.sheet-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+small { color:var(--creation-danger); }
 </style>

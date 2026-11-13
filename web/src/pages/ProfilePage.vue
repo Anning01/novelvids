@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   ArrowRight,
   Building2,
@@ -29,6 +30,9 @@ import { notice } from '@/shared/notice'
 import type { Membership, RechargeOrder, TeamRole } from '@/types'
 
 const auth = useAuthStore()
+const route = useRoute()
+const rechargeTarget = ref<Membership | null>(null)
+const rechargeLinkError = ref(false)
 const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 const changing = ref(false)
 const signingOut = ref(false)
@@ -140,9 +144,11 @@ function selectTeam(team: Membership) {
   auth.setActiveTeam(team.team_id)
 }
 
-function openTopUpModal() {
+function openTopUpModal(target = current.value, fromPlatformLink = false) {
+  if (!target) return
+  rechargeTarget.value = target
   topUpStep.value = 'form'
-  topUpMode.value = auth.isSuperAdmin ? 'direct' : 'wechat'
+  topUpMode.value = auth.isSuperAdmin && !fromPlatformLink ? 'direct' : 'wechat'
   topUpAmount.value = ''
   topUpNote.value = ''
   currentOrder.value = null
@@ -193,7 +199,7 @@ function startPolling(outTradeNo: string) {
         stopPolling()
         topUpPaidDetail.value = {
           amount: Number(res.data.amount),
-          balance: Number(res.data.balance_after ?? current.value?.team_balance ?? 0),
+          balance: Number(res.data.balance_after ?? rechargeTarget.value?.team_balance ?? 0),
         }
         topUpStep.value = 'success'
         notice.success(tr('充值成功！余额已到账'))
@@ -210,7 +216,8 @@ function selectPresetAmount(val: number) {
 }
 
 async function handleTopUpSubmit() {
-  if (!current.value || topUpSubmitting.value) return
+  const target = rechargeTarget.value
+  if (!target || topUpSubmitting.value) return
   const amount = Number(topUpAmount.value)
   if (!amount || Number.isNaN(amount) || amount <= 0) {
     notice.error(tr('请输入有效的充值金额'))
@@ -220,7 +227,7 @@ async function handleTopUpSubmit() {
   try {
     if (topUpMode.value === 'direct' && auth.isSuperAdmin) {
       await api.teamTopUp({
-        team_id: current.value.team_id,
+        team_id: target.team_id,
         amount,
         note: topUpNote.value.trim() || tr('管理端充值'),
       })
@@ -231,7 +238,7 @@ async function handleTopUpSubmit() {
     }
 
     const res = await api.createRechargeOrder({
-      team_id: current.value.team_id,
+      team_id: target.team_id,
       amount,
       note: topUpNote.value.trim() || tr('微信支付充值'),
     })
@@ -257,7 +264,7 @@ async function triggerMockPay() {
     stopPolling()
     topUpPaidDetail.value = {
       amount: Number(res.data.amount),
-      balance: Number(res.data.balance_after ?? current.value?.team_balance ?? 0),
+      balance: Number(res.data.balance_after ?? rechargeTarget.value?.team_balance ?? 0),
     }
     topUpStep.value = 'success'
     notice.success(tr('模拟支付成功！余额已到账'))
@@ -315,11 +322,22 @@ async function qilingBound() {
   if (!loadError.value) notice.success(tr('器灵账号已绑定'))
 }
 
-onMounted(async () => {
-  await load()
-  if (new URLSearchParams(location.hash.split('?')[1]).get('recharge') === '1' &&
-      !loadError.value && current.value && (current.value.role === 'admin' || current.value.role === 'creator' || auth.isSuperAdmin)) openTopUpModal()
+watch(() => [loading.value, loadError.value, route.query.recharge, route.query.team], () => {
+  rechargeLinkError.value = false
+  if (loading.value || loadError.value || route.query.recharge !== '1') return
+  const linkedTeam = route.query.team
+  if (auth.deploymentRole === 'platform' && linkedTeam !== undefined) {
+    const target = auth.activeMemberships.find(team => String(team.team_id) === linkedTeam && (team.role === 'admin' || team.role === 'creator' || auth.isSuperAdmin))
+    if (target) openTopUpModal(target, true)
+    else {
+      closeTopUpModal()
+      rechargeLinkError.value = true
+    }
+  } else if (current.value && (current.value.role === 'admin' || current.value.role === 'creator' || auth.isSuperAdmin)) {
+    openTopUpModal()
+  }
 })
+onMounted(load)
 </script>
 
 <template>
@@ -363,6 +381,7 @@ onMounted(async () => {
     </div>
 
     <div v-else class="profile-grid">
+      <p v-if="rechargeLinkError" role="alert" class="profile-card profile-state">{{ tr('当前账号无法为这个 API 平台账户充值。请使用创建该 Key 的平台账号登录。') }}</p>
       <!-- 团队与消费：合成一块全宽区域。顶部显示当前团队名称、角色和「个人团队」标记，下方放「进入项目」及有权限时的「成员管理」。用一条细分隔线把消费放在同一区域，金额按行展示，不再为 ¥0.00 单独撑开一张大卡。本人消费、团队余额和个人限额仍明确分开。 -->
       <section class="profile-card profile-combined-card" aria-labelledby="profile-current-title">
         <div class="profile-current">
@@ -404,7 +423,7 @@ onMounted(async () => {
                   variant="secondary"
                   size="sm"
                   type="button"
-                  @click="openTopUpModal"
+                  @click="openTopUpModal()"
                 >
                   <CreditCard :size="15" aria-hidden="true" />
                   {{ tr('充值') }}
@@ -454,6 +473,7 @@ onMounted(async () => {
           </div>
 
           <template v-if="current">
+            <p v-if="auth.deploymentRole === 'studio'" class="profile-copy">{{ tr('充值和管理员增额计入本地团队余额。API 平台余额可在模型配置中查看。') }}</p>
             <dl class="profile-amounts-line">
               <div class="profile-amount-item is-cost">
                 <dt>{{ tr('当前团队 · 本人累计消费') }}</dt>
@@ -469,7 +489,7 @@ onMounted(async () => {
                     type="button"
                     class="profile-topup-btn"
                     :aria-label="tr('为团队充值')"
-                    @click="openTopUpModal"
+                    @click="openTopUpModal()"
                   >
                     <CreditCard :size="12" aria-hidden="true" />
                     {{ tr('充值') }}
@@ -613,8 +633,8 @@ onMounted(async () => {
         <div class="profile-modal-body">
           <div class="profile-topup-team-info">
             <span class="profile-topup-label">{{ tr('充值目标团队') }}</span>
-            <strong class="profile-topup-team-name">{{ current?.team_name }}</strong>
-            <span class="profile-topup-current-bal">{{ tr('当前团队余额：{p0}', { p0: money(current?.team_balance) }) }}</span>
+            <strong class="profile-topup-team-name">{{ rechargeTarget?.team_name }}</strong>
+            <span class="profile-topup-current-bal">{{ tr('当前团队余额：{p0}', { p0: money(rechargeTarget?.team_balance) }) }}</span>
           </div>
 
           <!-- Step 1: 充值表单（微信扫码或超管直接到账） -->
@@ -735,7 +755,7 @@ onMounted(async () => {
                 + ¥ {{ Number(topUpPaidDetail?.amount || topUpAmount).toFixed(2) }}
               </p>
               <p class="profile-success-bal">
-                {{ tr('当前团队余额：{p0}', { p0: money(topUpPaidDetail?.balance ?? current?.team_balance) }) }}
+                {{ tr('当前团队余额：{p0}', { p0: money(topUpPaidDetail?.balance ?? rechargeTarget?.team_balance) }) }}
               </p>
               <div class="profile-modal-actions">
                 <AppButton variant="primary" size="sm" type="button" @click="closeTopUpModal">

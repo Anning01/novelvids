@@ -359,3 +359,43 @@ async def test_database_enforces_names_within_scope_on_creates_and_renames():
             await Novel.create(name="受约束名称", **scope)
         with pytest.raises(IntegrityError):
             await Novel.filter(id=second.id).update(name=first.name)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("第一集 雨夜\n1-1 车站 外 夜\n△ 林夏撑伞。\n第二集 来信\n2-1 客厅 内 日\n林夏：信到了。", 2),
+    ("1-1 车站 外 夜\n△ 林夏撑伞。", 1),
+    ("1-1 车站 外 夜\n" + "△ 林夏撑伞等候。\n" * 4000, 1),
+])
+async def test_import_screenplay_keeps_original_empty_and_creates_ready_episodes(text, expected):
+    project = await novel_controller.create(NovelCreate(name="现成剧本", content=text, source_kind="screenplay"))
+    assert project.content == ""
+    assert project.episodes_managed and project.total_chapters == expected
+    chapters = await Chapter.filter(novel=project).order_by("number")
+    assert len(chapters) == expected
+    assert all(chapter.content == "" and chapter.screenplay.strip() for chapter in chapters)
+    assert all(chapter.production_text == chapter.screenplay for chapter in chapters)
+    meta = await novel_controller.meta(project.id)
+    assert meta["content_length"] == 0
+
+
+async def test_screenplay_import_rolls_back_project_if_episode_creation_fails(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(Chapter, "bulk_create", AsyncMock(side_effect=RuntimeError("save failed")))
+    with pytest.raises(RuntimeError, match="save failed"):
+        await novel_controller.create(NovelCreate(name="失败剧本", content="场1 内景，林夏进门。", source_kind="screenplay"))
+    assert not await Novel.filter(name="失败剧本").exists()
+
+
+async def test_import_screenplay_from_uploaded_document(monkeypatch):
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    text = "第一集 雨夜\n△ 林夏进门。"
+    monkeypatch.setattr("controllers.novel.oss", SimpleNamespace(enabled=True))
+    read = AsyncMock(return_value={"text_content": text, "chapter_validation": {"valid": False, "message": "long single episode"}})
+    monkeypatch.setattr("controllers.novel.analyze_oss_document", read)
+    project = await novel_controller.create(NovelCreate(
+        name="上传剧本", source_kind="screenplay", source_key="uploads/test.md", source_filename="剧本.md"))
+    read.assert_awaited_once_with("uploads/test.md", "剧本.md")
+    chapter = await Chapter.get(novel=project)
+    assert project.content == chapter.content == ""
+    assert "林夏进门" in chapter.screenplay

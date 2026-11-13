@@ -1,15 +1,12 @@
 """Schema-validated model gateway for prepared asset extraction messages."""
 
 import asyncio
-import json
-import re
 from typing import Literal
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 
 from services.llm.json_output import create_json_completion, completion_usage
-from prompts.skill_pack import SkillSnapshot
 
 
 ASSET_EXTRACTION_GATEWAY_ERROR_CODE = "asset_extraction_gateway_error"
@@ -112,48 +109,11 @@ def validate_required_design_assets(result: AssetExtractionResult, required_asse
         raise ValueError(localized_message('本章应提取的资产尚未补全正式设定，请按原标准名返回完整提示词：{p0}', p0='、'.join(missing)))
 
 
-def validate_asset_prompt_contract(result: AssetExtractionResult, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:
-    """Validate new extraction output without rewriting saved or historical prompts."""
-    assets = [(person, "group" if person.label == "群像" else "person") for person in result.persons]
-    assets += [(scene, "scene") for scene in result.scenes]
-    assets += [(item, "item") for item in result.items]
-    for asset, kind in assets:
-        validate_asset_design(asset.base_traits, kind, snapshot, language, aspect_ratio)
-        if asset.variant:
-            validate_asset_design(asset.variant.base_traits, kind, snapshot, language, aspect_ratio)
+def validate_asset_design(text: str) -> None:
+    from utils.messages import localized_message
 
-
-def validate_asset_design(text: str, kind: str, snapshot: SkillSnapshot, language: str, aspect_ratio: str) -> None:
-    """Validate one asset or variant against the same immutable extraction contract."""
-    if "asset_contract" not in snapshot.contents:
-        return
-    contracts = json.loads(snapshot.read("asset_contract")).get(language)
-    if not contracts:
-        return
-    contract = contracts[kind]
-    text = text.strip()
-    task = contract["task"].format(aspect_ratio=aspect_ratio)
-    if not text.startswith(task or contract["heading"]):
-        raise ValueError(f"{kind}: use the complete task template verbatim at the start, with aspect_ratio={aspect_ratio}")
-    heading = text.find(contract["heading"], len(task))
-    if heading < 0:
-        raise ValueError(f"{kind}: missing description heading {contract['heading']}")
-    details = text[heading + len(contract["heading"]):].strip()
-    suffix = contract.get("suffix", "")
-    if suffix:
-        if not details.endswith(suffix):
-            raise ValueError(f"{kind}: preserve the complete template suffix: {suffix}")
-        details = details[:-len(suffix)].strip()
-    if not details:
-        raise ValueError(f"{kind}: visual description must not be empty")
-    fields = contract["fields"]
-    if fields:
-        lines = [line.strip() for line in details.splitlines() if line.strip()]
-        matches = [re.fullmatch(r"\*\*(.+?)\*\*\s*[:：]\s*(.+)", line) for line in lines]
-        if len(matches) != len(fields) or any(match is None or match[1] != field for match, field in zip(matches, fields)):
-            raise ValueError(f"{kind}: description must contain exactly these ordered fields: {', '.join(fields)}")
-        if any(match[2].strip().casefold() in {"", "无", "none", "未知", "unknown", "未提及", "not mentioned", "无法确认"} for match in matches):
-            raise ValueError(f"{kind}: replace placeholders with concrete visual design")
+    if not text.strip():
+        raise ValueError(localized_message('提示词不能为空'))
 
 
 # 保留结果容器，兼容已有内部调用和历史测试数据构造。
@@ -217,18 +177,17 @@ class AssetExtractor:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
-            from services.extraction.cast import read_chapter_cast
-            from prompts.extraction import render_cast_scope
             from services.creation_agent.step_context import step_context
             context = await step_context(execution.params)
             self.targeted = bool(context and context.step.asset_scope == 'targeted')
-            targets = None
             if self.targeted:
+                from services.extraction.cast import read_chapter_cast
+                from services.extraction.reuse import extraction_reuse
+                from prompts.extraction import render_cast_scope
+
                 targets = {'instructions': context.step.instructions,
                     'requirements': [item.model_dump(mode='json') for item in context.requirements]}
-            cast = await read_chapter_cast(execution, messages, **({'target_requirements': targets} if targets is not None else {}))
-            if self.targeted:
-                from services.extraction.reuse import extraction_reuse
+                cast = await read_chapter_cast(execution, messages, target_requirements=targets)
                 self.targeted_assets = await extraction_reuse.targeted(execution, cast)
                 self.required_assets = self.targeted_assets.required_assets
                 if not self.required_assets:
@@ -239,10 +198,9 @@ class AssetExtractor:
                     self.initial_assets = self.targeted_assets.accepted
                     if self.targeted_assets.complete:
                         return self.initial_assets
-            else:
-                self.required_assets = tuple(dict.fromkeys((*self.required_assets, *cast.required_assets())))
-            messages = [*messages, {'role': 'user', 'content': render_cast_scope(self.prompt_language, cast.model_dump(mode='json'), self.required_assets)}]
-            options = {'output_validator': self._validate_coverage} if self.required_assets else {}
+                messages = [*messages, {'role': 'user', 'content': render_cast_scope(
+                    self.prompt_language, cast.model_dump(mode='json'), self.required_assets)}]
+            options = {'output_validator': self._validate_coverage} if self.required_assets or self.required_variants else {}
             options['asset_scope'] = self.required_assets
             if self.initial_assets is not None:
                 from prompts.extraction import render_asset_repair

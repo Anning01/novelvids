@@ -36,6 +36,20 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     localStorage.clear()
   })
 
+  it.each(['admin', 'creator', 'viewer'])('开放平台模型配置入口仅超管可见，当前团队角色为 %s', role => {
+    const pinia = setupStore({enabled:true, ready:true, token:'t', deploymentRole:'platform',
+      user:{id:9, username:'user', nickname:'用户', is_super_admin:false},
+      memberships:[{team_id:1,team_name:'团队',role}], activeTeamId:1})
+    const wrapper = mountApp(pinia)
+    expect(wrapper.find('a[href$="/settings"]').exists()).toBe(false)
+    expect(wrapper.find('a[href$="/projects"]').exists()).toBe(false)
+    useAuthStore(pinia).user!.is_super_admin = true
+    return wrapper.vm.$nextTick().then(() => {
+      expect(wrapper.find('a[href$="/settings"]').exists()).toBe(true)
+      wrapper.unmount()
+    })
+  })
+
   it('translates all shared navigation when switching languages in place', async () => {
     const wrapper = mountApp(setupStore({ enabled: true, ready: true, token: 't',
       user: { id: 1, username: 'admin', nickname: '保留用户昵称', is_super_admin: true },

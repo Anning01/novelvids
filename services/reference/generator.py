@@ -1,4 +1,5 @@
 from services.image_generation import generate_images
+from prompts.image_references import render_image_reference_mentions
 
 
 def build_sora_compatible_prompt(data: dict, prompt_language: str = "en") -> str:
@@ -31,6 +32,7 @@ async def generate_for_sora_consistency(
         {**data, "aspect_ratio": aspect_ratio},
         prompt_language,
     )
+    final_prompt = render_image_reference_mentions(final_prompt, len(reference_images or []), prompt_language)
     if style_prompt:
         final_prompt = f"{final_prompt}\n\n{style_prompt}".strip()
     if output_format == "gif":

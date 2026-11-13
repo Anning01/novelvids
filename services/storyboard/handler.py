@@ -15,7 +15,7 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.validation import validate_storyboard_duration
+from services.storyboard.validation import episode_duration_limit, validate_episode_duration, validate_storyboard_duration
 from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
 from services.storyboard.appearances import existing_scene_layouts, previously_seen_assets
 from services.creation_agent.memory import creation_memory
@@ -74,6 +74,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         creative_constraints.append({"scope": {"kind": "project"},
                                      "content": audiovisual_guidance(chapter.novel.audiovisual_guidance, prompt_language)})
         seen_assets = await previously_seen_assets(chapter, entities)
+        duration_limit = episode_duration_limit(chapter.production_text, chapter.episode_pacing)
         start_time = time.time()
 
         try:
@@ -82,6 +83,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             storyboard, api_metadata = await generate_storyboard(
                 client=client,
                 long_text=chapter.production_text,
+                episode_pacing=chapter.episode_pacing,
+                episode_max_seconds=duration_limit,
                 entities=entities,
                 model=model,
                 supports_json_output=supports_json_output,
@@ -97,6 +100,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 
+            validate_episode_duration(storyboard, duration_limit)
             end_time = time.time()
             request_duration = end_time - start_time
 
@@ -127,18 +131,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 optimized_prompts=optimized,
             )
 
-            sheet_tasks, sheet_errors = [], []
-            if chapter.novel.storyboard_enabled:
-                from services.storyboard.sheets import submit_sheet
-                for scene in scenes_created:
-                    try:
-                        task = await submit_sheet(scene.id, team_id=request_params.get("team_id"), user_id=request_params.get("user_id"))
-                        sheet_tasks.append(str(task.id))
-                    except Exception as error:
-                        import logging
-                        logging.getLogger(__name__).warning("storyboard_sheet_submit_failed scene_id=%s error_type=%s", scene.id, type(error).__name__)
-                        sheet_errors.append(scene.id)
-
             from services.creation_agent.skill_execution import current_execution
             from models.agent_operation import AgentOperation
             execution = current_execution.get()
@@ -151,7 +143,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "chapter_id": chapter_id,
                 "scenes_created": len(scenes_created),
                 "scene_ids": [s.id for s in scenes_created],
-                "storyboard_sheet_task_ids": sheet_tasks, "storyboard_sheet_unsubmitted": sheet_errors,
+                "storyboard_sheet_task_ids": [], "storyboard_sheet_unsubmitted": [],
                 "video_optimizer": {key: value for key, value in optimizer.items() if key != "files"},
                 "total_shots": len(storyboard.shots),
                 "request_duration": round(request_duration, 2),
@@ -219,6 +211,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                              prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None, optimized_prompts: dict | None = None) -> List[Scene]:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
+        await chapter.refresh_from_db(fields=["content", "screenplay", "episode_pacing"])
+        validate_episode_duration(storyboard, episode_duration_limit(chapter.production_text, chapter.episode_pacing))
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
@@ -260,6 +254,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
             }
 
             # 解析 duration 为浮点数
+            if shot.duration_split_part is not None:
+                prompt_params["duration_split_part"] = shot.duration_split_part
             if shot.blocking_map:
                 prompt_params["blocking_map"] = shot.blocking_map.model_dump(exclude_none=True)
             if shot.segments:

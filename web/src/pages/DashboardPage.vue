@@ -20,6 +20,7 @@ const overview = ref<ProjectOverview | null>(null)
 const loading = ref(true)
 const errorMessage = ref('')
 const costs = ref(new Map<number, number>())
+const pendingCosts = ref(new Set<number>())
 const costState = ref<'loading' | 'ready' | 'error'>('loading')
 const costError = ref('')
 const search = ref('')
@@ -55,7 +56,7 @@ const stats = computed(() => [
   { key: 'chapters', label: tr('累计章节'), value: projectNumber(overview.value?.summary.chapter_count ?? 0), unit: '', hint: tr('已有文字章节'), icon: BookOpen },
   { key: 'assets', label: tr('累计资产'), value: projectNumber(overview.value?.summary.asset_count ?? 0), unit: '', hint: tr('项目内文件去重'), icon: Image },
   { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已合成作品的实际时长'), icon: Clock3 },
-  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
+  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? pendingCosts.value.size ? tr('待结算') : money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
   { value: 'all', label: tr('全部类型') }, { value: 'clip', label: tr('独立片段') }, { value: 'agent', label: tr('AI 创作') },
@@ -92,14 +93,19 @@ async function loadCosts(revision: number) {
   if (!auth.canAccessBilling) return
   try {
     const values = new Map<number, number>()
+    const pending = new Set<number>()
     let pages = 1
     for (let current = 1; current <= pages; current++) {
       // Reuse the billing endpoint's server-side role, team and user scope.
       const { data } = await api.billingProjects(current, 100)
       if (revision !== requestRevision) return
-      for (const item of data.items) values.set(item.novel_id, item.total_cost)
+      for (const item of data.items) {
+        values.set(item.novel_id, item.total_cost)
+        if (item.pending_records) pending.add(item.novel_id)
+      }
       pages = data.pagination.pages
     }
+    pendingCosts.value = pending
     costs.value = values
     costState.value = 'ready'
   } catch (error) {
@@ -117,20 +123,27 @@ function resetFilters() {
 
 const filePicker = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
-const exportingIds = ref(new Set<number>())
-let transfers = new AbortController()
+const exportsByProject = ref(new Map<number, AbortController>())
+let importTransfer = new AbortController()
 
 function cancelTransfers() {
-  transfers.abort()
-  transfers = new AbortController()
+  importTransfer.abort()
+  importTransfer = new AbortController()
   importing.value = false
-  exportingIds.value = new Set()
+  for (const transfer of exportsByProject.value.values()) transfer.abort()
+  exportsByProject.value.clear()
+}
+
+function cancelDownload(projectId: number) {
+  exportsByProject.value.get(projectId)?.abort()
+  exportsByProject.value.delete(projectId)
 }
 
 async function downloadProject(project: ProjectOverviewItem) {
-  if (exportingIds.value.has(project.id)) return
-  const {signal} = transfers
-  exportingIds.value.add(project.id)
+  if (exportsByProject.value.has(project.id)) return
+  const transfer = new AbortController()
+  const {signal} = transfer
+  exportsByProject.value.set(project.id, transfer)
   try {
     const blob = await exportProject(project.id, signal)
     if (signal.aborted) return
@@ -142,7 +155,9 @@ async function downloadProject(project: ProjectOverviewItem) {
     try { link.click() } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000) }
   } catch (error) {
     if (!signal.aborted) notice.error((error as Error).message)
-  } finally { if (!signal.aborted) exportingIds.value.delete(project.id) }
+  } finally {
+    if (exportsByProject.value.get(project.id) === transfer) exportsByProject.value.delete(project.id)
+  }
 }
 
 async function uploadProject(event: Event) {
@@ -150,7 +165,7 @@ async function uploadProject(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file || importing.value) return
-  const {signal} = transfers
+  const {signal} = importTransfer
   importing.value = true
   try {
     const {data} = await importProject(file, signal)
@@ -196,7 +211,10 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 <template>
   <main class="projects-page">
     <header class="projects-page__header">
-      <h1>{{ auth.deploymentRole === 'platform' ? tr('作品迁移') : tr('我的项目') }}</h1>
+      <div>
+        <h1>{{ auth.deploymentRole === 'platform' ? tr('作品迁移') : tr('我的项目') }}</h1>
+        <p v-if="editable && auth.deploymentRole === 'platform'" class="projects-page__migration-hint">{{ tr('下载作品包后，在本地猫影的项目列表中选择「导入作品」。') }}</p>
+      </div>
       <div v-if="editable && auth.deploymentRole === 'studio'" class="projects-page__actions">
         <input ref="filePicker" type="file" hidden accept=".zip,application/zip" @change="uploadProject">
         <AppButton variant="secondary" size="sm" :loading="importing" @click="filePicker?.click()"><Upload v-if="!importing" :size="15" />{{ importing ? tr('正在导入') : tr('导入作品') }}</AppButton>
@@ -230,7 +248,7 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
-          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :export-only="auth.deploymentRole === 'platform'" :deleting="deletingIds.has(project.id)" :exporting="exportingIds.has(project.id)" @download="downloadProject" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? costState : undefined" :cost-hint="costHint" @remove="remove" />
+          <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :export-only="auth.deploymentRole === 'platform'" :deleting="deletingIds.has(project.id)" :exporting="exportsByProject.has(project.id)" @download="downloadProject" @cancel-download="cancelDownload" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? pendingCosts.has(project.id) ? 'pending' : costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
         <div v-else class="projects-page__empty">
           <span class="projects-page__empty-icon"><Search v-if="hasFilters" :size="28" aria-hidden="true" /><BookOpen v-else :size="28" aria-hidden="true" /></span>
@@ -249,6 +267,7 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 <style scoped>
 .projects-page { container: projects / inline-size; min-height: 100%; padding: 32px 30px 60px; color: var(--app-text); background: var(--app-canvas); }
 .projects-page__header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+.projects-page__migration-hint { margin: 8px 0 0; color: var(--app-text-secondary); font-size: 13px; line-height: 1.5; }
 .projects-page__actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .projects-page h1 { margin: 0; font-size: clamp(26px, 2.6vw, 34px); font-weight: 700; line-height: 1.25; letter-spacing: -.035em; }
 .projects-page__create { display: inline-flex; min-height: 42px; flex: 0 0 auto; align-items: center; gap: 7px; padding: 0 17px; border-radius: 11px; color: #fff; background: #5b5cf6; box-shadow: 0 5px 14px rgb(91 92 246 / 16%); font-size: 13px; font-weight: 600; transition: background-color 150ms ease; }

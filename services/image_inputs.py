@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 
 from config import settings
+from services.cover_derivatives import local_media_path
 from services.oss import resolve_media_url
 
 
@@ -40,7 +40,10 @@ def resolve_image_source(raw: str) -> str:
     if resolved.startswith(("http://", "https://", "data:")):
         return resolved
     if resolved.startswith("/media/"):
-        resolved = os.path.join(settings.MEDIA_PATH, resolved[len("/media/"):])
+        path = local_media_path(Path(settings.MEDIA_PATH), resolved)
+        if path is None:
+            raise FileNotFoundError("Invalid local reference image path")
+        resolved = str(path)
     return image_to_base64(resolved)
 
 

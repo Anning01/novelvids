@@ -5,6 +5,7 @@ import { api, ApiRequestError } from '@/api'
 import { setLocale } from '@/i18n'
 import { useAuthStore } from '@/features/auth/authStore'
 import { appConfirm } from '@/shared/confirmDialog'
+import { notice } from '@/shared/notice'
 import type { ProjectOverview, ProjectOverviewItem } from '@/types'
 import DashboardPage from './DashboardPage.vue'
 
@@ -355,17 +356,24 @@ it.each(['light','dark'])('offers export beside delete and imports through the l
   document.documentElement.dataset.appTheme = theme
   const transfer = await import('@/features/project-transfer/transfer')
   const importing = vi.spyOn(transfer, 'importProject').mockResolvedValue({code:0,message:'',data:{id:77,name:'导入作品'}})
-  const exporting = vi.spyOn(transfer, 'exportProject').mockResolvedValue(new Blob(['archive']))
+  const exporting = vi.spyOn(transfer, 'exportProject').mockImplementation(() => new Promise(() => {}))
   const click = vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(() => {})
   const wrapper = render()
   try {
     await flushPromises()
     const card = wrapper.get('.project-overview-card')
     await card.get('[aria-haspopup="menu"]').trigger('click')
+    expect(card.find('.project-overview-card__export').exists()).toBe(false)
     expect(card.findAll('[role="menuitem"]').map(b=>b.text())).toEqual(['导出作品','删除项目'])
     await card.findAll('[role="menuitem"]')[0]!.trigger('click')
     await flushPromises()
     expect(exporting).toHaveBeenCalledOnce()
+    expect(card.find('.project-overview-card__export').exists()).toBe(false)
+    await card.get('[aria-haspopup="menu"]').trigger('click')
+    const cancel = card.findAll('[role="menuitem"]')[0]!
+    expect(cancel.text()).toBe('取消导出')
+    await cancel.trigger('click')
+    expect(exporting.mock.calls[0]![1].aborted).toBe(true)
     expect(api.deleteNovel).not.toHaveBeenCalled()
     const file = new File(['archive'],'本地作品.zip')
     const input = wrapper.get('input[type="file"]')
@@ -375,6 +383,52 @@ it.each(['light','dark'])('offers export beside delete and imports through the l
     expect(api.projectOverview).toHaveBeenCalledTimes(2)
   } finally {
     wrapper.unmount(); importing.mockRestore(); exporting.mockRestore(); click.mockRestore()
+    delete document.documentElement.dataset.appTheme
+  }
+})
+
+it.each(['light','dark'])('lets users cancel, retry, and download an old platform work (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  useAuthStore().deploymentRole = 'platform'
+  const transfer = await import('@/features/project-transfer/transfer')
+  let finishCancelled: (archive: Blob) => void = () => {}
+  const exportWork = vi.spyOn(transfer, 'exportProject')
+    .mockImplementationOnce(() => new Promise(resolve => { finishCancelled = resolve }))
+    .mockRejectedValueOnce(new Error('作品素材下载失败'))
+    .mockResolvedValueOnce(new Blob(['archive']))
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  const wrapper = render()
+  try {
+    await flushPromises()
+    expect(wrapper.get('h1').text()).toBe('作品迁移')
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    const card = wrapper.get('.project-overview-card')
+    expect(card.find('[aria-haspopup="menu"]').exists()).toBe(false)
+    const button = card.get('.project-overview-card__export button')
+    expect(button.text()).toBe('导出作品')
+    await button.trigger('focus')
+    await button.trigger('click')
+    expect(card.get('[role="status"]').text()).toBe('正在导出')
+    expect(button.text()).toBe('取消导出')
+    const signal = exportWork.mock.calls[0]![1]
+    await button.trigger('click')
+    expect(signal.aborted).toBe(true)
+
+    await button.trigger('click')
+    await flushPromises()
+    expect(notice.error).toHaveBeenCalledWith('作品素材下载失败')
+    await button.trigger('click')
+    await flushPromises()
+    finishCancelled(new Blob(['discarded']))
+    await flushPromises()
+    expect(exportWork).toHaveBeenCalledTimes(3)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(button.text()).toBe('导出作品')
+    expect(api.deleteNovel).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+    exportWork.mockRestore()
+    click.mockRestore()
     delete document.documentElement.dataset.appTheme
   }
 })

@@ -77,6 +77,8 @@ async def generate_storyboard(
     scene_layouts: dict | None = None,
     introduction_descriptions: dict[str, str] | None = None,
     shot_duration_range: list[int] | None = None,
+    episode_pacing: dict | None = None,
+    episode_max_seconds: int | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Generate fresh bounded calls and carry only a continuity summary."""
     from services.creation_agent.skill_execution import current_execution
@@ -90,6 +92,9 @@ async def generate_storyboard(
             'constraints': creative_constraints or []}
         if scene_layouts:
             facts["scene_layouts"] = scene_layouts
+        facts["episode_pacing"] = episode_pacing or {"preset": "smart"}
+        if episode_max_seconds is not None:
+            facts["episode_max_seconds"] = episode_max_seconds
         if duration_range := execution.params.get("shot_duration_range", shot_duration_range):
             facts["shot_duration_range"] = duration_range
         requirement = asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions)

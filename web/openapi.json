@@ -4154,6 +4154,17 @@
             "type": "integer",
             "title": "Novel Id",
             "description": "所属小说/剧本"
+          },
+          "episode_pacing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodePacing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "type": "object",
@@ -4248,6 +4259,17 @@
             "type": "integer",
             "title": "Id",
             "description": "章节ID"
+          },
+          "episode_pacing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodePacing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "type": "object",
@@ -4323,6 +4345,17 @@
             ],
             "title": "Content",
             "description": "正文内容"
+          },
+          "episode_pacing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodePacing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "type": "object",
@@ -4390,6 +4423,17 @@
             "type": "integer",
             "title": "Novel Id",
             "description": "所属小说/剧本"
+          },
+          "episode_pacing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EpisodePacing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "type": "object",
@@ -6999,6 +7043,38 @@
           "after_version"
         ],
         "title": "PromptChangeItemOut"
+      },
+      "EpisodePacing": {
+        "additionalProperties": false,
+        "properties": {
+          "preset": {
+            "default": "smart",
+            "enum": [
+              "compact",
+              "fast",
+              "smart",
+              "slow",
+              "detailed"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "max_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Seconds"
+          }
+        },
+        "title": "EpisodePacing",
+        "type": "object"
       }
     }
   }

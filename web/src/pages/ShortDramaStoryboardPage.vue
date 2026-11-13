@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import BillingPriceTag from '@/components/BillingPriceTag.vue'
+import { estimateVideoCost } from '@/shared/modelPricing'
+import { money } from '@/features/billing/recordDisplay'
 import { tr } from '@/i18n'
 import VideoEnhanceButton from '@/features/video-export/VideoEnhanceButton.vue'
 import VideoLastFrameButton from '@/components/VideoLastFrameButton.vue'
@@ -29,12 +32,10 @@ import {
 import AppSelect from '@/components/AppSelect.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
-import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
-import SceneVoiceTracks from '@/components/SceneVoiceTracks.vue'
 import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt } from '@/shared/sceneModelPrompt'
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
@@ -61,7 +62,6 @@ import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/
 import { appConfirm } from '@/shared/confirmDialog'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
-import { estimateVideoCost } from '@/shared/modelPricing'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
 import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
@@ -69,7 +69,6 @@ import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
 import { readVideoReferenceMedia as readReferenceMedia, buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { readAutoEnhancement, isVideoGenerationActive, autoEnhancementLabel, preserveAutoEnhancement, autoEnhancementAvailable, currentAutoEnhancement, enhancementEstimate } from '@/shared/autoEnhancement'
-import { money } from '@/features/billing/recordDisplay'
 import { exportApi, type EnhancementModel } from '@/features/video-export/api'
 import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
@@ -1091,11 +1090,12 @@ function referencePrompt(draft: SceneDraft) {
   return draft.promptModel ? draft.generic + '\n' + draft.prompt : draft.prompt
 }
 
-function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity) {
+function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity,
+  includeSelected = Boolean(draftFor(scene).promptModel)) {
   const draft = draftFor(scene)
   const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
   return buildVideoInputImageReferences(
-    referencePrompt(draft),
+    draft.promptModel ? draft.generic || draft.prompt : draft.prompt,
     selectedAssets.map(asset => ({
       assetId: asset.id,
       label: selectedAssetLabel(scene, asset),
@@ -1104,6 +1104,8 @@ function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelC
     })),
     withBlockingReference(scene, draft.referenceMedia),
     maxImages,
+    includeSelected,
+    referencePrompt(draft),
   )
 }
 
@@ -1346,8 +1348,8 @@ async function uploadFrame(scene: Scene, kind: 'first' | 'last', event: Event) {
   const uploadKey = `${scene.id}:${kind}`
   uploadingFrameKey.value = uploadKey
   try {
-    const uploaded = await api.upload(file)
-    const url = uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
+    const uploaded = await api.upload(file, selectedVideoModelConfig.value?.config_id)
+    const url = uploaded.url || `/media/${uploaded.filename}`
     const draft = draftFor(scene)
     if (kind === 'first') draft.firstFrameUrl = url
     else draft.lastFrameUrl = url
@@ -1836,7 +1838,7 @@ function optimizationInput(scene: Scene, model: VideoGenerationModel) {
     if (draft.firstFrameUrl) submitted.push({ type: 'image', label: tr('首帧') })
     if (draft.lastFrameUrl) submitted.push({ type: 'image', label: tr('尾帧') })
   } else {
-    for (const ref of videoInputImageReferences(scene)) submitted.push({ type: 'image', label: ref.label })
+    for (const ref of videoInputImageReferences(scene, model.capabilities.max_reference_images, true)) submitted.push({ type: 'image', label: ref.label })
     for (const ref of referencedVideoMedia(draft.prompt, draft.referenceMedia).filter(item => item.type === 'video')) {
       submitted.push({ type: 'video', label: ref.name || tr('参考视频') })
     }
@@ -2611,7 +2613,6 @@ onBeforeUnmount(() => {
                     @select="handleAssetPickerSelection(scene, group.type, $event)"
                   />
                 </section>
-                <SceneVoiceTracks :scene="scene" :assets="assets" :voice-busy="Boolean(savingAssetVoiceKey)" @voice="openAssetVoicePicker(scene, $event)" />
               </aside>
 
               <section class="prompt-panel" :class="{ 'has-keyframes': draftFor(scene).videoGenerationMode === 'keyframes' }">
@@ -2633,9 +2634,9 @@ onBeforeUnmount(() => {
                   </div>
                 </header>
                 <div v-if="draftFor(scene).videoGenerationMode === 'keyframes'" class="keyframe-inputs">
-                  <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="draftFor(scene).firstFrameUrl" :alt="tr('首帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传首帧') }}</strong><small>{{ tr('视频开始画面') }}</small></span><i>{{ tr('首帧') }}</i></label>
+                  <label :class="{ 'has-image': draftFor(scene).firstFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'first', $event)" /><img v-if="draftFor(scene).firstFrameUrl" :src="mediaUrl(draftFor(scene).firstFrameUrl)" :alt="tr('首帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:first`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传首帧') }}</strong><small>{{ tr('视频开始画面') }}</small></span><i>{{ tr('首帧') }}</i></label>
                   <span>→</span>
-                  <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="draftFor(scene).lastFrameUrl" :alt="tr('尾帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传尾帧') }}</strong><small>{{ tr('视频结束画面') }}</small></span><i>{{ tr('尾帧') }}</i></label>
+                  <label :class="{ 'has-image': draftFor(scene).lastFrameUrl }"><input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadFrame(scene, 'last', $event)" /><img v-if="draftFor(scene).lastFrameUrl" :src="mediaUrl(draftFor(scene).lastFrameUrl)" :alt="tr('尾帧')" /><span v-else><LoaderCircle v-if="uploadingFrameKey === `${scene.id}:last`" :size="18" /><Upload v-else :size="18" /><strong>{{ tr('上传尾帧') }}</strong><small>{{ tr('视频结束画面') }}</small></span><i>{{ tr('尾帧') }}</i></label>
                 </div>
                 <SceneReferenceMediaBar
                   :scene-id="scene.id"

@@ -1,10 +1,14 @@
 
 from utils.messages import localized_message
-from fastapi import APIRouter, Depends, HTTPException
+import re
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, SecretStr, field_validator
 
-from auth.deps import AuthContext, get_auth_context, require_roles
+from auth.deps import AuthContext, get_auth_context, require_roles, require_super_admin
+from config import settings
 from controllers.config import ai_model_config_controller, general_config_controller
 from models.config import AiModelConfig
+from services.studio_platform import SYNC_SCOPE, platform_connection_status, sync_platform_models, platform_account
 from schemas.config import (
     AiModelConfigCreate,
     AiModelConfigOut,
@@ -30,6 +34,7 @@ from utils.enums import (
 )
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
+from schemas.platform_billing import PlatformAccountOut
 
 router = APIRouter()
 
@@ -41,6 +46,8 @@ _ADMIN = Depends(require_roles("admin"))
 
 def _check_config_ownership(instance: AiModelConfig, ctx: AuthContext) -> None:
     """团队管理员只能修改本团队自定义配置；官方配置对其只读（404 不泄露）。"""
+    if instance.scope == SYNC_SCOPE:
+        raise HTTPException(409, localized_message("请通过平台同步管理此模型"))
     if ctx.user is None or ctx.is_super_admin:
         return
     if instance.team_id is None or instance.team_id != ctx.team_id:
@@ -57,9 +64,54 @@ def _check_config_read_access(instance: AiModelConfig, ctx: AuthContext) -> None
 
 def _mask_official_key(item: AiModelConfigOut, ctx: AuthContext) -> AiModelConfigOut:
     """平台级配置不向团队暴露（列表/详情均已隔离）；超管可看全量。保留掩码以防他处复用。"""
-    if ctx.user is not None and not ctx.is_super_admin and item.scope == "official":
+    if item.scope == SYNC_SCOPE or (ctx.user is not None and not ctx.is_super_admin and item.scope == "official"):
         item.api_key = None
     return item
+
+
+class PlatformKeyInput(BaseModel):
+    api_key: SecretStr
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+        if not re.fullmatch(r"nv_[A-Za-z0-9_-]{1,125}", value.get_secret_value()):
+            raise ValueError("Invalid platform API Key")
+        return value
+
+
+async def require_studio_owner(ctx: AuthContext = Depends(require_super_admin)) -> None:
+    if settings.DEPLOYMENT_ROLE != "studio":
+        raise HTTPException(404)
+    if not ctx.is_super_admin:
+        raise HTTPException(403, localized_message("仅超级管理员可执行此操作"))
+
+
+_STUDIO_OWNER = Depends(require_studio_owner)
+
+
+@router.get("/studio-platform", dependencies=[_STUDIO_OWNER])
+async def get_studio_platform(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return ResponseSchema(data=await platform_connection_status())
+
+
+@router.get("/studio-platform/account", dependencies=[_STUDIO_OWNER], response_model=ResponseSchema[PlatformAccountOut])
+async def get_platform_account(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return ResponseSchema(data=await platform_account())
+
+
+@router.put("/studio-platform", dependencies=[_STUDIO_OWNER])
+async def set_studio_platform(payload: PlatformKeyInput, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return ResponseSchema(data=await sync_platform_models(payload.api_key.get_secret_value()))
+
+
+@router.post("/studio-platform/sync", dependencies=[_STUDIO_OWNER])
+async def sync_studio_platform(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return ResponseSchema(data=await sync_platform_models())
 
 
 def _serialize_enum(enum_cls) -> list[dict]:
@@ -126,13 +178,14 @@ async def get_visual_styles(_: AuthContext = _LOGGED_IN):
 
 @router.post("", summary="创建模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def create_config(config: AiModelConfigCreate, ctx: AuthContext = _ADMIN):
-    # 超管（team_id=None）创建官方配置；团队管理员创建本团队自定义配置
+    # 开放平台模型归属平台，侧边栏选中的团队只影响用量等团队页面。
+    team_id = None if settings.DEPLOYMENT_ROLE == "platform" else ctx.team_id
     instance = await ai_model_config_controller.create(
         config,
-        team_id=ctx.team_id,
-        scope="team" if ctx.team_id else "official",
+        team_id=team_id,
+        scope="team" if team_id else "official",
     )
-    return ResponseSchema(data=instance)
+    return ResponseSchema(data=_mask_official_key(AiModelConfigOut.model_validate(instance), ctx))
 
 
 @router.get(
@@ -149,9 +202,8 @@ async def get_config_list(
     result = await ai_model_config_controller.list(
         params, AiModelConfigOut, base_query=base_query
     )
-    if ctx.user is not None and not ctx.is_super_admin:
-        for item in result["items"]:
-            _mask_official_key(item, ctx)
+    for item in result["items"]:
+        _mask_official_key(item, ctx)
     return ResponseSchema(data=result)
 
 
@@ -177,7 +229,7 @@ async def get_general_config(_: AuthContext = _ADMIN):
     summary="更新通用配置",
     response_model=ResponseSchema[GeneralConfigOut],
 )
-async def update_general_config(config: GeneralConfigUpdate, _: AuthContext = _ADMIN):
+async def update_general_config(config: GeneralConfigUpdate, ctx: AuthContext = _ADMIN):
     instance = await general_config_controller.update(config)
     return ResponseSchema(data=instance)
 
@@ -233,14 +285,18 @@ async def get_config(config_id: int, ctx: AuthContext = _ADMIN):
 async def update_config(config_id: int, config: AiModelConfigUpdate, ctx: AuthContext = _ADMIN):
     _check_config_ownership(await ai_model_config_controller.get(config_id), ctx)
     instance = await ai_model_config_controller.update(config_id, config)
-    return ResponseSchema(data=instance)
+    return ResponseSchema(data=_mask_official_key(AiModelConfigOut.model_validate(instance), ctx))
 
 
 @router.patch("/{config_id}", summary="局部更新模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def patch_config(config_id: int, config: AiModelConfigPatch, ctx: AuthContext = _ADMIN):
-    _check_config_ownership(await ai_model_config_controller.get(config_id), ctx)
+    instance = await ai_model_config_controller.get(config_id)
+    if instance.scope == SYNC_SCOPE and config.model_fields_set == {"pricing"}:
+        await require_studio_owner(ctx)
+    else:
+        _check_config_ownership(instance, ctx)
     instance = await ai_model_config_controller.patch(config_id, config)
-    return ResponseSchema(data=instance)
+    return ResponseSchema(data=_mask_official_key(AiModelConfigOut.model_validate(instance), ctx))
 
 
 @router.delete("/{config_id}", summary="删除模型配置", response_model=ResponseSchema)

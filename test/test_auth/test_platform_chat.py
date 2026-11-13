@@ -13,7 +13,7 @@ from auth.deps import AuthContext
 from config import settings
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
-from services.platform.access import create_key
+from services.platform.access import create_key, revoke_key
 from services.platform.calls import recover_measured
 
 pytestmark = pytest.mark.skipif(not settings.AUTH_ENABLED, reason="requires authenticated platform")
@@ -70,12 +70,46 @@ async def test_public_chat_routes_selected_model_and_charges_actual_usage_once(s
     assert duplicate.headers["X-Request-Id"]==reply.headers["X-Request-Id"]
     status=await http.get("/v1/requests/"+reply.headers["X-Request-Id"],headers=headers)
     assert status.json()["status"]=="completed" and status.json()["usage"]["cache_read_tokens"]==200
+    assert status.json()["settlement"] == {"status": "settled", "amount": "0.010200", "currency": "CNY"}
+    assert status.headers["Cache-Control"] == "no-store"
+    recovered = await http.get('/v1/requests', params={'request_key': 'my-generation'}, headers=headers)
+    assert recovered.json() == status.json()
+    assert "provider-test" not in status.text and "upstream-model" not in status.text
+    assert (await PlatformCallReceipt.get()).api_key_id is not None
     usage=await ModelUsageRecord.get()
     assert usage.novel_id==0 and usage.cost==Decimal(".0102") and usage.team_id==team.id
     await team.refresh_from_db()
     await member.refresh_from_db()
     assert team.balance==Decimal("2.9898") and member.total_cost==usage.cost
     assert await BalanceTransaction.filter(usage_record_id=usage.id).count()==1
+
+
+@pytest.mark.asyncio
+async def test_receipts_follow_platform_account_and_allow_authorized_key_rotation(setup_call):
+    from auth.models import PlatformApiKey
+    http, headers, model, sent, team, member = setup_call
+    response = await http.post('/v1/chat/completions', headers=headers,
+        json={'model': model, 'messages': [{'role': 'user', 'content': 'test'}]})
+    path = '/v1/requests/' + response.headers['X-Request-Id']
+    user = await User.get(id=member.user_id)
+    owner = AuthContext(user=user, team_id=team.id, membership=member)
+    previous = await PlatformApiKey.get(team_id=team.id, user_id=user.id)
+    fresh = (await create_key(owner, '更换 Key'))['key']
+    await revoke_key(owner, previous.id)
+    assert (await http.get(path, headers=headers)).status_code == 401
+    own = await http.get(path, headers={'Authorization': 'Bearer ' + fresh, 'X-Team-Id': '999999'})
+    assert own.status_code == 200 and own.json()['settlement']['amount'] == '0.010200'
+    foreign_team = await Team.create(name='另一平台账户', balance=50)
+    foreign_user = await User.create(username='other-receipt-user', is_super_admin=True)
+    foreign_member = await TeamMember.create(team=foreign_team, user=foreign_user, role='admin')
+    foreign_key = (await create_key(AuthContext(user=foreign_user, team_id=foreign_team.id,
+        membership=foreign_member), '另一账户 Key'))['key']
+    denied = await http.get(path, headers={'Authorization': 'Bearer ' + foreign_key, 'X-Team-Id': str(team.id)})
+    assert denied.status_code == 404 and '0.010200' not in denied.text
+    account = await http.get('/v1/account', headers={'Authorization': 'Bearer ' + fresh})
+    assert Decimal(account.json()['balance']) == Decimal('2.9898')
+    assert account.json()['recharge_url'].endswith(f'/#/profile?recharge=1&team={team.id}')
+    assert len(sent) == 1
 
 
 @pytest.mark.asyncio

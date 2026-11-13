@@ -48,6 +48,7 @@ async def developer_identity(request: Request) -> AuthContext:
         raise HTTPException(403, "账户或团队已停用")
     request.state.platform_key_id = row.id
     ctx = await context_for_team(row.user, row.team_id)
+    ctx.platform_key_id = row.id
     if not ctx.is_super_admin and (not ctx.membership or ctx.membership.role not in {"admin", "creator"}):
         raise HTTPException(403, "当前团队角色不能调用模型")
     return ctx

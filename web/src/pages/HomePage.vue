@@ -10,6 +10,7 @@ import { nameClipReference } from '@/features/creation-agent/clipReferences'
 import { locale, localeSaving, tr } from '@/i18n'
 import inspirationPrompts from '../../../prompts/home_inspirations.json'
 import AppButton from '@/components/AppButton.vue'
+import AppSegmentedSwitch from '@/components/AppSegmentedSwitch.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AgentActivity from '@/features/creation-agent/AgentActivity.vue'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -229,10 +230,7 @@ async function create() {
               <div v-if="gifEnabled"><span>{{ tr('每帧间隔') }}</span><label class="composer-frame-interval"><input v-model.number="frameInterval" type="number" :min="gifIntervalMin" :max="gifIntervalMax" :step="gifIntervalStep" :aria-label="tr('每帧间隔')" :aria-invalid="!gifIntervalValid" @change="normalizeGifInterval"><span>ms</span></label></div>
             </div>
             <div class="composer-actions">
-              <div class="composer-tabs composer-mode-switch" :class="{ 'is-direct': mode === 'direct' }" role="group" :aria-label="tr('创作方式')">
-                <button type="button" :aria-pressed="mode === 'agent'" @click="mode = 'agent'">Agent</button>
-                <button type="button" :aria-pressed="mode === 'direct'" @click="mode = 'direct'">{{ tr('直创') }}</button>
-              </div>
+              <AppSegmentedSwitch v-model="mode" class="composer-mode-switch" :class="{'is-direct':mode === 'direct'}" :items="[{value:'agent',label:'Agent'},{value:'direct',label:tr('直创')}]" :label="tr('创作方式')" />
               <button
                 class="generate-action-btn"
                 type="button"
@@ -309,15 +307,12 @@ async function create() {
 .composer-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 10px; }
 .composer-tabs { position: relative; isolation: isolate; display: inline-grid; grid-template-columns: repeat(2,minmax(0,1fr)); min-width: 0; max-width: 100%; gap: 0; padding: 3px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
 .composer-tabs::before { position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 2); border-radius: 8px; background: var(--home-accent); box-shadow: 0 2px 6px color-mix(in srgb,var(--home-accent) 16%,transparent); content: ''; transform: translateX(0); transition: transform 280ms cubic-bezier(.22,1,.36,1); }
-.composer-tabs.is-image::before, .composer-tabs.is-direct::before { transform: translateX(100%); }
+.composer-tabs.is-image::before { transform: translateX(100%); }
 .composer-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 0 11px; border: 0; border-radius: 8px; color: var(--app-text-secondary); background: transparent; font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: color 160ms ease; }
 .composer-tabs button:hover:not([aria-pressed='true']) { color: var(--app-text); }
 .composer-tabs button[aria-pressed='true'] { color: var(--app-surface); }
 .composer-tabs button:focus-visible { outline: 2px solid var(--home-accent); outline-offset: -3px; }
 .composer-tabs button[aria-pressed='true']:focus-visible { outline-color: var(--app-surface); }
-.composer-tabs.composer-mode-switch { flex: none; width: 108px; padding: 2px; border-radius: 10px; }
-.composer-tabs.composer-mode-switch::before { top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 2); border-radius: 7px; box-shadow: none; }
-.composer-tabs.composer-mode-switch button { min-height: 24px; padding: 0 8px; border-radius: 7px; font-size: 11px; }
 .composer-models { display: flex; align-items: center; gap: 12px; min-width: 0; }.models-label { color: var(--app-text-muted); font-size: 12px; }.composer-models :deep(.app-select) { max-width: 300px; }
 .composer-frame-interval { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; padding: 5px 7px; border-radius: 7px; background: var(--app-surface-muted); color: var(--app-text-secondary); font-size: 11px; }.composer-frame-interval input { flex: 1; width: 60px; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--app-text); font: inherit; }.composer-frame-interval input[aria-invalid='true'] { color: var(--app-danger, var(--creation-danger)); }
 .prompt-well { border: 0; background: transparent; overflow: visible; }.prompt-well:focus-within { box-shadow: none; }
@@ -329,13 +324,13 @@ async function create() {
 .generate-action-btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
 .generate-btn-sparkle { color: #ffffff; flex-shrink: 0; margin-right: 2px; }
 .generate-btn-label { color: #ffffff; font-weight: 600; font-size: 15px; letter-spacing: 0.02em; }
+
 .generate-btn-price { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 0; font-variant-numeric: tabular-nums; }
 .generate-btn-approx { color: rgba(255, 255, 255, 0.9); font-size: 13px; margin-left: 2px; margin-right: 3px; }
 .generate-btn-original { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: rgba(255, 255, 255, 0.52); text-decoration: line-through; font-size: 13px; font-weight: 400; margin-right: 4px; }
 .generate-btn-discount { color: #ffffff; font-size: 16px; font-weight: 750; letter-spacing: -0.01em; margin-right: 2px; }
 .generate-btn-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 1px; }
 .discount-badge-svg { display: block; }
-
 .composer-quote-warning { display: flex; justify-content: flex-end; margin-top: 8px; font-size: 12px; }
 .est-warning { color: #ef4444; font-weight: 500; }
 .est-error { color: var(--creation-warning); }

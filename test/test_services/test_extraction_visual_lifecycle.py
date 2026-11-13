@@ -155,9 +155,9 @@ async def test_variant_failure_rolls_back_placeholder_promotion_and_other_asset_
 
 @pytest.mark.parametrize('language', ['zh', 'en'])
 @pytest.mark.parametrize('kind,model,key', [('person', Person, 'persons'), ('scene', Scene, 'scenes'), ('item', Item, 'items')])
-def test_variant_prompts_follow_same_language_and_mandatory_output_contract(language, kind, model, key):
+def test_variant_prompts_keep_their_own_wording_and_receive_language_guidance(language, kind, model, key):
     from prompts.skill_pack import SkillSnapshot, snapshot_skills, instructions
-    from services.extraction.extractor import validate_asset_prompt_contract
+    from services.extraction.validation import AssetCandidateValidator
     from test.test_services.test_asset_design_instructions import fixed_asset_prompt
 
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
@@ -165,14 +165,16 @@ def test_variant_prompts_follow_same_language_and_mandatory_output_contract(lang
     candidate = AssetExtractionResult(persons=[], scenes=[], items=[]).model_copy(update={key: [
         model(name='主体', base_traits=prompt, variant={'name': '变化形态', 'base_traits': prompt,
             'change_reason': '章节明确外观变化'})]})
-    validate_asset_prompt_contract(candidate, snapshot, language, '16:9')
     rendered = instructions(snapshot, language, 'assets')
     assert f'language={language}' in rendered
     assert snapshot.read('asset_lifecycle') in rendered
     assert snapshot.read('asset_lifecycle') in instructions(snapshot, language, 'storyboard')
-    getattr(candidate, key)[0].variant.base_traits = '简略的占位概述'
-    with pytest.raises(ValueError):
-        validate_asset_prompt_contract(candidate, snapshot, language, '16:9')
+    design = '自由视觉描述' if language == 'zh' else 'Free-form visual design.'
+    getattr(candidate, key)[0].variant.base_traits = design
+    validator = AssetCandidateValidator()
+    accepted = validator.merge(candidate)
+    assert not validator.issues
+    assert getattr(accepted, key)[0].variant.base_traits == design
 
 
 @pytest.mark.parametrize('field', ['name', 'base_traits', 'change_reason'])
@@ -344,12 +346,12 @@ async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
         nonlocal calls
         calls += 1
         if calls == 1:
-            persons = [{'name': '合格人物', 'base_traits': prompt}, {'name': '格式错误人物', 'base_traits': '缺少模板'}]
+            persons = [{'name': '合格人物', 'base_traits': prompt}, {'name': '空提示词人物', 'base_traits': ''}]
         else:
             retry = next(part.content for msg in reversed(messages) for part in msg.parts if isinstance(part, RetryPromptPart))
-            assert '合格人物' in retry and '格式错误人物' in retry and '缺失占位' in retry
+            assert '合格人物' in retry and '空提示词人物' in retry and '缺失占位' in retry
             assert ('只返回' if language == 'zh' else 'Return only') in retry
-            persons = [{'name': name, 'base_traits': prompt} for name in ('格式错误人物', '缺失占位')]
+            persons = [{'name': name, 'base_traits': prompt} for name in ('空提示词人物', '缺失占位')]
             persons.append({'name': '合格人物', 'base_traits': '不允许覆盖已通过的设计'})
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'persons': persons, 'scenes': [], 'items': []})])
 
@@ -363,7 +365,7 @@ async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     assert calls == 2
-    assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'合格人物', '格式错误人物', '缺失占位'}
+    assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'合格人物', '空提示词人物', '缺失占位'}
     checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
     assert checkpoint.result['issues'] == []
     assert len(checkpoint.result['accepted']['persons']) == 3

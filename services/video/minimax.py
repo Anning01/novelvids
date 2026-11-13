@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from services.platform.http_contract import check_upstream_response, public_task_error
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for
@@ -145,6 +146,7 @@ class MiniMaxH3Generator(BaseVideoGenerator):
                 raise MiniMaxGenerationError("MiniMax 视频供应商网络请求失败") from exc
 
         response_request_id = request_id(response)
+        check_upstream_response(response)
         if response.status_code >= 400:
             detail = http_provider_error(response)
             suffix = f"，request_id={response_request_id}" if response_request_id else ""
@@ -185,6 +187,7 @@ class MiniMaxH3Generator(BaseVideoGenerator):
                 raise MiniMaxGenerationError("查询 MiniMax 视频任务时网络请求失败") from exc
 
         response_request_id = request_id(response)
+        check_upstream_response(response)
         if response.status_code >= 400:
             detail = http_provider_error(response)
             suffix = f"，request_id={response_request_id}" if response_request_id else ""
@@ -227,12 +230,12 @@ class MiniMaxH3Generator(BaseVideoGenerator):
         if status == "failed":
             return self._build_result(
                 TaskStatusEnum.failed,
-                error=provider_error(task) or localized_message('MiniMax 视频生成任务失败'),
+                error=public_task_error(task, provider_error(task) or localized_message('MiniMax 视频生成任务失败')),
             )
         if status == "cancelled":
             return self._build_result(
                 TaskStatusEnum.cancelled,
-                error=provider_error(task) or "MiniMax 视频生成任务已取消",
+                error=public_task_error(task, provider_error(task) or "MiniMax 视频生成任务已取消"),
             )
         if status == "queued":
             return self._build_result(TaskStatusEnum.queued)

@@ -17,6 +17,7 @@ async def login(client, user):
 
 @pytest.fixture
 def upstream(monkeypatch):
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "platform")
     monkeypatch.setattr(settings, "AUTH_PROVIDER", "qiling")
     monkeypatch.setattr(settings, "QILING_API_BASE_URL", "https://qiling.example.test")
     monkeypatch.setattr(settings, "QILING_SIGNUP_ENABLED", True)

@@ -3,6 +3,7 @@ import asyncio
 from collections import Counter
 from decimal import Decimal, ROUND_HALF_UP
 import logging
+from math import gcd
 import re
 from math import isfinite
 import time
@@ -17,6 +18,7 @@ from models.config import AiModelConfig
 from services.billing.pricing import compute_input_image_cost, compute_video_cost
 from services.platform.calls import CALL_TIMEOUT, admit, digest, settle
 from services.platform.images import media_url
+from services.platform.http_contract import UpstreamResponseError, public_upstream
 from services.video import get_generator
 from services.video.base import VideoProviderError
 from services.video.capabilities import capabilities_for, validate_selection
@@ -35,11 +37,14 @@ class Reference(BaseModel):
 
 class VideoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: str = Field(pattern=r"^nv-[1-9][0-9]{0,9}$")
+    model: str = Field("sora-2", min_length=1, max_length=200)
     prompt: str = Field(min_length=1)
-    duration: int = Field(gt=0)
-    resolution: str
-    aspect_ratio: str
+    input_reference: str | None = None
+    seconds: str | None = Field(None, pattern=r"^[1-9][0-9]*$")
+    size: str | None = Field(None, pattern=r"^[1-9][0-9]*x[1-9][0-9]*$")
+    duration: int = Field(4, gt=0)
+    resolution: str = "720p"
+    aspect_ratio: str = "16:9"
     references: list[Reference] = Field(default_factory=list)
     generate_audio: bool | None = None
     return_last_frame: bool = False
@@ -48,6 +53,25 @@ class VideoRequest(BaseModel):
 
     @model_validator(mode="after")
     def reference_roles(self):
+        if not self.model_fields_set.intersection({"size", "aspect_ratio", "resolution", "duration"}):
+            self.size = "720x1280"
+        if self.seconds is not None:
+            if "duration" in self.model_fields_set and self.duration != int(self.seconds):
+                raise ValueError("seconds and duration must agree")
+            self.duration = int(self.seconds)
+        if self.size is not None:
+            width, height = (int(value) for value in self.size.split("x"))
+            divisor = gcd(width, height)
+            ratio, resolution = f"{width // divisor}:{height // divisor}", f"{min(width, height)}p"
+            if "aspect_ratio" in self.model_fields_set and self.aspect_ratio != ratio:
+                raise ValueError("size and aspect_ratio must agree")
+            if "resolution" in self.model_fields_set and self.resolution.lower() != resolution:
+                raise ValueError("size and resolution must agree")
+            self.aspect_ratio, self.resolution = ratio, resolution
+        if self.input_reference:
+            if self.references:
+                raise ValueError("Use input_reference or references")
+            self.references = [Reference(type="image", url=self.input_reference)]
         roles = [r.role for r in self.references]
         if any(r != "reference" for r in roles):
             if sorted(roles) != ["first_frame","last_frame"] or any(r.type != "image" for r in self.references):
@@ -90,7 +114,7 @@ async def submit_video(ctx, request, key):
         raise HTTPException(422, "request_id 与 Idempotency-Key 不一致")
     key = str(request.request_id) if request.request_id else key
     try:
-        config, receipt = await admit(ctx,int(request.model[3:]),body,key,validate=video_options)
+        config, receipt = await admit(ctx,request.model,body,key,validate=video_options,kind="video")
     except HTTPException as exc:
         if exc.status_code != 409 or not key:
             raise
@@ -101,7 +125,7 @@ async def submit_video(ctx, request, key):
         status = prior_job.status if prior_job else "queued"
         if previous.state in {"review","rejected"} and status!="completed":
             status="failed"
-        return {"id":str(previous.public_id),"status":status}
+        return video_object(previous, prior_job, status=status)
     refs = request.references
     frames = {r.role:r.url for r in refs if r.role!="reference"}
     types = {kind:[r.url for r in refs if r.type==kind and r.role=="reference"] for kind in ("image","video","audio")}
@@ -109,7 +133,7 @@ async def submit_video(ctx, request, key):
                       if r.lower()==request.resolution.lower())
     job = await PlatformVideoJob.create(receipt=receipt,route_hash=route_hash(config),inputs={
         "duration":request.duration, "resolution":resolution, "input_image_count":len(frames) + len(types["image"]),
-        "has_video_reference":bool(types["video"])})
+        "has_video_reference":bool(types["video"]), "public_model":request.model, "size":request.size or video_size(request.resolution, request.aspect_ratio)})
     from prompts.storyboard_sheet_binding import model_image_format
     label = model_image_format(config.video_model_type)
     prompt = re.sub(r"@image(\d+)", lambda m: label.format(int(m[1])), request.prompt)
@@ -120,23 +144,48 @@ async def submit_video(ctx, request, key):
         return ("@音频" if kind=="audio" else "@视频") + number
     prompt = re.sub(r"@(audio|video)(\d+)", media_label, prompt)
     try:
-        async with asyncio.timeout(CALL_TIMEOUT):
-            upstream_id = await get_generator(config).submit(prompt=prompt, duration=request.duration,
-                resolution=resolution, aspect_ratio=request.aspect_ratio, output_format="mp4", generate_audio=request.generate_audio,
-                return_last_frame=request.return_last_frame, generation_mode="keyframes" if frames else "reference",
-                first_frame_url=frames.get("first_frame"),last_frame_url=frames.get("last_frame"),reference_images=types["image"],
-                reference_videos=types["video"], reference_audios=types["audio"],team_id=ctx.team_id)
+        with public_upstream(str(receipt.public_id), config.api_key):
+            async with asyncio.timeout(CALL_TIMEOUT):
+                upstream_id = await get_generator(config).submit(prompt=prompt, duration=request.duration,
+                    resolution=resolution, aspect_ratio=request.aspect_ratio, output_format="mp4", generate_audio=request.generate_audio,
+                    return_last_frame=request.return_last_frame, generation_mode="keyframes" if frames else "reference",
+                    first_frame_url=frames.get("first_frame"),last_frame_url=frames.get("last_frame"),reference_images=types["image"],
+                    reference_videos=types["video"], reference_audios=types["audio"],team_id=ctx.team_id)
         if not upstream_id:
             raise ValueError("missing upstream task")
         await PlatformCallReceipt.filter(id=receipt.id,state="submitted").update(provider_id=upstream_id,state="processing")
     except (Exception, asyncio.CancelledError) as exc:
-        definite = isinstance(exc,VideoProviderError) and not exc.submission_uncertain
+        definite = (isinstance(exc,VideoProviderError) and not exc.submission_uncertain) or (
+            isinstance(exc,UpstreamResponseError) and exc.status < 500 and exc.status != 408)
         await PlatformCallReceipt.filter(id=receipt.id,state="submitted").update(state="rejected" if definite else "review")
         if isinstance(exc, asyncio.CancelledError):
             raise
+        if isinstance(exc, UpstreamResponseError):
+            raise
         raise HTTPException(422 if definite else 502,"未能确认视频提交，请凭请求编号核对",
                             headers={"X-Request-Id":str(receipt.public_id)}) from None
-    return {"id":str(receipt.public_id),"status":job.status}
+    return video_object(receipt, job)
+
+
+def video_size(resolution, aspect_ratio):
+    side = int(re.sub(r"\D", "", resolution))
+    if resolution.lower() == "4k":
+        side = 2160
+    if aspect_ratio == "adaptive":
+        return "auto"
+    width, height = (int(value) for value in aspect_ratio.split(":"))
+    return f"{round(side * width / min(width, height))}x{round(side * height / min(width, height))}"
+
+
+def video_object(receipt, job, *, status=None):
+    inputs = job.inputs if job else {}
+    state = status or job.status
+    return {"id":str(receipt.public_id), "object":"video", "model":inputs.get("public_model", receipt.model),
+            "status":state, "progress":job.progress if job else 0,
+            "created_at":int(receipt.created_at.timestamp()),
+            "completed_at":int(job.updated_at.timestamp()) if job and state == "completed" else None,
+            "seconds":str(inputs.get("duration", 4)), "size":inputs.get("size", "1280x720"),
+            "error":(job.output or {}).get("error") if job and state == "failed" else None}
 
 
 def nonnegative(value):
@@ -180,6 +229,11 @@ async def refresh_job(job, receipt, *, renew=False):
         return
     config = await AiModelConfig.get_or_none(id=receipt.model_config_id,scope="official",team_id__isnull=True)
     ours = PlatformVideoJob.filter(id=job.id,poll_token=token)
+    if config and route_hash(config) != job.route_hash:
+        from services.video.ark_migration import legacy_query_config
+        previous = legacy_query_config(config)
+        if previous and route_hash(previous) == job.route_hash:
+            config = previous
     if not config or route_hash(config)!=job.route_hash:
         if renew:
             await ours.update(poll_token=None, poll_after=now+60)
@@ -189,8 +243,9 @@ async def refresh_job(job, receipt, *, renew=False):
                 await PlatformCallReceipt.filter(id=receipt.id,state="processing").update(state="review")
         return
     try:
-        async with asyncio.timeout(90):
-            result = await get_generator(config).query(receipt.provider_id)
+        with public_upstream(str(receipt.public_id), config.api_key):
+            async with asyncio.timeout(90):
+                result = await get_generator(config).query(receipt.provider_id)
         status = TaskStatusEnum(result["status"])
         metadata = result.get("metadata") or {}
         if renew and status != TaskStatusEnum.completed:
@@ -223,11 +278,17 @@ async def refresh_job(job, receipt, *, renew=False):
                 await settle(receipt.id)
         elif status in (TaskStatusEnum.failed,TaskStatusEnum.cancelled):
             async with in_transaction():
-                if await ours.update(status="failed",poll_token=None):
+                error = metadata.get("error") or {"code":"video_generation_failed", "message":result.get("error") or "Video generation failed"}
+                if not isinstance(error, dict):
+                    error = {"code":"video_generation_failed", "message":str(error)}
+                if await ours.update(status="failed",output={"error":error},poll_token=None):
                     await PlatformCallReceipt.filter(id=receipt.id,state="processing").update(state="rejected")
         else:
             await ours.update(status="queued" if status==TaskStatusEnum.queued else "in_progress",
                               progress=result.get("progress") or 0,poll_after=now+5,poll_token=None)
+    except UpstreamResponseError:
+        await ours.update(poll_after=int(time.time())+15,poll_token=None)
+        raise
     except Exception:
         await ours.update(poll_after=int(time.time())+15,poll_token=None)
         logger.warning("Platform video status check deferred: receipt=%s",receipt.public_id)
@@ -244,8 +305,7 @@ async def video_status(ctx, public_id=None, key=None, *, refresh=False):
         await job.refresh_from_db()
         await receipt.refresh_from_db()
     status = "failed" if job.status!="completed" and receipt.state in {"review","rejected"} else job.status
-    return {"id":str(receipt.public_id),"status":status,"progress":job.progress,"metadata":job.output,
-            "billing_status":receipt.state, **({"error":"视频任务失败或需要核对"} if status=="failed" else {})}
+    return {**video_object(receipt, job, status=status), "metadata":job.output, "billing_status":receipt.state}
 
 
 async def reconcile_videos():

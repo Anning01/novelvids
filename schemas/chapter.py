@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import Literal, Optional
 from schemas._base import BaseResponse
 from utils.enums import TaskStatusEnum, WorkflowStatus
 
@@ -17,12 +17,20 @@ class ChapterProperties(BaseModel):
     workflow_status: Optional[int] = Field(None, description=WorkflowStatus.__doc__)
 
 
+class EpisodePacing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preset: Literal["compact", "fast", "smart", "slow", "detailed"] = "smart"
+    max_seconds: int | None = Field(None, ge=1, strict=True)
+
+
 class ChapterFullProperties(ChapterProperties):
     """
     完整的业务属性，包含 content 等大字段。
     用于创建、更新、详情。
     """
     content: Optional[str] = Field(None, description="章节原文")
+    episode_pacing: EpisodePacing | None = None
     screenplay: str | None = Field(None, description="本集导演剧本")
 
 

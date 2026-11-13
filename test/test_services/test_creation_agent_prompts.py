@@ -100,8 +100,9 @@ async def test_storyboard_persistence_keeps_segments_and_their_references(client
     chapter = await Chapter.create(novel=novel, number=1, name="第一章", content="雨夜")
     asset = await Asset.create(novel=novel, canonical_name="女主", asset_type=AssetTypeEnum.person.value)
     entity = heroine().model_copy(update={"asset_id": asset.id})
+    continuation = segmented_shot().model_copy(update={"duration_split_part": 2})
     scenes = await StoryboardTaskHandler()._save_scenes(
-        chapter.id, Storyboard(shots=[segmented_shot()]), {}, 0.1, entities=[entity],
+        chapter.id, Storyboard(shots=[continuation]), {}, 0.1, entities=[entity],
     )
     assert len(scenes) == 1
     scene = scenes[0]
@@ -110,6 +111,7 @@ async def test_storyboard_persistence_keeps_segments_and_their_references(client
     assert scene.sequence == 1
     assert scene.duration == 6
     assert len(scene.prompt_params["segments"]) == 3
+    assert scene.prompt_params["duration_split_part"] == 2
     assert await scene.assets.all().values_list("id", flat=True) == [asset.id]
     assert re.findall(r"【镜头(\d+) ·", scene.prompt) == ["1", "2", "3"]
 

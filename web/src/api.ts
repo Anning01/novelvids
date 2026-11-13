@@ -23,7 +23,7 @@ export function mediaUrl(path: string | null | undefined): string {
 /** 落库媒体引用：OSS 直传时优先存对象 key（读取时由后端重新签发），
  *  避免把有效期有限的签名 URL 持久化；本地模式回退到 /media 路径。 */
 export function persistedMediaRef(uploaded: { key?: string; url?: string; filename: string }): string {
-  return uploaded.key || uploaded.url || mediaUrl(`/media/${uploaded.filename}`)
+  return uploaded.key || uploaded.url || `/media/${uploaded.filename}`
 }
 export const AUTH_TOKEN_KEY = 'novelvids_token'
 export const ACTIVE_TEAM_KEY = 'novelvids_active_team'
@@ -60,7 +60,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/analyze|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
@@ -292,11 +292,12 @@ export const api = {
   novel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}`),
   novelMeta: (id: number) => request<SingleResponse<NovelMeta>>(`/novel/${id}/meta`),
   chaptersPage: (novelId: number, page = 1, pageSize = 30) => request<PaginationResponse<Chapter>>(`/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`),
-  createNovel: (data: Partial<Novel> & { source_key?: string; source_filename?: string }) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
+  createNovel: (data: Partial<Novel> & { source_key?: string; source_filename?: string; source_kind?: 'novel' | 'screenplay' }) => request<SingleResponse<Novel>>('/novel', { method: 'POST', body: JSON.stringify(data) }),
   updateNovel: (id: number, data: Partial<Novel>) => request<SingleResponse<Novel>>(`/novel/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteNovel: (id: number) => request<SingleResponse<null>>(`/novel/${id}`, { method: 'DELETE' }),
   splitNovel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}/split`, { method: 'POST' }),
-  analyzeNovel: (id: number) => request<SingleResponse<AiTask>>(`/novel/${id}/analyze`, { method: 'POST' }),
+  generateNovelCover: (id: number, modelConfigId: number) => request<SingleResponse<AiTask>>(`/novel/${id}/cover${qs({ model_config_id: modelConfigId })}`, { method: 'POST' }),
+  analyzeNovel: (id: number, coverModelConfigId?: number) => request<SingleResponse<AiTask>>(`/novel/${id}/analyze${qs({ cover_model_config_id: coverModelConfigId })}`, { method: 'POST' }),
   novelAnalysis: (id: number) => request<SingleResponse<AiTask | null>>(`/novel/${id}/analysis`),
   chapters: (novelId: number) => requestAllPages<Chapter>(
     (page, pageSize) => `/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`,
@@ -339,7 +340,7 @@ export const api = {
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
-  generateStoryboardSheet: (sceneId: number) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/storyboard-sheet`, {method: 'POST'}),
+  generateStoryboardSheet: (sceneId: number, modelConfigId: number) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/storyboard-sheet${qs({ model_config_id: modelConfigId })}`, {method: 'POST'}),
   generateScenes: (chapterId: number, replaceExisting = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
@@ -354,7 +355,7 @@ export const api = {
   generateVideoBatch: (requests: Array<VideoGenerationOptions & { scene_id: number; model_config_id: number }>) => request<SingleResponse<AiTask>>('/video/batch', { method: 'POST', body: JSON.stringify({ requests }) }),
   latestVideoBatch: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/video/batch/latest/${chapterId}`),
   async uploadVideoReference(file: File, modelConfigId: number) {
-    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
+    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream', model_config_id: modelConfigId })}`)
     if (policyResponse.data.direct) {
       const policy = policyResponse.data
       const form = new FormData()
@@ -422,6 +423,10 @@ export const api = {
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   workbenchBootstrap: (novelId: number, chapterId: number, signal?: AbortSignal) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`, signal ? { signal } : undefined),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
+  studioPlatform: () => request<SingleResponse<{ connected: boolean }>>('/config/studio-platform'),
+  studioPlatformAccount: () => request<SingleResponse<{ balance: string; currency: string; recharge_url: string }>>('/config/studio-platform/account'),
+  connectStudioPlatform: (key: string) => request<SingleResponse<{ synced: number }>>('/config/studio-platform', { method: 'PUT', body: JSON.stringify({ api_key: key }) }),
+  syncStudioPlatform: () => request<SingleResponse<{ synced: number }>>('/config/studio-platform/sync', { method: 'POST' }),
   imageGenerationModels: () => request<SingleResponse<ImageGenerationModel[]>>('/config/image-generation/models'),
   videoGenerationModels: () => request<SingleResponse<VideoGenerationModel[]>>('/config/video-generation/models'),
   generationCapabilities: () => request<SingleResponse<GenerationCapabilities>>('/config/generation/capabilities'),
@@ -441,8 +446,8 @@ export const api = {
   billingProject: (id: number) => request<SingleResponse<BillingProjectDetail>>(`/billing/projects/${id}`),
   billingRecords: (params: { novel_id?: number; task_type?: number; billing_type?: string; status?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records${qs(params)}`),
   billingRecordDetails: (recordId: number, params: { novel_id?: number; page?: number; page_size?: number } = {}) => request<PaginationResponse<BillingRecord>>(`/billing/records/${recordId}/details${qs(params)}`),
-  async upload(file: File): Promise<UploadResult> {
-    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream' })}`)
+  async upload(file: File, modelConfigId?: number): Promise<UploadResult> {
+    const policyResponse = await request<SingleResponse<UploadPolicy>>(`/file/upload-policy${qs({ filename: file.name, content_type: file.type || 'application/octet-stream', model_config_id: modelConfigId })}`)
     if (policyResponse.data.direct) {
       const policy = policyResponse.data
       const form = new FormData()

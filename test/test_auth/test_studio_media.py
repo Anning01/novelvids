@@ -12,13 +12,48 @@ from api.platform import developer_router
 from auth.deps import AuthContext
 from auth.models import StudioMediaLease, Team, TeamMember, User
 from config import settings
+from models.config import AiModelConfig
 from services.oss.temporary import TemporaryBucket
 from services.platform.access import create_key
 from services.platform.temporary_media import expire_uploads
 from services.video.public_media import PublicMediaResolver
+from test.test_auth import issue_test_session
 
 PUT_HEADERS = {"content-type":"image/png", "content-length":"8", "content-md5":"bW9jay1jaGVja3N1bS0wMA==",
                "x-oss-object-acl":"private", "x-oss-forbid-overwrite":"true"}
+
+
+@pytest.mark.skipif(not settings.AUTH_ENABLED, reason="requires authenticated user")
+async def test_reference_upload_policy_prefers_local_for_studio_storage(client, monkeypatch):
+    from unittest.mock import Mock
+
+    user = await User.create(username="reference-upload-owner", password_hash="!")
+    team = await Team.create(name="参考素材团队")
+    await TeamMember.create(team=team, user=user, role="creator")
+    headers = {"Authorization": "Bearer " + await issue_test_session(user.username), "X-Team-Id": str(team.id)}
+    platform = await AiModelConfig.create(name="平台模型", model="nv-1", task_type=2,
+        base_url="https://platform.example/v1", api_key="test", api_protocol="novelvids", is_active=True)
+    custom = await AiModelConfig.create(name="自有模型", model="custom", task_type=4,
+        base_url="https://custom.example/v1", api_key="test", is_active=True)
+    oss = Mock(enabled=True)
+    oss.name = "legacy-oss"
+    oss.sign_form_upload.return_value = {"url": "https://legacy.example/upload", "fields": {}}
+    oss.public_url.return_value = "https://legacy.example/reference.png"
+    monkeypatch.setattr("api.file.oss", oss)
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_BASE_URL", "")
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "")
+
+    async def policy(**params):
+        response = await client.get("/api/file/upload-policy", headers=headers,
+            params={"filename": "reference.png", "content_type": "image/png", **params})
+        return response.json()["data"]["direct"]
+
+    assert await policy(model_config_id=platform.id) is False
+    assert await policy(model_config_id=custom.id) is True
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_BASE_URL", "https://platform.example/v1")
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "nv_test")
+    assert await policy(model_config_id=custom.id) is False
+    assert await policy() is True
 
 
 @pytest.mark.parametrize("method,ttl,headers,expected", [

@@ -12,6 +12,7 @@ from schemas.creation_agent import AgentConfiguration
 from pydantic_ai.models.wrapper import WrapperModel
 
 from models.creation_agent import AgentMessage
+from services.billing.platform import active_model_call, finish_model_call
 
 
 def main_request_count(calls) -> int:
@@ -83,6 +84,7 @@ class RecordedAgentModel(WrapperModel):
             call["usage_reported"] = bool(usage.input_tokens or usage.output_tokens)
             call["cache_usage_reported"] = bool(usage.details.get('cache_usage_reported', False) or usage.cache_read_tokens or usage.cache_write_tokens)
             self.budget.observe(call['context'], usage)
+        await finish_model_call(call, completed=completed, usage=call.get('usage'), duration=call['duration_seconds'])
         await self._checkpoint()
         if self.on_activity:
             await self.on_activity(call)
@@ -137,6 +139,7 @@ class RecordedAgentModel(WrapperModel):
         while True:
             call, started = await self._begin(messages, model_request_parameters)
             response = None
+            billing_context = active_model_call.set((self.message, call))
             try:
                 response = await self.wrapped.request(messages, model_settings, model_request_parameters)
                 return response
@@ -146,6 +149,7 @@ class RecordedAgentModel(WrapperModel):
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response)
                 await self._finish(call, started, response.usage if response else None, response is not None,
@@ -160,6 +164,7 @@ class RecordedAgentModel(WrapperModel):
             call, started = await self._begin(messages, model_request_parameters)
             response = None
             entered = completed = False
+            billing_context = active_model_call.set((self.message, call))
             try:
                 async with self.wrapped.request_stream(messages, model_settings, model_request_parameters, run_context) as response:
                     entered = True
@@ -174,6 +179,7 @@ class RecordedAgentModel(WrapperModel):
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
+                active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response.get())
                 await self._finish(call, started, response.usage() if response else None, completed,

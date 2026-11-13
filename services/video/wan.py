@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from services.platform.http_contract import check_upstream_response, public_task_error
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for
@@ -204,6 +205,7 @@ class Wan3Generator(BaseVideoGenerator):
                 logger.warning("wan3_network_error endpoint=%s error_type=%s", safe_url, type(exc).__name__)
                 raise Wan3GenerationError("Wan 3 视频供应商网络请求失败") from exc
         response_request_id = request_id(response)
+        check_upstream_response(response)
         if response.status_code >= 400:
             detail = http_provider_error(response)
             suffix = f"，request_id={response_request_id}" if response_request_id else ""
@@ -235,6 +237,7 @@ class Wan3Generator(BaseVideoGenerator):
                 logger.warning("wan3_query_network_error endpoint=%s error_type=%s", safe_url, type(exc).__name__)
                 raise Wan3GenerationError("查询 Wan 3 视频任务时网络请求失败") from exc
         response_request_id = request_id(response)
+        check_upstream_response(response)
         if response.status_code >= 400:
             detail = http_provider_error(response)
             suffix = f"，request_id={response_request_id}" if response_request_id else ""
@@ -277,12 +280,12 @@ class Wan3Generator(BaseVideoGenerator):
         if status == "FAILED":
             return self._build_result(
                 TaskStatusEnum.failed,
-                error=provider_error(output) or localized_message('Wan 3 视频生成任务失败'),
+                error=public_task_error(output, provider_error(output) or localized_message('Wan 3 视频生成任务失败')),
             )
         if status == "CANCELED":
             return self._build_result(
                 TaskStatusEnum.cancelled,
-                error=provider_error(output) or "Wan 3 视频生成任务已取消",
+                error=public_task_error(output, provider_error(output) or "Wan 3 视频生成任务已取消"),
             )
         if status == "UNKNOWN":
             return self._build_result(

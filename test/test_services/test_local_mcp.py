@@ -150,13 +150,13 @@ async def test_real_stdio_client_restart_and_schema_safe(tmp_path):
         await asyncio.wait_for(process.wait(), 10)
 
 
-async def test_import_invalid_assets_rolls_back(tmp_path):
+async def test_import_blank_asset_prompt_rolls_back(tmp_path):
     from models.novel import Novel
     from models.work_sync import WorkSyncObject
     count_before = await Novel.all().count()
     root = package(tmp_path / 'invalid', 'invalid-work')
     (root / 'assets.json').write_text(json.dumps({'assets': [
-        {'id': 'a', 'name': '资产', 'kind': 'person', 'prompt': '不符合资产协议'}]}))
+        {'id': 'a', 'name': '资产', 'kind': 'person', 'prompt': '   '}]}))
     with pytest.raises(ValueError):
         await WorkSync(tmp_path, tmp_path / 'media').import_episode(ImportEpisode(
             directory=str(root), request_id='invalid-import', confirmed=True))

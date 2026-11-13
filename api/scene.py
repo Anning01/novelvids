@@ -3,7 +3,7 @@ from api._production_request import production_request
 from utils.messages import localized_message
 from fastapi.responses import Response
 from pydantic import ValidationError
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 
 from auth.deps import (
     AuthContext,
@@ -204,9 +204,9 @@ async def delete_scene(
 
 
 @router.post('/{scene_id}/storyboard-sheet', response_model=ResponseSchema[AiTaskOut], summary='生成本镜线稿故事版')
-async def generate_storyboard_sheet(scene_id: int, background_tasks: BackgroundTasks,
+async def generate_storyboard_sheet(scene_id: int, background_tasks: BackgroundTasks, model_config_id: int = Query(gt=0),
     ctx: AuthContext = Depends(get_auth_context), _: AuthContext = Depends(require_scene_access), __: AuthContext = _EDITOR):
     from services.storyboard.sheets import submit_sheet
-    task = await submit_sheet(scene_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    task = await submit_sheet(scene_id, model_config_id=model_config_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
     background_tasks.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)

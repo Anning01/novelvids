@@ -271,6 +271,7 @@ class PlatformCallReceipt(AbstractBaseModel):
     payload_hash = fields.CharField(max_length=64)
     team_id = fields.IntField(db_index=True)
     user_id = fields.IntField()
+    api_key_id = fields.IntField(null=True)
     model_config_id = fields.IntField(db_index=True)
     model_name = fields.CharField(max_length=100)
     model = fields.CharField(max_length=200)

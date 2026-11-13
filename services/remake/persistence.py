@@ -39,15 +39,12 @@ class RemakeResultPersistence:
         from prompts.skill_pack import SkillSnapshot, snapshot_skills
         from services.creation_agent.skill_execution import current_execution
         from services.language import task_language
-        from services.remake.asset_validation import validate_remake_assets
         from services.remake.prompt_render import compact_catalog
         from services.remake.storyboards import prepare_remake_prompt
 
         execution = current_execution.get()
         snapshot = execution.snapshot if execution else SkillSnapshot.model_validate(snapshot_skills())
         project = await Novel.get(id=source.novel_id)
-        validate_remake_assets(assets, snapshot, execution.language if execution else task_language.get() or 'zh',
-                               project.aspect_ratio or '16:9')
         language = execution.language if execution else task_language.get() or 'zh'
         catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         prompts = [
@@ -86,6 +83,8 @@ class RemakeResultPersistence:
         source: RemakeSource,
         assets: dict[str, list[dict[str, Any]]],
     ) -> dict[str, Asset]:
+        from services.extraction.extractor import validate_asset_design
+
         result: dict[str, Asset] = {}
         chapter = await Chapter.get(id=source.chapter_id).using_db(connection)
         for group, asset_type in _ASSET_GROUPS:
@@ -96,6 +95,8 @@ class RemakeResultPersistence:
                 name = str(item.get("name", "")).strip()
                 if not reference_id or not name:
                     continue
+                description = str(item.get("description", "")).strip()
+                validate_asset_design(description)
                 layout = ({'reference_layout':GROUP_PORTRAIT if item.get('label') == '群像' else CHARACTER_TURNAROUND}
                           if asset_type == AssetTypeEnum.person else {})
                 existing = await Asset.get_or_none(
@@ -110,8 +111,8 @@ class RemakeResultPersistence:
                         asset_type=asset_type.value,
                         canonical_name=name,
                         aliases=[],
-                        description=str(item.get("description", "")).strip(),
-                        base_traits=str(item.get("description", "")).strip(),
+                        description=description,
+                        base_traits=description,
                         is_global=True,
                         source_chapters=[chapter.number],
                         last_updated_chapter=chapter.number,
@@ -148,7 +149,6 @@ class RemakeResultPersistence:
                         chapters.sort()
                     existing.source_chapters = chapters
                     if owned:
-                        description = str(item.get("description", "")).strip()
                         existing.description = description
                         existing.base_traits = description
                         existing.last_updated_chapter = chapter.number

@@ -63,10 +63,12 @@ def _build_analysis_material(
 ) -> str:
     """优先使用完整书稿；超长时按章节均匀取样，避免只分析故事开头。"""
     content = (novel.content or "").strip()
-    if len(content) <= MAX_ANALYSIS_TEXT_LENGTH:
+    if content and len(content) <= MAX_ANALYSIS_TEXT_LENGTH:
         return content
 
     if not chapters:
+        if not content:
+            return ""
         head = content[: MAX_ANALYSIS_TEXT_LENGTH // 2]
         tail = content[-MAX_ANALYSIS_TEXT_LENGTH // 2 :]
         return json.dumps({"head": head, "tail": tail}, ensure_ascii=False)
@@ -74,7 +76,9 @@ def _build_analysis_material(
     allowance = MAX_ANALYSIS_TEXT_LENGTH // len(chapters)
     blocks = []
     for chapter in chapters:
-        chapter_text = (chapter.content or "").strip()
+        chapter_text = chapter.production_text.strip()
+        if not chapter_text:
+            continue
         if len(chapter_text) > allowance:
             first = allowance * 2 // 3
             chapter_text = f"{chapter_text[:first]}\n……\n{chapter_text[-(allowance - first):]}"
@@ -165,9 +169,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         if await stopped():
             raise ValueError(localized_message('任务已取消或结束'))
         novel = await Novel.get(id=novel_id)
-        if not (novel.content or "").strip():
-            raise ValueError(localized_message('项目没有可分析的书稿内容'))
-
+        if request_params.get("operation") == "project_cover":
+            if not request_params.get("cover_model_config_id"):
+                raise ValueError(localized_message("请选择生图模型"))
+            return await self._generate_cover(
+                novel, request_params, prompt_language, task_id,
+                outline=novel.story_outline or novel.description or "",
+                book_types=novel.tags or [], result={}, stopped=stopped,
+            )
         chapter_query = Chapter.filter(novel_id=novel_id).order_by("number")
         chapter_count = await chapter_query.count()
         if not chapter_count and not novel.episodes_managed:
@@ -175,13 +184,15 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             chapter_count = await chapter_query.count()
 
         samples = []
-        if len(novel.content.strip()) > MAX_ANALYSIS_TEXT_LENGTH and chapter_count:
+        if (not (novel.content or "").strip() or len(novel.content or "") > MAX_ANALYSIS_TEXT_LENGTH) and chapter_count:
             numbers = await chapter_query.values_list("number", flat=True)
             if len(numbers) > MAX_SAMPLE_CHAPTERS:
                 last = len(numbers) - 1
                 numbers = [numbers[round(i * last / (MAX_SAMPLE_CHAPTERS - 1))] for i in range(MAX_SAMPLE_CHAPTERS)]
-            samples = await chapter_query.filter(number__in=numbers).only("number", "name", "content")
+            samples = await chapter_query.filter(number__in=numbers).only("number", "name", "content", "screenplay")
         material = _build_analysis_material(novel, samples, prompt_language)
+        if not material.strip():
+            raise ValueError(localized_message('项目没有可分析的书稿内容'))
 
         from services.creation_agent.skill_execution import current_execution, require_agent
         execution = current_execution.get()
@@ -237,15 +248,26 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         if await stopped():
             result['cover_status'] = 'cancelled'
             return result
-        if not request_params.get("include_cover", True):
+        cover_model_config_id = request_params.get("cover_model_config_id")
+        if not cover_model_config_id or not request_params.get("include_cover", True):
             return result
+        return await self._generate_cover(
+            novel, request_params, prompt_language, task_id,
+            outline=analysis.story_outline, book_types=analysis.book_types, result=result, stopped=stopped,
+        )
+
+    async def _generate_cover(self, novel, request_params, prompt_language, task_id, *, outline, book_types, result, stopped):
+        from services.creation_agent.skill_execution import current_execution
+
+        execution = current_execution.get()
+        cover_model_config_id = request_params["cover_model_config_id"]
         if task_id:
             await AiTask.filter(id=task_id, status=TaskStatusEnum.running.value).update(
                 response_data={**result, "cover_status": "pending"}
             )
         try:
             image_config = await ai_model_config_controller.get_active(
-                AiTaskTypeEnum.reference_image.value, team_id=request_params.get("team_id"),
+                AiTaskTypeEnum.reference_image.value, cover_model_config_id, team_id=request_params.get("team_id"),
             )
             cover_ratio = novel.aspect_ratio or "2:3"
             cover_selection = validate_selection(
@@ -255,11 +277,11 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             if execution:
                 from schemas.agent_workflow import CompletePrompt
                 cover = await execution.generate('image', {'purpose': 'project_cover', 'name': novel.name,
-                    'outline': analysis.story_outline, 'aspect_ratio': cover_ratio}, CompletePrompt)
+                    'outline': outline, 'aspect_ratio': cover_ratio}, CompletePrompt)
                 cover_prompt = cover.prompt
             else:
-                cover_prompt = render_cover_prompt(name=novel.name, book_types=analysis.book_types,
-                    story_outline=analysis.story_outline, prompt_language=prompt_language, aspect_ratio=cover_ratio)
+                cover_prompt = render_cover_prompt(name=novel.name, book_types=book_types,
+                    story_outline=outline, prompt_language=prompt_language, aspect_ratio=cover_ratio)
             async def generate_cover():
                 if await stopped():
                     result['cover_status'] = 'cancelled'
@@ -277,7 +299,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 # Preserve actual provider usage even if saving a returned image subsequently fails.
                 result.update(image_usage={"image_count": len(images), "clarity": cover_selection.clarity},
                               image_config_id=image_config.id, image_model=image_config.model)
-                cover = await _save_cover(images[0], novel_id)
+                cover = await _save_cover(images[0], novel.id)
                 novel.cover = cover
                 await novel.save(update_fields=["cover", "updated_at"])
                 result["cover"] = cover

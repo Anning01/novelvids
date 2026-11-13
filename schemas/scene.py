@@ -263,8 +263,12 @@ class SoraScenePromptConfig(BaseModel):
         description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
     )
 
+    duration_split_part: int | None = Field(
+        default=None, ge=2, description="同一个导演镜头因单次生成时长上限拆段时填写续段序号，从 2 开始；首段及独立镜头留空。segments 中的内部切镜不算拆段。",
+    )
+
     blocking_map: BlockingMap | None = Field(
-        default=None, description="本镜的空场景底图与拍摄覆盖层，内部切镜共用同一张图；左上 (0,0)，右下 (100,100)",
+        default=None, description="仅用于因时长拆分的续段。用同一场景底图标出承接上一段结尾的站位与本段走位；左上 (0,0)，右下 (100,100)",
     )
 
     segments: list[ScenePromptSegment] = Field(

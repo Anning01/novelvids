@@ -5,7 +5,7 @@
 <h1 align="center">猫影短剧 · NovelVids</h1>
 
 <p align="center">
-  <strong>开源 AI 漫剧与短剧创作平台，可在线使用，也可自行部署。</strong>
+  <strong>开源 AI 漫剧与短剧工作台，在本地管理作品，可接入自有模型或猫影开放平台。</strong>
 </p>
 
 <p align="center">
@@ -40,13 +40,13 @@
   二维码有效期为 7 天；如已失效，请查看仓库首页的最新版本。
 </p>
 
-## 在线创作
+## 猫影服务
 
 **[进入猫影商业站 →](https://shortdramas.xiazq.com)**
 
-使用器灵账号微信扫码登录，从一句想法开始生成图片或视频，也可以把故事推进成系列短剧。在线版提供模型选择、参考素材、团队协作、用量记录与充值入口；生成费用以页面展示的报价和实际用量为准。
+使用器灵账号微信扫码登录。新版开放平台提供模型目录、接口文档、API Key、用量和充值。旧作品的迁移入口见「本地工作台和开放平台」。
 
-本站使用本仓库的源码和创作规则。自行部署也包含器灵登录、团队协作、用量账单和微信支付接入，所需服务由部署者配置。
+本仓库提供猫影创作工作台与创作规则。模型开放平台已独立为 [Cat API](https://github.com/Anning01/cat-api)。本地工作台的账号、团队和余额由部署者管理，平台账号与模型调用费用由 Cat API 独立管理。
 
 ## 使用教程
 
@@ -88,7 +88,7 @@
 - **每一步可以修改。** 保留提示词与生成版本；可以只调整一个镜头，再决定是否生成。
 - **按钮与对话用同一套能力。** 创作助手负责编排，图片和视频模型负责生成，任务与用量有记录。
 - **规则可以自己改。** 故事、资产、生图和分镜规则集中在一套中文 Skills；按系统语言输出中文或英文。
-- **按需要选择使用方式。** 可以直接在猫影站点创作，也可以自行部署，管理自己的模型服务和数据。
+- **模型可选。** 作品保存在本地，可使用自有模型服务，也可配置猫影开放平台。
 
 ### 新版界面
 
@@ -108,7 +108,7 @@
 
 ## 快速开始
 
-1. 打开 **[猫影商业站](https://shortdramas.xiazq.com)**，阅读协议并通过器灵微信扫码登录。
+1. 按下方步骤启动本地工作台，在「设置 → 模型配置」添加自有模型，或填入猫影开放平台的 Base URL、模型 ID 和 API Key。
 2. 在首页选择图片或视频模型，填写画面描述、添加参考素材并核对预计费用；也可以从「短剧制作」导入故事，进入资产与分镜工作区。
 3. 查看生成结果与历史版本，继续编辑镜头、整理资源，或在作品库管理成片。团队和费用归属以当前选中的团队为准。
 
@@ -145,8 +145,8 @@ docker compose exec backend ffprobe -version
 可用 `docker compose exec backend ffprobe -version` 检查视频工具是否就绪。
 
 - **数据在本地：**`./data` 保存数据库和私有导出，`./media` 保存图片、视频、音频；更新前备份这两个目录。
-- **默认无登录：**适合个人本地使用。公网部署前，请通过环境变量配置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=password`、`SUPER_ADMIN_USERNAME` 和 `SUPER_ADMIN_PASSWORD`，并启用 HTTPS。
-- **器灵扫码登录：**设置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling` 和器灵服务的 HTTPS 地址 `QILING_API_BASE_URL`。开放新账号注册时设置 `QILING_SIGNUP_ENABLED=true`，并填写 Compose 中的 `LEGAL_*` 运营者、协议与第三方信息。
+- **自建工作台初始登录：**全新安装的初始账号为 `admin`，密码为 `123456`，默认团队获 `999999` 元本地余额。公网部署前请设置自己的 `SUPER_ADMIN_PASSWORD` 并启用 HTTPS。仅本机单人使用时可设置 `AUTH_ENABLED=false`。
+- **API 平台器灵扫码登录：**在 `NOVELVIDS_ROLE=platform` 上设置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling` 和器灵服务的 HTTPS 地址 `QILING_API_BASE_URL`。开放新账号注册时设置 `QILING_SIGNUP_ENABLED=true`，并填写 Compose 中的 `LEGAL_*` 运营者、协议与第三方信息。自建工作台开启登录后使用自己部署的账号密码。
 - **微信支付与远程重制：**启用充值时，为后端配置自己的 `WECHAT_PAY_*` 商户参数和回调地址（站点的 `/api/payment/wechat/notify`），通过 Compose 覆盖文件把密钥文件只读挂载到配置的容器路径。重制默认在本机处理；已安装媒体工作进程时，填写 `REMAKE_MEDIA_SSH_HOST` 并为后端配置 SSH 身份和已验证的主机公钥。
 - **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，步骤见下方「本地开发」。
 
@@ -154,9 +154,11 @@ docker compose exec backend ffprobe -version
 
 ### 本地工作台和开放平台
 
-同一套程序支持两种部署角色。默认的 `NOVELVIDS_ROLE=studio` 提供创作工作台。在项目列表的更多操作中选择「导出作品」，在另一套本地工作台选择「导入作品」即可恢复为新项目。云端素材由导出浏览器直接下载，存储域名需允许该工作台来源的跨域读取。
+本仓库部署创作工作台，默认使用 `NOVELVIDS_ROLE=studio`。开放平台请使用独立的 [Cat API 项目](https://github.com/Anning01/cat-api)。在项目列表的更多操作中选择「导出作品」，在另一套本地工作台选择「导入作品」即可恢复为新项目。云端素材由导出浏览器直接下载，存储域名需允许该工作台来源的跨域读取。
 
-`NOVELVIDS_ROLE=platform` 需要 `AUTH_ENABLED=true`。控制台提供用量、充值、模型目录、API Key 和接口文档，旧项目只提供导出。本地文本模型可使用 OpenAI 兼容协议，Base URL 填平台的 `/v1` 地址，模型填目录中的 `nv-…` 标识，密钥由控制台签发。支持 `POST /v1/chat/completions`（含流式）、`GET /v1/models` 和 `GET /v1/requests/{id}`。本地生图配置选择「猫影开放平台」协议，使用目录里对应的图像模型类型和 ID。开发者可调用 `POST /v1/images/generations` 获取生成结果链接；是否支持 URL 参考图以模型目录为准。远程视频使用同一平台协议，提交 `POST /v1/videos`，按 `GET /v1/videos/{id}` 查询，成片由客户端直接下载并保存在本地。同一逻辑请求重试时应复用 `Idempotency-Key`。平台反向代理需将 `/api/` 和 `/v1/` 指向后端，旧项目仍保留媒体下载路径。将现有创作站切换为平台前，请先完成作品迁移验收并处理在途任务。
+在平台控制台创建用途为「本地猫影」的 API Key，然后用工作台超级管理员打开「模型配置 → 连接开放平台」，填入 Key 并同步模型。工作台默认连接 `https://shortdramas.xiazq.com/v1`，也可通过 `STUDIO_PLATFORM_BASE_URL` 指定其他平台地址。成片由工作台直接下载并保存在本地。
+
+旧版本的 `NOVELVIDS_ROLE=platform` 仅为已有部署保留兼容，新部署应分别安装工作台与 Cat API。旧站用户可登录 [历史作品迁移](https://shortdramas.xiazq.com/#/legacy-works) 下载完整作品包，再导入本地工作台。切换服务前应保留原作品和媒体，预留迁移时间并提前通知用户。
 
 ## 创作流程
 

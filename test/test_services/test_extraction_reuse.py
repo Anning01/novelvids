@@ -72,7 +72,7 @@ async def test_second_button_extraction_skips_model_and_does_not_add_usage():
     before = await ModelUsageRecord.all().count()
     amounts = await ModelUsageRecord.all().values_list('cost', flat=True)
     second = await run()
-    assert counts == {'inventory': 1, 'design': 1}
+    assert counts == {'inventory': 0, 'design': 1}
     assert second.response_data['preserved_existing']
     assert len(second.response_data['asset_ids']) == 3
     assert await ModelUsageRecord.all().count() == before
@@ -80,20 +80,20 @@ async def test_second_button_extraction_skips_model_and_does_not_add_usage():
 
 
 @pytest.mark.asyncio
-async def test_missing_prop_reuses_inventory_and_only_completes_the_missing_type():
+async def test_missing_prop_reuses_saved_designs_and_only_completes_the_missing_type():
     novel, _, _, counts, requested, run = await extraction_fixture()
     await run()
     person = await Asset.get(novel=novel, asset_type=1)
     original = person.base_traits
     await Asset.filter(novel=novel, asset_type=3).update(base_traits='')
     await run()
-    assert counts == {'inventory': 1, 'design': 2}
+    assert counts == {'inventory': 0, 'design': 2}
     await person.refresh_from_db()
     assert person.base_traits == original
     assert '道具甲' in requested[-1] and ('只返回' in requested[-1] or 'Return only' in requested[-1])
     assert (await Asset.get(novel=novel, asset_type=3)).base_traits
     await run()
-    assert counts == {'inventory': 1, 'design': 2}
+    assert counts == {'inventory': 0, 'design': 2}
 
 
 @pytest.mark.asyncio
@@ -102,14 +102,14 @@ async def test_missing_variant_is_repaired_without_regenerating_other_assets():
     novel, _, _, counts, _, run = await extraction_fixture(with_variant=True)
     await run()
     await run()
-    assert counts == {'inventory': 1, 'design': 1}
+    assert counts == {'inventory': 0, 'design': 1}
     variant = await AssetVariant.get(asset__novel_id=novel.id)
     await AssetVariant.filter(id=variant.id).update(base_traits='')
     await run()
-    assert counts == {'inventory': 1, 'design': 2}
+    assert counts == {'inventory': 0, 'design': 2}
     assert (await AssetVariant.get(asset__novel_id=novel.id)).base_traits
     await run()
-    assert counts == {'inventory': 1, 'design': 2}
+    assert counts == {'inventory': 0, 'design': 2}
 
 
 @pytest.mark.asyncio
@@ -124,7 +124,7 @@ async def test_deleted_prop_is_not_silently_restored_or_charged_again():
     execution = SkillExecution({**task.request_params, 'task_id': str(task.id)}, await AgentMessage.get(task=task, role='assistant'), AsyncMock())
     with pytest.raises(ValueError, match='恢复'):
         await extraction_reuse.find(execution, task.request_params['chapter_id'])
-    assert counts == {'inventory': 1, 'design': 1}
+    assert counts == {'inventory': 0, 'design': 1}
     assert await Asset.filter(novel=novel, asset_type=3).count() == 0
 
 
@@ -135,18 +135,18 @@ async def test_cover_only_changes_do_not_invalidate_completed_extraction():
     novel.cover = '/media/new-cover.png'
     await novel.save()
     await run()
-    assert counts == {'inventory': 1, 'design': 1}
+    assert counts == {'inventory': 0, 'design': 1}
 
 
 @pytest.mark.asyncio
-async def test_invalid_saved_prompt_is_corrected_once_then_reused():
+async def test_saved_freeform_prompt_is_reused_without_model_call():
     novel, _, _, counts, _, run = await extraction_fixture()
     await run()
-    await Asset.filter(novel=novel, asset_type=3).update(base_traits='旧的不完整格式')
+    design = '自由描述的深色木盒，保留旧铜扣。'
+    await Asset.filter(novel=novel, asset_type=3).update(base_traits=design)
     await run()
-    await run()
-    assert counts == {'inventory': 1, 'design': 2}
-    assert (await Asset.get(novel=novel, asset_type=3)).base_traits != '旧的不完整格式'
+    assert counts == {'inventory': 0, 'design': 1}
+    assert (await Asset.get(novel=novel, asset_type=3)).base_traits == design
 
 
 @pytest.mark.asyncio
@@ -164,17 +164,25 @@ async def test_variant_repair_preserves_a_concurrent_user_edit():
     assert failed.status == 4 and '人工编辑' in failed.error_message
     await variant.refresh_from_db()
     assert variant.base_traits == changed['prompt']
-    assert counts == {'inventory': 1, 'design': 2}
+    assert counts == {'inventory': 0, 'design': 2}
 
 
 @pytest.mark.asyncio
 async def test_legacy_verified_receipts_are_reused_without_a_schema_migration():
     from models.agent_operation import AgentOperation
-    _, _, _, counts, _, run = await extraction_fixture()
+    from dataclasses import asdict
+    from services.extraction.cast import cast_segment
+    from services.extraction.context import ExtractionContextLoader
+
+    novel, chapter, snapshot, counts, _, run = await extraction_fixture()
     first = await run()
-    await AgentOperation.filter(task=first, key='extraction:inputs').delete()
+    await AgentOperation.filter(task=first, key=f'extraction:inputs:{chapter.id}:{snapshot.revision}').delete()
+    context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
+    segment = cast_segment(asdict(context.chapter), 'zh', snapshot.revision)
+    await AgentOperation.create(task=first, key=f'model:structured:ChapterCast:{segment}', state='completed',
+        result={'characters': [{'name': '临时名单中的额外人物', 'presence': 'present', 'quote': chapter.content}]})
     await run()
-    assert counts == {'inventory': 1, 'design': 1}
+    assert counts == {'inventory': 0, 'design': 1}
 
 
 @pytest.mark.asyncio
@@ -287,7 +295,7 @@ def test_misplaced_duplicate_scene_cannot_poison_an_otherwise_complete_candidate
         {'name': '维修室', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}],
         'scenes': [{'name': '维修室', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}],
         'items': [{'name': '面板', 'base_traits': fixed_asset_prompt(kind='item', snapshot=snapshot)}]})
-    merged = validator.merge(draft, snapshot, 'zh', '16:9')
+    merged = validator.merge(draft)
     validate_required_design_assets(merged, scope)
     assert not validator.issues and [person.name for person in merged.persons] == ['角色甲']
 
@@ -299,5 +307,5 @@ def test_scope_filter_never_drops_a_required_person_sharing_a_scene_name():
     validator = AssetCandidateValidator(AssetExtractionResult, ((1, '同名'), (2, '同名')))
     draft = validator.draft_type.model_validate({'persons': [{'name': '同名', 'base_traits': fixed_asset_prompt(snapshot=snapshot)}],
         'scenes': [{'name': '同名', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}], 'items': []})
-    merged = validator.merge(draft, snapshot, 'zh', '16:9')
+    merged = validator.merge(draft)
     assert len(merged.persons) == len(merged.scenes) == 1 and not validator.issues

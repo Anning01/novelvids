@@ -8,12 +8,15 @@ import shutil
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+from tortoise.expressions import Q
 
 from auth.deps import AuthContext, ensure_novel_access, require_roles
+from models.config import AiModelConfig
 from models.novel import Novel
 from services.document import analyze_document, analyze_oss_document
 from services.oss import make_upload_key, oss
 from utils.response_format import ResponseSchema
+from utils.image_protocol import ImageApiProtocol
 from config import settings
 
 router = APIRouter()
@@ -36,6 +39,7 @@ async def get_upload_policy(
     filename: str = Query(..., max_length=255),
     content_type: str = Query("application/octet-stream", max_length=120),
     novel_id: int | None = Query(default=None, ge=1),
+    model_config_id: int | None = Query(default=None, ge=1),
     ctx: AuthContext = _EDITOR,
 ):
     if not oss.enabled:
@@ -49,6 +53,13 @@ async def get_upload_policy(
 
             raise HTTPException(status_code=404, detail=localized_message('项目不存在'))
         team_id = novel.team_id
+    if model_config_id is not None:
+        platform_storage = settings.STUDIO_PLATFORM_BASE_URL and settings.STUDIO_PLATFORM_API_KEY
+        if platform_storage or await AiModelConfig.filter(
+            Q(team_id__isnull=True) | Q(team_id=team_id),
+            id=model_config_id, is_active=True, api_protocol=ImageApiProtocol.novelvids.value,
+        ).exists():
+            return ResponseSchema(data={"direct": False})
     key = make_upload_key(team_id, filename)
     policy = oss.sign_form_upload(key, content_type, _DIRECT_UPLOAD_MAX_BYTES)
     return ResponseSchema(

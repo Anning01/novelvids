@@ -75,6 +75,8 @@ video_task_reconciler = VideoTaskReconciler(
 async def _initialize_database_schema() -> None:
     """Initialize storage while keeping legacy PostgreSQL installs bootable."""
     await Tortoise.init(config=tortoise_config)
+    from services.schema_compat import ensure_billing_integration_schema
+    await ensure_billing_integration_schema()
     # PostgreSQL emits column comments for existing tables during safe schema
     # generation. Add fields referenced by the current models first, otherwise
     # startup fails before the compatibility migrations can run.
@@ -115,6 +117,8 @@ async def lifespan(_: FastAPI):
             await ensure_media_library_seed_data()
     if settings.MODEL_CONFIG_SEED_ENABLED:
         await ensure_model_config_seed_data()
+    from services.video.ark_migration import migrate_legacy_video_channels
+    await migrate_legacy_video_channels()
     if settings.AUTH_ENABLED:
         from services.schema_compat import ensure_team_schema
 
@@ -149,9 +153,14 @@ async def lifespan(_: FastAPI):
     await production_recovery.start()
     from services.video_editor.exports import editor_export_worker
     await editor_export_worker.start()
+    import asyncio
+    from services.billing.platform import settle_periodically as settle_studio_calls
+    billing_reconciler = asyncio.create_task(settle_studio_calls())
     try:
         yield
     finally:
+        billing_reconciler.cancel()
+        await asyncio.gather(billing_reconciler, return_exceptions=True)
         await editor_export_worker.stop()
         await production_recovery.stop()
         await video_task_reconciler.stop()
@@ -201,7 +210,9 @@ if settings.DEPLOYMENT_ROLE == "platform":
         raise RuntimeError("Platform deployment requires AUTH_ENABLED=true")
     from api.platform import console_router, developer_router
     app.include_router(console_router, prefix="/api")
-    developer_api = FastAPI(title="猫影模型 API", version="1", docs_url=None, redoc_url=None)
+    from services.platform.http_contract import DEVELOPER_EXCEPTION_HANDLERS
+    developer_api = FastAPI(title="猫影模型 API", version="1", docs_url=None, redoc_url=None,
+                            exception_handlers=DEVELOPER_EXCEPTION_HANDLERS)
     developer_api.include_router(developer_router)
     app.mount("/v1", developer_api)
 elif settings.DEPLOYMENT_ROLE == "studio":

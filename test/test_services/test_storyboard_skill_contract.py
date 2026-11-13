@@ -23,6 +23,29 @@ def test_normalization_keeps_spoken_address_and_mentioned_names_verbatim():
     assert normalize_storyboard_reference_text(text, characters()) == '0s-2s: @{苏玄}（哽咽）：「师父，赵无垢，你才六十四啊！」'
 
 
+@pytest.mark.parametrize('literal', ['“赵无垢之墓”', '「赵无垢之墓」', '"赵无垢之墓"'])
+def test_inscription_is_literal_even_when_the_name_matches_a_registered_person(literal):
+    text = f'木牌上写着{literal}。'
+    assert normalize_storyboard_reference_text(text, characters()) == text
+
+
+def test_an_absent_character_name_in_screen_text_is_not_automatically_bound():
+    from schemas.scene import SceneEntity
+    person = characters()[1]
+    marker = SceneEntity(name='木牌墓碑', aliases=[], description='木牌', asset_type='物品')
+    shot = _shot()
+    shot.visible_asset_names = ['木牌墓碑']
+    shot.visual_prose = '木牌墓碑旁浮现：赵无垢，赵无垢之墓。'
+    shot.description = '晨光下的木牌墓碑，屏显交代赵无垢之墓。'
+    shot.actions = ['0s-4s: 镜头推进木牌墓碑，显出赵无垢之墓。']
+    entities = [person, marker]
+    updates = normalized_storyboard_reference_fields(shot, entities)
+    assert updates['visual_prose'] == '@{木牌墓碑}旁浮现：赵无垢，赵无垢之墓。'
+    result = format_storyboard_prompt(shot.model_copy(update=updates), entities=entities)
+    assert '@{木牌墓碑}' in result
+    assert '@{赵无垢}' not in result
+
+
 def test_renderer_preserves_literal_speech_and_does_not_cast_a_mentioned_person():
     shot = _shot()
     shot.description = '苏玄哭着喊师父'
@@ -325,27 +348,42 @@ def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(langua
     assert shot.camera_movement in prompt and all(line in prompt for line in shot.dialogue)
 
 
-def test_new_multicut_requires_one_map_shared_by_all_segments_but_old_runs_still_render():
+def test_internal_cuts_do_not_need_a_map_but_duration_split_continuations_do():
     from schemas.agent_workflow import StructuredSkillStoryboard
+    from schemas.scene import BlockingMap
     from services.storyboard.validation import prepare_skill_storyboard
     from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
 
     value = segmented_shot().model_dump(exclude={'prompt', 'blocking_map'})
     board = StructuredSkillStoryboard(shots=[value])
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    independent = prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic').shots[0]
+    assert independent.prompt and independent.blocking_map is None
+    with_map = StructuredSkillStoryboard(shots=[segmented_shot().model_dump(exclude={'prompt'})])
+    assert prepare_skill_storyboard(with_map, snapshot, 'zh', [heroine()], 'cinematic').shots[0].blocking_map is None
+
+    continuation = StructuredSkillStoryboard(shots=[{**value, 'duration_split_part': 2, 'segments': []}])
     with pytest.raises(ValueError, match='空间定位图'):
-        prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic')
-    snapshot.contents.pop('blocking_guide')
-    assert prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic').shots[0].prompt
+        prepare_skill_storyboard(continuation, snapshot, 'zh', [heroine()], 'cinematic')
+
+    plan = segmented_shot().blocking_map.model_dump()
+    plan['cameras'] = plan['cameras'][:1]
+    continuation.shots[0].blocking_map = BlockingMap.model_validate(plan)
+    prepared = prepare_skill_storyboard(continuation, snapshot, 'zh', [heroine()], 'cinematic').shots[0]
+    assert prepared.blocking_map and 'C1' in prepared.prompt
+    from services.storyboard.blocking_reference import blocking_source
+    assert blocking_source(12, {}, prepared.model_dump()) == '/api/scene/12/blocking-map.svg'
+
 
 
 @pytest.mark.parametrize("problem", ["coverage", "cameras"])
-def test_incomplete_blocking_map_rejected_for_new_multicut(problem):
+def test_incomplete_blocking_map_rejected_for_duration_split_continuations(problem):
     from schemas.agent_workflow import StructuredSkillStoryboard
     from services.storyboard.validation import prepare_skill_storyboard
     from test.test_services.test_creation_agent_prompts import segmented_shot, heroine
 
     data = segmented_shot().model_dump(exclude={'prompt'})
+    data['duration_split_part'] = 2
     plan = data['blocking_map']
     if problem == 'coverage':
         plan['assets'][0]['name'] = '雨棚'

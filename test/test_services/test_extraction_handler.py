@@ -861,3 +861,35 @@ async def test_handler_surfaces_token_usage_from_extractor():
 
     assert summary["token_usage"] == {"prompt_tokens": 120, "completion_tokens": 40}
     assert summary["persons"] == case.summary["persons"]
+
+
+@pytest.mark.parametrize("status_code,detail", [
+    (402, "团队余额不足，请联系团队管理员充值"),
+    (402, "你已达到个人消费限额，请联系团队管理员调整"),
+    (403, "运行用户已不可用"),
+    (409, "创作助手尚未启用"),
+])
+async def test_handler_preserves_business_failure_for_task_and_agent(status_code, detail):
+    from fastapi import HTTPException
+    from services.ai_task_executor import AiTaskExecutor
+
+    case = _orchestration_case()
+    failure = HTTPException(status_code=status_code, detail=detail)
+    case.extractor.extract.side_effect = failure
+    with pytest.raises(HTTPException) as captured:
+        await case.handler.execute(case.request_params)
+    assert captured.value is failure
+    case.upsert_service.save_result.assert_not_awaited()
+
+    await Novel.create(id=case.request_params["novel_id"], name="错误提示测试")
+    await Chapter.create(id=case.request_params["chapter_id"], novel_id=case.request_params["novel_id"],
+        number=1, name="错误提示测试", content="测试正文")
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.extraction, case.handler)
+    task = await executor.submit(AiTaskTypeEnum.extraction, case.request_params)
+    await executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 4
+    assert task.error_message == detail
+    assert "asset_extraction_gateway_error" not in task.error_message
+    case.upsert_service.save_result.assert_not_awaited()

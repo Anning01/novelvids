@@ -100,4 +100,10 @@ describe('resolveAuthGuard', () => {
     )
     expect(superAdmin).toEqual({})
   })
+
+  it.each(['admin', 'creator', 'viewer'])('checks super-only model settings by account identity while selected team role is %s', role => {
+    const settings = route({path:'/settings', meta:{roles:['admin'], superOnly:true}})
+    expect(resolveAuthGuard(settings, auth({enabled:true,isLoggedIn:true,role,isSuperAdmin:false,deploymentRole:'platform'}))).toEqual({redirect:'/'})
+    expect(resolveAuthGuard(settings, auth({enabled:true,isLoggedIn:true,role,isSuperAdmin:true,deploymentRole:'platform'}))).toEqual({})
+  })
 })

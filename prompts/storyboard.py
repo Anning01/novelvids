@@ -138,8 +138,11 @@ def _safe_automatic_alias(value: object) -> str:
 
 def _asset_reference_candidates(
     entities: Sequence[StoryboardEntity],
+    visible_names: Sequence[str] | None = None,
 ) -> list[tuple[str, str]]:
     """返回可自动补标的全部资产名称，并排除有歧义的别名。"""
+    if visible_names is not None:
+        entities = [entity for entity in entities if entity.name in visible_names]
     canonical_names = {
         name for entity in entities if (name := _safe_canonical_asset_name(entity.name))
     }
@@ -192,6 +195,8 @@ def _normalize_asset_reference_text(
         re.sub(rf"{timeline}[^\n]*?(?={timeline}|\n|\Z)", protect_speech, text)
         if preserve_speech else text
     )
+    # Quoted inscriptions, captions, and screen text are literal content.
+    normalized = re.sub(r'“[^”\n]*”|「[^」\n]*」|『[^』\n]*』|"[^"\n]*"', lambda match: protect(match[0]), normalized)
     normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, normalized)
 
     # 兼容旧格式 @资产名，并统一升级为带花括号的正式名。模型常会把后续
@@ -229,9 +234,8 @@ def normalized_storyboard_reference_fields(
     entities: Sequence[StoryboardEntity],
 ) -> dict[str, object]:
     """为模型漏写的普通资产名补齐正式引用语法，返回非破坏性字段更新。"""
-    candidates = _asset_reference_candidates(entities)
-    if not candidates:
-        return {}
+    candidates = _asset_reference_candidates(entities, getattr(shot, "visible_asset_names", None))
+    voice_candidates = _asset_reference_candidates(entities)
 
     updates: dict[str, object] = {}
     for field_name in _REFERENCE_TEXT_FIELDS:
@@ -243,7 +247,7 @@ def normalized_storyboard_reference_fields(
         original = list(getattr(shot, field_name))
         normalized = [
             (
-                _normalize_asset_reference_text(split_storyboard_voice_track(str(value))[0], candidates)
+                _normalize_asset_reference_text(split_storyboard_voice_track(str(value))[0], voice_candidates)
                 + split_storyboard_voice_track(str(value))[1]
                 if field_name in {"dialogue", "narration"}
                 else _normalize_asset_reference_text(str(value), candidates)
@@ -542,7 +546,7 @@ def format_storyboard_prompt(
     layout = []
     if blocking and blocking.layout:
         layout.extend(f"C{i} · {camera.framing} · {camera.beat}".rstrip(" ·") for i, camera in enumerate(blocking.cameras, 1))
-    elif blocking and len(segments) > 1:
+    elif blocking and (getattr(shot, "duration_split_part", None) is not None or len(segments) > 1):
         layout.append(f"{prompt_label('空间定位图（左上 0,0；右下 100,100）', language)} · {blocking.orientation}")
         for asset in blocking.assets:
             end = f" → ({asset.end.x},{asset.end.y})" if asset.end else ""
@@ -582,12 +586,13 @@ def format_storyboard_prompt(
             f"{prompt_label('总时长：', language)}{duration_token}",
         )
     )
-    candidates = _asset_reference_candidates(entities)
+    candidates = _asset_reference_candidates(entities, getattr(shot, "visible_asset_names", None))
+    voice_candidates = _asset_reference_candidates(entities)
     protected_voices = []
     for index, voice in enumerate([*shot.narration, *shot.dialogue]):
         prefix, speech = split_storyboard_voice_track(voice)
         placeholder = f"\ue100{index}\ue101"
-        protected_voices.append((placeholder, _normalize_asset_reference_text(prefix, candidates) + speech))
+        protected_voices.append((placeholder, _normalize_asset_reference_text(prefix, voice_candidates) + speech))
         prompt = prompt.replace(voice, placeholder)
     prompt = _normalize_asset_reference_text(prompt, candidates)
     for placeholder, voice in protected_voices:

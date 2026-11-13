@@ -32,6 +32,7 @@ class AuthContext:
     membership: Optional[TeamMember] = None
     team_id: Optional[int] = None
     is_super_admin: bool = False
+    platform_key_id: int | None = None
 
     @property
     def is_anonymous(self) -> bool:

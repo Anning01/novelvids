@@ -11,6 +11,12 @@ export function money(value: number, currency = 'CNY'): string {
   return `${symbol}${value.toFixed(abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6)}`
 }
 
+export function recordCost(item: BillingRecord): string {
+  if (item.settlement_status === 'pending') return tr('待结算')
+  if (item.settlement_status === 'review') return tr('待核对')
+  return money(item.cost, item.currency)
+}
+
 export function formatTokens(value: number): string {
   return formatTokenCount(value, 1)
 }
@@ -43,7 +49,7 @@ export function usageLabel(item: { billing_type: string; usage: Record<string, u
 }
 
 export function costSourceLabel(source?: string): string {
-  return ({ get team_key() { return tr('团队 Key') }, get balance() { return tr('团队余额') }, get mixed() { return tr('混合来源') } })[source || ''] || tr('平台')
+  return ({ get platform_key() { return tr('平台 Key') }, get team_key() { return tr('团队 Key') }, get balance() { return tr('团队余额') }, get mixed() { return tr('混合来源') } })[source || ''] || tr('平台')
 }
 
 export function recordStatus(item: BillingRecord): string {

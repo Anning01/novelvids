@@ -28,6 +28,7 @@ class Chapter(AbstractBaseModel):
         max_length=255, description="章节名称"
     )
     content = fields.TextField(description="章节内容")
+    episode_pacing = fields.JSONField(null=True)
     screenplay = fields.TextField(null=True, description="本集导演剧本")
 
     @property

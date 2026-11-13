@@ -5,6 +5,38 @@ from tortoise import Tortoise
 from config import settings
 
 
+async def ensure_billing_integration_schema() -> None:
+    """Add platform accounting fields while preserving historical records."""
+    connection = Tortoise.get_connection("default")
+    definitions = {
+        "model_usage_records": {
+            "platform_cost": "DECIMAL(18,6)",
+            "local_charge": "DECIMAL(18,6)",
+            "settlement_status": "VARCHAR(16) NOT NULL DEFAULT 'legacy'",
+        },
+        "studio_calls": {"local_pricing": "JSON" if connection.capabilities.dialect == "sqlite" else "JSONB"},
+        "platformcallreceipt": {"api_key_id": "INT"},
+    }
+    for table, columns in definitions.items():
+        if connection.capabilities.dialect == "sqlite":
+            existing = await connection.execute_query_dict(f"PRAGMA table_info({table})")
+            if not existing:
+                continue
+            names = {row["name"] for row in existing}
+            for name, definition in columns.items():
+                if name not in names:
+                    await connection.execute_script(f"ALTER TABLE {table} ADD COLUMN {name} {definition};")
+        else:
+            for name, definition in columns.items():
+                await connection.execute_script(f"ALTER TABLE IF EXISTS {table} ADD COLUMN IF NOT EXISTS {name} {definition};")
+
+    from models.config import StudioPlatformConnection
+    from models.studio_call import StudioCall
+    generator = connection.schema_generator(connection)
+    for model in (StudioPlatformConnection, StudioCall):
+        await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
+
+
 async def ensure_resource_library_schema() -> None:
     from models.resource_library import ResourcePlacement
     connection = Tortoise.get_connection('default')
@@ -561,14 +593,22 @@ async def ensure_chapter_screenplay_schema() -> None:
     async with in_transaction() as db:
         if db.capabilities.dialect == "sqlite":
             columns = await db.execute_query_dict("PRAGMA table_info(chapters)")
-            if not columns or any(row["name"] == "screenplay" for row in columns):
+            if not columns:
+                return
+            if not any(row["name"] == "episode_pacing" for row in columns):
+                await db.execute_query("ALTER TABLE chapters ADD COLUMN episode_pacing JSON")
+            if any(row["name"] == "screenplay" for row in columns):
                 return
             tables = {row["name"] for row in await db.execute_query_dict(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
         else:
             columns = await db.execute_query_dict(
                 "SELECT column_name AS name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters'")
-            if not columns or any(row["name"] == "screenplay" for row in columns):
+            if not columns:
+                return
+            if not any(row["name"] == "episode_pacing" for row in columns):
+                await db.execute_query("ALTER TABLE chapters ADD COLUMN IF NOT EXISTS episode_pacing JSONB")
+            if any(row["name"] == "screenplay" for row in columns):
                 return
             await db.execute_query("LOCK TABLE chapters IN ACCESS EXCLUSIVE MODE")
             if await db.execute_query_dict("SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='chapters' AND column_name='screenplay'"):

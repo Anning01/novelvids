@@ -108,9 +108,8 @@ async def recognize_and_apply_subtitles(
         user_id=ctx.user.id if ctx.user else None,
     )
     if record and record.cost_source != "team_key" and ctx.team_id:
-        from services.balance import accumulate_member_cost, consume
-        await consume(ctx.team_id, record.cost, usage_record_id=record.id)
-        await accumulate_member_cost(ctx.team_id, ctx.user.id if ctx.user else None, record.cost)
+        from services.billing.recorder import _consume_team_balance
+        await _consume_team_balance(record, ctx.team_id, ctx.user.id if ctx.user else None)
 
     return {
         "document": document.model_dump(mode="json"),

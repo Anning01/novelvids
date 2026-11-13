@@ -1,5 +1,5 @@
 from api._production_request import production_request
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 
 from auth.deps import AuthContext, ensure_project_creation_team, get_auth_context, require_roles, require_team_access
 from controllers.novel import novel_controller
@@ -171,13 +171,31 @@ async def split_novel(
 async def analyze_novel(
     novel_id: int,
     bg: BackgroundTasks,
+    cover_model_config_id: int | None = Query(default=None, gt=0),
     ctx: AuthContext = Depends(require_team_access),
     _: AuthContext = _EDITOR,
 ):
     task = await novel_controller.analyze(
         novel_id,
         team_id=ctx.team_id,
+        cover_model_config_id=cover_model_config_id,
         user_id=ctx.user.id if ctx.user else None,
+    )
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post("/{novel_id}/cover", summary="生成项目封面", response_model=ResponseSchema[AiTaskOut])
+async def generate_novel_cover(
+    novel_id: int,
+    bg: BackgroundTasks,
+    model_config_id: int = Query(gt=0),
+    ctx: AuthContext = Depends(require_team_access),
+    _: AuthContext = _EDITOR,
+):
+    task = await novel_controller.analyze(
+        novel_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None,
+        cover_model_config_id=model_config_id, cover_only=True,
     )
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)

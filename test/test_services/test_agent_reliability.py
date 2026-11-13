@@ -143,20 +143,19 @@ async def test_asset_extraction_source_does_not_authorize_storyboard_or_prose():
 def test_asset_checkpoint_keeps_nine_valid_designs_and_repairs_only_failed_one():
     from services.extraction.validation import AssetCandidateValidator
     from services.extraction.extractor import AssetExtractionResult
-    from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
-    snapshot = synthetic_snapshot()
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
     valid = fixed_asset_prompt(kind='item')
     first = AssetExtractionResult(persons=[], scenes=[], items=[{'name': str(i), 'description': '道具',
-        'base_traits': valid if i < 9 else 'invalid'} for i in range(10)])
+        'base_traits': valid if i < 9 else ''} for i in range(10)])
     validator = AssetCandidateValidator()
-    accepted = validator.merge(first, snapshot, 'zh', '16:9')
+    accepted = validator.merge(first)
     assert len(accepted.items) == 9 and len(validator.issues) == 1
     restored = AssetCandidateValidator()
     restored.restore({'accepted': accepted.model_dump(mode='json'), 'issues': validator.issues,
         'pending': [[list(key), issue] for key, issue in validator.pending.items()]}, AssetExtractionResult)
     repaired = restored.merge(AssetExtractionResult(persons=[], scenes=[], items=[
         {'name': '0', 'description': '不可覆盖', 'base_traits': 'invalid'},
-        {'name': '9', 'description': '道具', 'base_traits': valid}]), snapshot, 'zh', '16:9')
+        {'name': '9', 'description': '道具', 'base_traits': valid}]))
     assert len(repaired.items) == 10 and not restored.issues
     assert repaired.items[0].description == '道具'
 
@@ -164,16 +163,16 @@ def test_asset_checkpoint_keeps_nine_valid_designs_and_repairs_only_failed_one()
 def test_missing_field_in_one_asset_does_not_discard_nine_valid_assets():
     from services.extraction.validation import AssetCandidateValidator
     from services.extraction.extractor import AssetExtractionResult
-    from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
     validator = AssetCandidateValidator(AssetExtractionResult)
     valid = fixed_asset_prompt(kind='item')
     draft = validator.draft_type.model_validate({'persons': [], 'scenes': [], 'items': [
         *[{'name': str(index), 'base_traits': valid} for index in range(9)], {'name': '9'}]})
-    accepted = validator.merge(draft, synthetic_snapshot(), 'zh', '16:9')
+    accepted = validator.merge(draft)
     assert len(accepted.items) == 9 and len(validator.issues) == 1
     assert 'base_traits' in validator.issues[0]
     repaired = validator.merge(validator.draft_type.model_validate({'persons': [], 'scenes': [], 'items': [
-        {'name': '9', 'base_traits': valid}, {'name': '0', 'base_traits': '不得覆盖'}]}), synthetic_snapshot(), 'zh', '16:9')
+        {'name': '9', 'base_traits': valid}, {'name': '0', 'base_traits': '不得覆盖'}]}))
     assert len(repaired.items) == 10 and not validator.issues
     assert repaired.items[0].base_traits == valid
 

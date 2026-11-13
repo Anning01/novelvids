@@ -112,6 +112,10 @@ async def initialize_db():
 @pytest.fixture(scope="function", autouse=True)
 async def clear_db():
     """Clear data between tests but keep schema."""
+    from models.studio_call import StudioCall
+    from models.config import StudioPlatformConnection
+    await StudioCall.all().delete()
+    await StudioPlatformConnection.all().delete()
     # Manual cleanup for core models we use in tests
     from models.novel import Novel
     from models.chapter import Chapter

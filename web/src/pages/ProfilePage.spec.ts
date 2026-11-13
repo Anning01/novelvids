@@ -6,7 +6,7 @@ import ProfilePage from './ProfilePage.vue'
 import { api } from '@/api'
 import { useAuthStore } from '@/features/auth/authStore'
 
-function mountPage(pinia: Pinia) {
+function mountPage(pinia: Pinia, path?: string) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -19,7 +19,9 @@ function mountPage(pinia: Pinia) {
       { path: '/billing', component: { template: '<div>Billing</div>' } },
     ],
   })
-  return mount(ProfilePage, { global: { plugins: [pinia, router] } })
+  const wrapper = mount(ProfilePage, { global: { plugins: [pinia, router] } })
+  if (path) void router.push(path)
+  return wrapper
 }
 
 describe('ProfilePage 用户中心', () => {
@@ -27,6 +29,34 @@ describe('ProfilePage 用户中心', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.restoreAllMocks()
+  })
+
+  it('opens payment for the team named by the platform recharge link', async () => {
+    const pinia = createPinia()
+    const user = { id: 1, username: 'admin', nickname: '', avatar_url: '', is_super_admin: true }
+    const memberships = [
+      { team_id: 1, team_name: '当前选中团队', role: 'admin' as const, team_balance: 5 },
+      { team_id: 2, team_name: 'Key 所属团队', role: 'admin' as const, team_balance: 20 },
+    ]
+    localStorage.setItem('novelvids_active_team', '1')
+    const auth = useAuthStore(pinia)
+    auth.$patch({ deploymentRole: 'platform', enabled: true, token: 'test', user, memberships, activeTeamId: 1 })
+    vi.spyOn(api, 'me').mockResolvedValue({ code: 0, message: '', data: { user, memberships, is_super_admin: true } })
+    const order = vi.spyOn(api, 'createRechargeOrder').mockRejectedValue(new Error('测试订单'))
+    const direct = vi.spyOn(api, 'teamTopUp')
+    const wrapper = mountPage(pinia, '/profile?recharge=1&team=2')
+    await flushPromises()
+    expect(wrapper.get('.profile-topup-team-name').text()).toBe('Key 所属团队')
+    expect(auth.activeTeamId).toBe(1)
+    await wrapper.get('.profile-topup-field input[type="number"]').setValue(50)
+    await wrapper.get('.profile-topup-form').trigger('submit')
+    await flushPromises()
+    expect(order).toHaveBeenCalledWith(expect.objectContaining({ team_id: 2, amount: 50 }))
+    expect(direct).not.toHaveBeenCalled()
+    await wrapper.vm.$router.push('/profile?recharge=1&team=999')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('当前账号无法为这个 API 平台账户充值')
+    expect(wrapper.find('.profile-topup-form').exists()).toBe(false)
   })
 
   it.each(['light', 'dark'])('保存昵称并同步用户资料，失败后可以重试（%s）', async theme => {

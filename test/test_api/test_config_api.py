@@ -6,10 +6,9 @@ from utils.enums import AiTaskTypeEnum
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("second_protocol", ["volcengine_ark", "unified_video"])
-async def test_api_video_channels_coexist_and_keep_independent_prices(client: AsyncClient, second_protocol):
+async def test_api_video_channels_coexist_and_keep_independent_prices(client: AsyncClient):
     configs = []
-    for name, protocol, discount in [("官方渠道", "volcengine_ark", 1), ("优惠渠道", second_protocol, 0.5)]:
+    for name, protocol, discount in [("官方渠道", "volcengine_ark", 1), ("优惠渠道", "volcengine_ark", 0.5)]:
         response = await client.post("/api/config", json={
             "task_type": 4, "task_types": [4], "name": name,
             "base_url": "https://video.example.test/v1", "api_key": "test-key",
@@ -27,7 +26,7 @@ async def test_api_video_channels_coexist_and_keep_independent_prices(client: As
     assert models[configs[0]["id"]]["pricing"]["discount"] == 1
     assert models[configs[1]["id"]]["pricing"]["discount"] == 0.5
     assert models[configs[0]["id"]]["capabilities"]["supports_auto_duration"] is True
-    assert models[configs[1]["id"]]["capabilities"]["supports_auto_duration"] is (second_protocol == "volcengine_ark")
+    assert models[configs[1]["id"]]["capabilities"]["supports_auto_duration"] is True
     for config in configs:
         response = await client.get(f"/api/config/{config['id']}")
         assert response.json()["data"]["is_active"] is True

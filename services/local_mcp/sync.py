@@ -12,7 +12,7 @@ from schemas.novel import NovelCreate
 from controllers.asset import asset_controller
 from models.scene import Scene
 from models.work_sync import WorkSyncObject, WorkSyncRequest
-from prompts.skill_pack import SkillSnapshot, snapshot_skills, read_skill
+from prompts.skill_pack import read_skill
 from services.project_config import validate_project_config
 from fastapi import HTTPException
 from auth.deps import AuthContext, ensure_novel_access
@@ -207,11 +207,9 @@ class WorkSync:
                     raise SyncConflict('episode_exists', message='已导入的集不能整集覆盖；请使用单镜同步')
                 if await Chapter.filter(novel_id=project.id, number=manifest.number).exists():
                     raise SyncConflict('episode_number_exists')
-                snapshot = SkillSnapshot.model_validate(snapshot_skills())
-                # Enforce the same current visual output contract before any assets are saved.
                 for asset in assets:
                     for obj in [asset, *asset.variants]:
-                        validate_asset_design(obj.prompt, asset.kind, snapshot, manifest.language, manifest.aspect_ratio)
+                        validate_asset_design(obj.prompt)
                 urls = files.archive(self.archive_root)
                 objects = CreationObjects(project.id)
                 for asset in assets:

@@ -35,6 +35,7 @@ async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = N
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.screenplay, status__in=ACTIVE_TASK_STATUSES).using_db(db):
             if task.request_params.get("chapter_id") == chapter_id:
                 return task
+        params["episode_pacing"] = chapter.episode_pacing or {"preset": "smart"}
         params["source_version"] = fingerprint([chapter.name, chapter.content])
         return await ai_task_executor.submit(AiTaskTypeEnum.screenplay, params, db_connection=db)
 
@@ -45,6 +46,8 @@ class ScreenplayHandler(BaseTaskHandler):
         chapter = await Chapter.get(id=params["chapter_id"], novel_id=params["novel_id"])
 
         def verify_source():
+            if "episode_pacing" in params and (chapter.episode_pacing or {"preset": "smart"}) != params["episode_pacing"]:
+                raise ValueError(localized_message("本集节奏设置已修改，请重新生成剧本"))
             current = fingerprint(chapter.screenplay) if chapter.screenplay else None
             if current != params.get("screenplay_version") or fingerprint([chapter.name, chapter.content]) != params["source_version"]:
                 raise ValueError(localized_message("本集原文或剧本已修改，请刷新后查看"))
@@ -55,9 +58,15 @@ class ScreenplayHandler(BaseTaskHandler):
             return receipt.result
         verify_source()
         draft = await execution.generate("screenplay", {"episode_number": chapter.number,
-            "episode_name": chapter.name, "source_text": chapter.content}, EpisodeScript)
+            "episode_name": chapter.name, "source_text": chapter.content,
+            "episode_pacing": params.get("episode_pacing") or {"preset": "smart"}}, EpisodeScript)
         if not draft.screenplay.strip():
             raise ValueError(localized_message("模型未返回导演剧本"))
+        if "episode_pacing" in params:
+            from services.storyboard.validation import episode_duration_limit
+
+            if episode_duration_limit(draft.screenplay, params["episode_pacing"]) is None:
+                raise ValueError(localized_message("导演剧本缺少本集时长上限"))
 
         async def save():
             async with project_write(chapter.novel_id) as db:

@@ -9,6 +9,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
+from services.platform.http_contract import check_upstream_response, public_task_error
 from pydantic import BaseModel, Field, ValidationError
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
@@ -66,14 +67,25 @@ def _prompt(prepared: PreparedVideoContent, reference_images: list[str], referen
 class UnifiedVideoGenerator(BaseVideoGenerator):
     """Translate shared video inputs without exposing service-specific details."""
 
-    async def _request(self, method: str, task_id: str | None = None, payload: dict | None = None, *, refresh=False) -> dict:
+    async def _request(self, method: str, task_id: str | None = None, payload: dict | None = None, *, refresh=False, billing_video_id=None) -> dict:
         submitting = method == "POST"
+        platform_call = None
+        headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
+        if submitting and self.config.api_protocol == "novelvids" and billing_video_id is not None:
+            from services.billing.platform import begin_platform_call
+            from services.ai_task_executor import current_task_id
+            platform_call = await begin_platform_call(self.config, billing_type="video", video_id=billing_video_id,
+                task_id=current_task_id.get(), request_key=payload["request_id"])
+            headers["Idempotency-Key"] = str(platform_call.request_key)
         async with httpx.AsyncClient(timeout=600) as client:
             try:
                 response = await client.request(method, _endpoint(self.config.base_url, task_id),
-                    headers={"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"},
+                    headers=headers,
                     **({"params":{"refresh":"true"}} if refresh else {}),
                     **({"json": payload} if payload is not None else {}))
+                if platform_call:
+                    from services.billing.platform import capture_platform_response
+                    await capture_platform_response(platform_call, response)
             except httpx.HTTPError as exc:
                 not_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
                 logger.warning("video_api_network_error operation=%s error_type=%s", method, type(exc).__name__)
@@ -86,6 +98,7 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             data = None
         if self.config.api_protocol == "novelvids" and not submitting and response.status_code == 404 and (task_id or "").startswith("req-"):
             return {"id":task_id, "status":"failed", "error":localized_message("平台没有此视频请求的受理记录")}
+        check_upstream_response(response)
         if response.status_code >= 400:
             raise VideoProviderError(public_provider_error(data, status_code=response.status_code,
                 transport_request_id=request_id(response), secrets=(self.config.api_key,)),
@@ -93,12 +106,14 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         if not isinstance(data, dict):
             raise VideoProviderError(localized_message('视频接口返回了无效响应'), submission_uncertain=submitting)
         if data.get("error"):
-            data = {**data, "error": public_provider_error(data, status_code=response.status_code,
-                transport_request_id=request_id(response), secrets=(self.config.api_key,))}
+            data = {**data, "error": public_task_error(data, public_provider_error(data, status_code=response.status_code,
+                transport_request_id=request_id(response), secrets=(self.config.api_key,)))}
         return data
 
     async def submit(self, prompt: str, negative_prompt: str = "", subjects: list[dict[str, Any]] | None = None,
         duration: float = 6.0, aspect_ratio: str = "16:9", **kwargs) -> str:
+        if self.config.api_protocol == "unified_video":
+            raise VideoProviderError(localized_message("通用视频接口已停用，请使用火山方舟协议"))
         mode = kwargs.get("generation_mode", "reference")
         selection = validate_selection(self.config.video_model_type, api_protocol=self.config.api_protocol,
             generation_mode=mode, resolution=kwargs.get("resolution"), aspect_ratio=aspect_ratio,
@@ -132,7 +147,7 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             payload.update(request_id=platform_key, generate_audio=selection.generate_audio,
                            return_last_frame=selection.return_last_frame)
         try:
-            data = await self._request("POST", payload=payload)
+            data = await self._request("POST", payload=payload, billing_video_id=kwargs.get("billing_video_id"))
         except VideoProviderError as exc:
             if platform_key and exc.submission_uncertain:
                 return "req-" + platform_key

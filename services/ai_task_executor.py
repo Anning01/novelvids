@@ -5,6 +5,8 @@ import logging
 from contextvars import ContextVar
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
+
 from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
@@ -270,7 +272,7 @@ class AiTaskExecutor:
                 logger.warning("AI task failed: task_id=%s error_type=%s", task.id, type(e).__name__)
             else:
                 logger.exception("AI task #%s failed", task.id)
-            await self._fail(task, str(e), error=e)
+            await self._fail(task, str(e.detail) if isinstance(e, HTTPException) else str(e), error=e)
         finally:
             task_language.reset(token)
 

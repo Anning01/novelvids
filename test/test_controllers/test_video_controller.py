@@ -859,7 +859,7 @@ async def test_返回尾帧_注入同章下一分镜参考图():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("model_type", "protocol"), [("minimax_h3", "minimax"), ("seedance_2_5", "unified_video")])
+@pytest.mark.parametrize(("model_type", "protocol"), [("minimax_h3", "minimax"), ("seedance_2_5", "volcengine_ark")])
 async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜(model_type, protocol):
     scene, config = await _create_scene_with_config(
         model_name="minimax-h3",
@@ -875,7 +875,7 @@ async def test_供应商未返回尾帧时_ffmpeg_提取并注入下一分镜(mo
     )
     video = await Video.create(
         scene=scene,
-        model_type=VideoModelTypeEnum.seedance.value if protocol == "unified_video" else VideoModelTypeEnum.minimax.value,
+        model_type=VideoModelTypeEnum.seedance.value if protocol == "volcengine_ark" else VideoModelTypeEnum.minimax.value,
         external_task_id="minimax-no-last-frame",
         status=TaskStatusEnum.running.value,
         metadata={
@@ -1384,13 +1384,15 @@ async def test_specialized_storyboard_sheet_is_the_third_image_on_the_wire(monke
     stable = reference_mention_syntax('image', identity)
     scene, config = await _create_scene_with_config(prompt=f'Use {stable} for staging.', video_model_type=model,
                                                    api_protocol=protocol, base_url='https://example.com')
-    scene.metadata = {'video_prompt_model': model, 'generic_video_prompt': '@{主角}进入@{房间}',
+    scene.metadata = {'video_prompt_model': model, 'generic_video_prompt': '主角进入房间',
                       'work_package': {'drafts': {'general': '@{旧场景}'}}}
     await scene.save(update_fields=['metadata'])
     inputs = ['https://cdn.example.com/hero.png', 'https://cdn.example.com/set.png', sheet]
-    mocked_assets = AsyncMock(return_value=[{'name': name, 'images':[url], 'description':name}
-                                             for name,url in zip(('主角','房间'), inputs)])
-    monkeypatch.setattr('controllers.video.resolve_assets', mocked_assets)
+    from models.asset import Asset
+    chapter = await scene.chapter
+    for name, url in zip(('主角', '房间'), inputs):
+        asset = await Asset.create(novel_id=chapter.novel_id, asset_type=1, canonical_name=name, main_image=url)
+        await scene.assets.add(asset)
     payloads = []
     real = httpx.AsyncClient
     def reply(request):
@@ -1401,7 +1403,6 @@ async def test_specialized_storyboard_sheet_is_the_third_image_on_the_wire(monke
     monkeypatch.setattr(httpx,'AsyncClient',client)
     await video_controller._submit_generation(VideoGenerateRequest(scene_id=scene.id, model_config_id=config.id,
         generate_audio=False, reference_media=[VideoReferenceMedia(type='image',url=sheet,mention_url=identity)]))
-    assert '@{房间}' in mocked_assets.await_args.args[0] and '@{旧场景}' not in mocked_assets.await_args.args[0]
     parts=payloads[0]['content']
     assert [p['image_url']['url'] for p in parts if p['type']=='image_url'] == inputs
     assert expected in parts[0]['text'] and identity not in parts[0]['text']

@@ -111,7 +111,7 @@ async def test_targeted_deleted_asset_is_not_silently_restored():
 @pytest.mark.asyncio
 async def test_targeted_repair_does_not_overwrite_a_concurrent_user_edit():
     novel, chapter, snapshot, _, _, _ = await extraction_fixture()
-    sword = await Asset.create(novel=novel, asset_type=3, canonical_name='玄铁剑', base_traits='不完整')
+    sword = await Asset.create(novel=novel, asset_type=3, canonical_name='玄铁剑', base_traits='')
     async def user_edit():
         await Asset.filter(id=sword.id).update(base_traits='用户刚刚手改的剑')
     task, _ = await targeted_run(chapter, snapshot, sword_inventory(chapter), before_design=user_edit)
@@ -172,14 +172,14 @@ async def test_targeted_unrequested_outputs_are_never_persisted():
 
 
 @pytest.mark.asyncio
-async def test_targeted_invalid_design_is_repaired_without_touching_other_assets():
+async def test_targeted_empty_design_is_repaired_without_touching_other_assets():
     novel, chapter, snapshot, _, _, _ = await extraction_fixture()
-    sword = await Asset.create(novel=novel, asset_type=3, canonical_name='玄铁剑', base_traits='不完整', main_image='/media/keep.png')
+    sword = await Asset.create(novel=novel, asset_type=3, canonical_name='玄铁剑', base_traits='', main_image='/media/keep.png')
     task, counts = await targeted_run(chapter, snapshot, sword_inventory(chapter))
     assert task.status == 3, task.error_message
     await sword.refresh_from_db()
     assert counts == {'inventory': 1, 'design': 1}
-    assert sword.base_traits != '不完整' and sword.main_image == '/media/keep.png'
+    assert sword.base_traits and sword.main_image == '/media/keep.png'
 
 
 @pytest.mark.asyncio

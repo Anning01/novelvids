@@ -52,13 +52,14 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.ready) await auth.bootstrap()
   if (auth.deploymentRole === 'platform') {
-    if (!to.meta.platformOnly && !['/login','/profile','/projects','/billing','/orders','/teams','/members','/users','/settings'].includes(to.path) && to.name !== 'invite') {
+    if (!to.meta.platformOnly && !['/login','/profile','/billing','/orders','/teams','/members','/users','/settings'].includes(to.path) && to.name !== 'invite') {
       return auth.canAccessBilling ? '/platform/usage' : '/platform/models'
     }
     if (['/platform/usage','/platform/keys'].includes(to.path) && auth.isLoggedIn && !auth.canAccessBilling) return '/platform/models'
   } else if (to.meta.platformOnly) return '/'
   const decision = resolveAuthGuard(to, auth)
-  if (decision.redirect === '/login' && to.name === 'local-mcp-connect') {
+  if (decision.redirect === '/login' && (to.name === 'local-mcp-connect' ||
+    (auth.deploymentRole === 'platform' && to.name === 'profile' && to.query.recharge === '1'))) {
     return {path: '/login', query: {redirect: to.fullPath}}
   }
   if (decision.redirect) return decision.redirect

@@ -1,0 +1,6 @@
+# 猫影模型 API
+
+OpenAI 兼容的对话、图片和视频接口。API Key 使用猫影账户的团队权限。
+
+- [AI Agent 接入说明](/v1/agent-guide.md): 认证、模型选择、官方 SDK 示例、错误处理和任务查询。
+- [OpenAPI](/v1/openapi.json): 公开模型接口定义。

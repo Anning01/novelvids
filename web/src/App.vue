@@ -41,7 +41,7 @@ const platformItems = computed(() => [
   {path:'/platform/models',label:tr('模型目录'),icon:Layers},
   {path:'/platform/docs',label:tr('接口文档'),icon:BookOpen},
   ...(auth.isLoggedIn ? [
-    ...(auth.canAccessBilling ? [{path:'/billing',label:tr('消费账单'),icon:Receipt},{path:'/projects',label:tr('作品迁移'),icon:FolderKanban}] : []),
+    ...(auth.canAccessBilling ? [{path:'/billing',label:tr('消费账单'),icon:Receipt}] : []),
     {path:'/orders',label:tr('充值订单'),icon:Receipt}] : [{path:'/login',label:tr('登录'),icon:UserRound}]),
 ])
 const personalItems = computed(() => {
@@ -184,6 +184,8 @@ function handleTeamSwitch(teamId: string) {
 <style scoped>
 .app-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .app-team-selector {
+  flex: 0 0 auto;
+  min-width: 0;
   display: block;
   margin: 0 10px 10px;
 }
@@ -194,6 +196,7 @@ function handleTeamSwitch(teamId: string) {
   color: var(--app-text-muted, #9398a8);
 }
 .app-user-block {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;

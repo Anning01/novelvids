@@ -1,10 +1,12 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
+import ImageModelSelect from '@/components/ImageModelSelect.vue'
 import AppButton from '@/components/AppButton.vue'
 import { AssetTypeEnum, TaskStatusEnum, type Novel } from '@/types'
 import ShortDramaAgentPage from './ShortDramaAgentPage.vue'
+import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
 import { useAuthStore } from '@/features/auth/authStore'
 
 const push = vi.fn()
@@ -32,6 +34,8 @@ vi.mock('@/api', async (importOriginal) => {
       assets: vi.fn(),
       storyboardStrategies: vi.fn(),
       analyzeNovel: vi.fn(),
+      generateNovelCover: vi.fn(),
+      imageGenerationModels: vi.fn(),
       generateScreenplay: vi.fn(),
       task: vi.fn(),
       updateNovel: vi.fn(),
@@ -56,6 +60,7 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({code: 0, message: '', data: []})
   vi.mocked(api.remakeCapabilities).mockResolvedValue({code: 0, message: '', data: {
     media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
     aspect_ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '1080P'],
@@ -217,7 +222,7 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   await flushPromises()
   expect(wrapper.text()).toContain('外部请求结果待核对')
   await wrapper.findAll('button').find(button => button.text() === '重新分析')!.trigger('click')
-  expect(api.analyzeNovel).toHaveBeenCalledOnce()
+  expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9)
   expect(wrapper.get('.secondary-action').attributes('disabled')).toBeDefined()
   admit({ code: 0, message: '', data: { id: 'new-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '' } })
   await flushPromises()
@@ -324,17 +329,19 @@ it.each(['light', 'dark'])('shows story results while the cover is pending (%s)'
 })
 
 
-it('opens and refreshes a finished imported script without creating an analysis task', async () => {
+it('opens a screenplay-only project and offers analysis on request', async () => {
   const source = (await api.novelMeta(9)).data
   vi.mocked(api.novelMeta).mockResolvedValue({code: 0, message: '', data: {...source, content_length: 0, author: undefined}})
+  vi.mocked(api.chapter).mockResolvedValue({code: 0, message: '', data: {...chapter, content: '', screenplay: '1-1 雨路 外 夜\n△ 宫平与运在雨中前行。'}})
   vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
   for (let index = 0; index < 2; index += 1) {
     const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
     await flushPromises()
-    expect(wrapper.text()).toContain(chapter.content)
+    expect(wrapper.text()).toContain('宫平与运在雨中前行。')
     expect(wrapper.text()).toContain('剧本已载入')
     expect(wrapper.text()).not.toContain('没有可分析')
-    expect(wrapper.findAll('button').some(button => button.text() === '重新分析')).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === '重新分析')).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text() === '生成本集剧本')).toBe(false)
     wrapper.unmount()
   }
   expect(api.analyzeNovel).not.toHaveBeenCalled()
@@ -352,7 +359,7 @@ it('opens the original and generates only when the user clicks, preserving both 
   expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('原文')
   expect(api.analyzeNovel).not.toHaveBeenCalled()
   expect(api.generateScreenplay).not.toHaveBeenCalled()
-  await wrapper.get('.episode-doc-tools > button').trigger('click')
+  await wrapper.get('.episode-doc-tools .generate-screenplay').trigger('click')
   await flushPromises()
   expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id)
   expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('导演剧本')
@@ -360,6 +367,41 @@ it('opens the original and generates only when the user clicks, preserving both 
   await wrapper.get('.episode-doc-tabs button').trigger('click')
   expect(wrapper.text()).toContain(chapter.content)
   wrapper.unmount()
+})
+
+it('saves pacing for the selected episode and retains the draft on a save failure', async () => {
+  const pacing = { preset: 'fast', max_seconds: 95 } as const
+  vi.mocked(api.updateChapter).mockRejectedValueOnce(new Error('设置暂未保存'))
+    .mockResolvedValueOnce({ code: 0, message: '', data: { ...chapter, episode_pacing: pacing } })
+  const wrapper = mount(ShortDramaAgentPage, { attachTo: document.body, global: { plugins: [pinia],
+    components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+  try {
+    await flushPromises()
+    const trigger = wrapper.get<HTMLButtonElement>('.pacing-trigger')
+    expect(trigger.text()).toBe('智能时长')
+    const dialog = new DOMWrapper(document.body.querySelector<HTMLDialogElement>('dialog')!)
+    if (!dialog.element.showModal) dialog.element.showModal = () => { dialog.element.open = true }
+    await trigger.trigger('click')
+    expect(dialog.element.open).toBe(true)
+    await dialog.get('input[value="fast"]').setValue(true)
+    const duration = dialog.get('input[type="number"]')
+    await duration.setValue('0')
+    expect(dialog.get<HTMLButtonElement>('[type="submit"]').element.disabled).toBe(true)
+    await duration.setValue('90')
+    await dialog.get('[aria-label="增加 5 秒"]').trigger('click')
+    await dialog.get('form').trigger('submit')
+    await flushPromises()
+    expect(dialog.get('[role="alert"]').text()).toBe('设置暂未保存')
+    expect(dialog.element.open).toBe(true)
+    expect(trigger.text()).toBe('智能时长')
+    await dialog.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.updateChapter).toHaveBeenLastCalledWith(chapter.id, { episode_pacing: pacing })
+    expect(trigger.text()).toContain('快节奏 · 最多 95 秒')
+    expect(api.generateScreenplay).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it.each(['light', 'dark'])('exposes the storyboard switch without edit mode and only patches its setting (%s)', async theme => {
@@ -460,7 +502,7 @@ it('offers regeneration on the original tab and keeps the existing screenplay wh
   try {
     await flushPromises()
     await wrapper.get('.episode-doc-tabs button').trigger('click')
-    const button = wrapper.get('.episode-doc-tools > button')
+    const button = wrapper.get('.episode-doc-tools .generate-screenplay')
     expect(button.text()).toBe('重新生成本集剧本')
     await button.trigger('click')
     expect(appConfirmState.open).toBe(true)
@@ -468,4 +510,61 @@ it('offers regeneration on the original tab and keeps the existing screenplay wh
     await flushPromises()
     expect(api.generateScreenplay).not.toHaveBeenCalled()
   } finally { wrapper.unmount() }
+})
+
+
+it('offers an episode and the creative assistant in a blank workspace without starting generation', async () => {
+  const source = (await api.novelMeta(9)).data
+  vi.mocked(api.novelMeta).mockResolvedValue({code: 0, message: '', data: {...source, total_chapters: 0, content_length: 0}})
+  vi.mocked(api.novelAnalysis).mockResolvedValue({code: 0, message: '', data: null})
+  vi.mocked(api.chaptersPage).mockResolvedValue({code: 0, message: '', data: {items: [], pagination: {total: 0, page: 1, page_size: 30, pages: 0}}})
+  vi.mocked(api.chapter).mockRejectedValueOnce(new Error('章节不存在'))
+  const wrapper = mount(ShortDramaAgentPage, {global: {
+    plugins: [pinia], components: {AppButton},
+    stubs: {RouterLink: {template: '<a><slot /></a>'}, CreationAgentPanel: true},
+  }})
+  await flushPromises()
+  expect(wrapper.findAll('button').some(button => button.text() === '新增一集')).toBe(true)
+  const assistant = wrapper.findAll('button').find(button => button.text() === '与助手开始创作')!
+  expect(assistant).toBeTruthy()
+  await assistant.trigger('click')
+  expect(useCreationAgentWorkspace().isOpen).toBe(true)
+  expect(useCreationAgentWorkspace().projectId).toBe(9)
+  expect(api.analyzeNovel).not.toHaveBeenCalled()
+  expect(api.generateScreenplay).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+
+it.each(['light', 'dark'])('generates a cover separately and updates the action once saved (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.generateNovelCover).mockResolvedValueOnce({code: 0, message: '', data: {
+    id: 'cover-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '',
+  }})
+  vi.mocked(api.task).mockResolvedValueOnce({code: 0, message: '', data: {
+    id: 'cover-run', task_type: 5, status: TaskStatusEnum.COMPLETED, created_at: '', response_data: {cover_status: 'ready'},
+  }})
+  const initial = await api.novelMeta(9)
+  vi.mocked(api.novelMeta).mockClear()
+  vi.mocked(api.novelMeta).mockResolvedValueOnce(initial)
+    .mockResolvedValueOnce({...initial, data: {...initial.data, cover: '/media/new-cover.png'}})
+  const wrapper = mount(ShortDramaAgentPage, {global: {
+    plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}},
+  }})
+  try {
+    await flushPromises()
+    const action = wrapper.get('.cover-generation-actions')
+    expect(action.findAll('button').map(button => button.text())).toEqual(['选择封面模型', '生成封面'])
+    expect(action.findAll('button')[1]!.attributes('disabled')).toBeDefined()
+    wrapper.getComponent(ImageModelSelect).vm.$emit('update:modelValue', '23')
+    await flushPromises()
+    await action.findAll('button')[1]!.trigger('click')
+    await flushPromises()
+    expect(api.generateNovelCover).toHaveBeenCalledExactlyOnceWith(9, 23)
+    expect(api.analyzeNovel).not.toHaveBeenCalled()
+    expect(action.findAll('button')[1]!.text()).toBe('重新生成封面')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
 })

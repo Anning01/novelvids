@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, onMounted, ref } from 'vue'
-import { Activity, Clapperboard, Coins, Image, Type, ChevronRight } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Activity, Clapperboard, Coins, Image, Type, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AppPagination from '@/components/AppPagination.vue'
 import AppTabs from '@/components/AppTabs.vue'
 import BillingStatements from '@/features/billing/BillingStatements.vue'
 import { api } from '@/api'
 import BillingRecordDetails from '@/features/billing/BillingRecordDetails.vue'
-import { costSourceLabel, money, recordStatus, recordStatusHint, usageLabel } from '@/features/billing/recordDisplay'
+import { costSourceLabel, money, recordCost, recordStatus, recordStatusHint, usageLabel } from '@/features/billing/recordDisplay'
 import { useAuthStore } from '@/features/auth/authStore'
 import { notice } from '@/shared/notice'
 import type { BillingProject, BillingRecord, BillingSummary } from '@/types'
@@ -23,7 +24,11 @@ const page = ref(1)
 const pageSize = ref(20)
 const selectedProjectId = ref('all')
 const expandedRecordId = ref<number | null>(null)
+const settlementRevision = ref(0)
+let requestRevision = 0
+let settlementRefreshing = false
 const auth = useAuthStore()
+const platformConsole = computed(() => auth.deploymentRole === 'platform')
 const view = ref(auth.isSuperAdmin ? 'statements' : 'costs')
 const views = computed(() => [{ value: 'statements', label: tr('消费账单') }, { value: 'costs', label: tr('调用成本') }])
 const showSourceColumn = computed(() => auth.enabled === true)
@@ -32,6 +37,7 @@ const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') 
 const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') }, get 9() { return tr('语音识别') } }[value] || tr('任务 {p0}', { p0: value }))
 
 function recordDiscount(item: BillingRecord): number {
+  if (item.settlement_status && item.settlement_status !== 'legacy') return 1
   if (item.record_kind === 'agent_conversation') return 1
   const snapshot = item.pricing_snapshot as Record<string, unknown> | null | undefined
   const raw = snapshot?.discount
@@ -71,9 +77,14 @@ function currentNovelId(): number | undefined {
   return selectedProjectId.value === 'all' ? undefined : Number(selectedProjectId.value)
 }
 
-async function load() {
-  expandedRecordId.value = null
-  loading.value = true
+async function load(background = false) {
+  if (background && settlementRefreshing) return
+  if (background) settlementRefreshing = true
+  const revision = ++requestRevision
+  if (!background) {
+    expandedRecordId.value = null
+    loading.value = true
+  }
   try {
     const novelId = currentNovelId()
     const [summaryResponse, projectsResponse, recordsResponse] = await Promise.all([
@@ -81,28 +92,33 @@ async function load() {
       api.billingProjects(1, 100),
       api.billingRecords({ novel_id: novelId, page: page.value, page_size: pageSize.value }),
     ])
+    if (revision !== requestRevision) return
     summary.value = summaryResponse.data
     projects.value = projectsResponse.data.items
     records.value = recordsResponse.data.items
     totalRecords.value = recordsResponse.data.pagination.total
+    if (background) settlementRevision.value += 1
   } catch (error) {
-    notice.error((error as Error).message)
+    if (revision === requestRevision && !background) notice.error((error as Error).message)
   } finally {
-    loading.value = false
+    if (background) settlementRefreshing = false
+    if (revision === requestRevision) loading.value = false
   }
 }
 
 async function loadRecords() {
+  const revision = ++requestRevision
   expandedRecordId.value = null
   loading.value = true
   try {
     const response = await api.billingRecords({ novel_id: currentNovelId(), page: page.value, page_size: pageSize.value })
+    if (revision !== requestRevision) return
     records.value = response.data.items
     totalRecords.value = response.data.pagination.total
   } catch (error) {
-    notice.error((error as Error).message)
+    if (revision === requestRevision) notice.error((error as Error).message)
   } finally {
-    loading.value = false
+    if (revision === requestRevision) loading.value = false
   }
 }
 
@@ -124,6 +140,13 @@ function changePageSize(next: number) {
 }
 
 onMounted(() => { if (view.value === 'costs') void load() })
+const settlementRefresh = setInterval(() => {
+  if (!document.hidden && view.value === 'costs' && !loading.value && (summary.value?.pending_records || records.value.some(row => ['pending', 'review'].includes(row.settlement_status || '')))) void load(true)
+}, 5000)
+onUnmounted(() => {
+  ++requestRevision
+  clearInterval(settlementRefresh)
+})
 function selectView(value: string) {
   view.value = value
   if (value === 'costs') void load()
@@ -131,13 +154,15 @@ function selectView(value: string) {
 </script>
 
 <template>
-  <main class="billing-page">
+  <main class="billing-page" :class="{ 'is-platform-console': platformConsole }">
     <header class="billing-header">
       <div>
-        <span>COST DASHBOARD</span>
-        <h1>{{ tr('成本看板') }}</h1>
-        <p>{{ auth.isSuperAdmin && view === 'statements' ? tr('按团队、用户查询实际扣款，随时导出消费明细。') : tr('每个模型的调用成本，按项目与维度汇总。') }}</p>
+        <span v-if="!platformConsole">COST DASHBOARD</span>
+        <h1>{{ platformConsole ? tr('消费记录') : tr('成本看板') }}</h1>
+        <p>{{ platformConsole ? tr('查看 API 调用费用与实际扣款记录。') : auth.isSuperAdmin && view === 'statements' ? tr('按团队、用户查询实际扣款，随时导出消费明细。') : tr('每个模型的调用成本，按项目与维度汇总。') }}</p>
       </div>
+      <div class="billing-header-actions">
+      <AppButton v-if="platformConsole && view === 'costs'" variant="secondary" size="sm" :loading="loading" @click="load()"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新') }}</AppButton>
       <AppSelect
         v-if="view === 'costs'"
         v-model="selectedProjectId"
@@ -146,9 +171,10 @@ function selectView(value: string) {
         :ariaLabel="tr('按项目过滤成本看板')"
         @update:model-value="selectProject"
       />
+      </div>
     </header>
     <AppTabs v-if="auth.isSuperAdmin" :model-value="view" :items="views" :label="tr('账单视图')" @update:model-value="selectView" />
-    <BillingStatements v-if="auth.isSuperAdmin && view === 'statements'" />
+    <BillingStatements v-if="auth.isSuperAdmin && view === 'statements'" :compact="platformConsole" />
     <div v-else-if="loading" class="billing-state">{{ tr('正在读取成本数据…') }}</div>
     <template v-else>
       <section class="summary-grid" :aria-label="tr('成本汇总')">
@@ -156,6 +182,9 @@ function selectView(value: string) {
           <span class="stat-label"><Coins :size="15" />{{ tr('总成本') }}</span>
           <strong class="stat-value">{{ money(summary?.total_cost ?? 0) }}</strong>
           <small class="stat-sub">{{ selectedProject ? selectedProject.novel_name : tr('全部项目累计') }}</small>
+          <small v-if="!platformConsole && (Number(summary?.platform_cost) || Number(summary?.local_charge))" class="stat-sub">
+            {{ tr('平台成本') }} {{ money(Number(summary?.platform_cost ?? 0)) }} · {{ tr('本地收费') }} {{ money(Number(summary?.local_charge ?? 0)) }}
+          </small>
         </article>
         <article class="stat-card">
           <span class="stat-label"><Activity :size="15" />{{ tr('计费记录') }}</span>
@@ -181,6 +210,7 @@ function selectView(value: string) {
       </section>
 
       <section class="table-card">
+        <p v-if="summary?.pending_records" class="settlement-note" role="status">{{ tr('{p0} 条调用待结算或核对，已确认成本会自动更新。', { p0: summary.pending_records }) }}</p>
         <header class="table-card__header">
           <div><h2>{{ tr('调用流水') }}</h2><p>{{ tr('创作助手按会话汇总，展开可查看明细。') }}</p></div>
           <small>{{ selectedProject?.novel_name || tr('全部项目') }}</small>
@@ -190,7 +220,7 @@ function selectView(value: string) {
             <thead>
               <tr>
                 <th>{{ tr('时间') }}</th>
-                <th>{{ tr('项目') }}</th>
+                <th>{{ platformConsole ? tr('调用来源') : tr('项目') }}</th>
                 <th>{{ tr('维度') }}</th>
                 <th>{{ tr('任务') }}</th>
                 <th>{{ tr('模型') }}</th>
@@ -204,13 +234,13 @@ function selectView(value: string) {
             <tbody>
               <template v-for="item in records" :key="item.id"><tr>
                 <td class="cell-muted">{{ item.created_at }}</td>
-                <td>{{ projectName(item.novel_id) }}</td>
+                <td class="record-source" :title="projectName(item.novel_id)">{{ projectName(item.novel_id) }}</td>
                 <td>{{ billingTypeLabel(item.billing_type) }}</td>
                 <td><template v-if="item.record_kind === 'agent_conversation'">
                   <button class="conversation-record-toggle" type="button" :aria-label="tr('查看会话 {p0} 费用明细', { p0: item.conversation_id })" :aria-expanded="expandedRecordId === item.id" :aria-controls="`billing-details-${item.id}`" @click="expandedRecordId = expandedRecordId === item.id ? null : item.id">
                     <ChevronRight :size="13" :class="{ 'is-expanded': expandedRecordId === item.id }" />{{ tr('创作助手') }} </button><small class="conversation-record-meta">{{ tr('会话') }} {{ item.conversation_id }} · {{ item.turn_count }} {{ tr('轮对话') }}</small>
                 </template><template v-else>{{ taskTypeLabel(item.task_type) }}</template></td>
-                <td>{{ item.model_name || item.model }}</td>
+                <td class="record-model" :title="item.model_name || item.model">{{ item.model_name || item.model }}</td>
                 <td class="cell-muted">{{ usageLabel(item) }}</td>
                 <td class="cell-mono">{{ formatDuration(item.duration_seconds) }}</td>
                 <td :title="recordStatusHint(item)">{{ recordStatus(item) }}</td>
@@ -222,11 +252,13 @@ function selectView(value: string) {
                     <span class="list-price">{{ money(item.cost / recordDiscount(item), item.currency) }}</span>
                     <span class="discount-chip">{{ discountText(recordDiscount(item)) }}</span>
                   </div>
-                  {{ money(item.cost, item.currency) }}
+                  {{ recordCost(item) }}
+                  <small v-if="!platformConsole && item.platform_cost != null" class="settlement-label">{{ tr('平台成本') }} {{ money(Number(item.platform_cost), item.currency) }}</small>
+                  <small v-if="!platformConsole && item.local_charge != null" class="settlement-label">{{ tr('本地扣款') }} {{ money(Number(item.local_charge), item.currency) }}</small>
                 </td>
               </tr>
               <tr v-if="expandedRecordId === item.id" :id="`billing-details-${item.id}`" class="conversation-record-detail"><td :colspan="showSourceColumn ? 10 : 9">
-                <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" />
+                <BillingRecordDetails :record-id="item.id" :novel-id="item.novel_id" :show-source="showSourceColumn" :settlement-revision="settlementRevision" />
               </td></tr></template>
               <tr v-if="!records.length"><td :colspan="showSourceColumn ? 10 : 9" class="empty">{{ tr('暂无调用记录') }}</td></tr>
             </tbody>
@@ -252,6 +284,7 @@ function selectView(value: string) {
 .billing-header span { color: var(--app-accent); font-size: 9px; font-weight: 750; letter-spacing: .16em; }
 .billing-header h1 { margin: 4px 0 0; font-size: 30px; letter-spacing: -.03em; }
 .billing-header p { margin: 5px 0 0; color: var(--app-text-muted); font-size: 12px; }
+.billing-header-actions { display: flex; align-items: center; gap: 8px; }
 .billing-project-filter { width: 240px; }
 .billing-state { padding: 60px 0; color: var(--app-text-muted); text-align: center; }
 
@@ -275,6 +308,8 @@ function selectView(value: string) {
 :global([data-app-theme='dark']) .stat-card.is-video .stat-label { color: #f2b26b; }
 
 .table-card { margin-bottom: 22px; border-radius: 16px; background: var(--app-surface-raised, #fff); box-shadow: 0 1px 2px rgb(20 22 28 / 3%), 0 10px 28px rgb(20 22 28 / 5%); overflow: hidden; }
+.settlement-label { display:block; margin-top:4px; color:var(--app-text-secondary); font-size:11px; }
+.settlement-note { margin:12px 20px; color:var(--app-text-secondary); font-size:12px; }
 .table-card__header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 16px 20px 12px; }
 .table-card__header h2 { margin: 0; font-size: 14px; }
 .table-card__header p { margin: 5px 0 0; color: var(--app-text-muted); font-size: 11px; }
@@ -318,6 +353,27 @@ function selectView(value: string) {
 .cost-with-discount .discount-chip { display: inline-flex; align-items: center; white-space: nowrap; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; color: #b45309; background: rgb(245 158 11 / 15%); }
 .pager { padding: 12px 20px 16px; }
 
+.is-platform-console { min-width: 0; padding: 24px; background: var(--app-canvas); }
+.is-platform-console .billing-header { align-items: center; gap: 16px; margin-bottom: 20px; }
+.is-platform-console .billing-header h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: 0; }
+.is-platform-console .billing-header p { margin-top: 6px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
+.is-platform-console :deep(.app-tabs) { gap: 20px; }
+.is-platform-console :deep(.app-tabs__tab) { min-height: 36px; font-size: 12px; }
+.is-platform-console .summary-grid { gap: 10px; margin: 18px 0; }
+.is-platform-console .stat-card { gap: 8px; padding: 14px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); box-shadow: none; }
+.is-platform-console .stat-label { color: var(--app-text-secondary); }
+.is-platform-console .stat-value,.is-platform-console .is-primary .stat-value { color: var(--app-text); font-size: 21px; }
+.is-platform-console .table-card { border: 1px solid var(--app-border); border-radius: 8px; box-shadow: none; }
+.is-platform-console .table-card__header { padding: 14px 16px; border-bottom: 1px solid var(--app-border); }
+.is-platform-console .data-table th { color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; letter-spacing: 0; }
+.is-platform-console .data-table th,.is-platform-console .data-table td { padding: 10px 12px; }
+.is-platform-console .data-table .record-model,.is-platform-console .data-table .record-source { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.is-platform-console .billing-header-actions { flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .is-platform-console { padding: 16px 12px; }
+  .is-platform-console .billing-header-actions { width: 100%; }
+  .is-platform-console .billing-project-filter { width: auto; min-width: 0; flex: 1; }
+}
 @media (max-width: 960px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -1,23 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { expect, it } from 'vitest'
 
-const themeSource = readFileSync('src/app-theme.css', 'utf8')
-const pageSource = readFileSync('src/pages/ShortDramaPage.vue', 'utf8')
-const entryShellSource = readFileSync('src/components/CreationEntryShell.vue', 'utf8')
-
-describe('短剧创作页主题背景', () => {
-  it('为浅色和深色主题使用对应背景资源', () => {
-    expect(themeSource).toContain("--creation-bg-image: url('/background-light.png')")
-    expect(themeSource).toContain("--creation-bg-image: url('/background-dark.png')")
-    expect(existsSync('public/background-light.png')).toBe(true)
-    expect(existsSync('public/background-dark.png')).toBe(true)
-  })
-
-  it('直接展示设计背景且不覆盖高透明度纯色遮罩', () => {
-    expect(pageSource).toContain('<CreationEntryShell')
-    expect(entryShellSource).toContain('background-image: var(--creation-bg-image, none)')
-    expect(entryShellSource).toContain('background-size: cover')
-    expect(themeSource).not.toContain('--creation-bg-tint')
-    expect(entryShellSource).not.toContain('linear-gradient(var(--creation-bg-tint')
-  })
+it('shares the subtle CSS dot pattern between both creation entry points', () => {
+  const shell = readFileSync('src/components/CreationEntryShell.vue', 'utf8')
+  expect(shell).toContain('background-image: radial-gradient(circle,')
+  expect(shell).toContain('var(--app-text-muted) 20%, transparent')
+  expect(shell).toContain('background-size: 22px 22px')
+  expect(shell).not.toContain('CreationThreadsBackground')
+  expect(shell).not.toContain('<canvas')
+  for (const name of ['ShortDramaPage', 'RemakeWorkshopPage']) {
+    expect(readFileSync(`src/pages/${name}.vue`, 'utf8')).toContain('<CreationEntryShell')
+  }
+  expect(readFileSync('src/app-theme.css', 'utf8')).not.toContain('--creation-bg-image')
 })

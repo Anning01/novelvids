@@ -23,19 +23,22 @@ withDefaults(defineProps<{
 
 <style scoped>
 .creation-entry-page {
+  position: relative;
+  isolation: isolate;
   display: flex;
   min-height: 100%;
   overflow: auto;
   padding: 36px 22px 90px;
   color: var(--app-text, #303442);
   background-color: var(--app-canvas, #f8f9fc);
-  background-image: var(--creation-bg-image, none);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--app-text-muted) 20%, transparent) 0.7px, transparent 0.8px);
+  background-size: 22px 22px;
   background-position: center;
-  background-size: cover;
-  background-repeat: no-repeat;
 }
 
 .creation-entry-workspace {
+  position: relative;
+  z-index: 1;
   width: min(820px, 100%);
   min-width: 0;
   margin: auto;

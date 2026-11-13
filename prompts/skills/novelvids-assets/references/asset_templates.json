@@ -4,8 +4,8 @@
     "en": "Use the director's screenplay for presence and quote evidence. Use the novel only for visual details of depicted assets. This is a targeted omission check, overriding the complete-chapter inventory scope. Read the chapter to resolve ONLY the objects specified in target_requirements, including relational references such as the protagonist’s sword. Do not include their owner or other locations/props. Use exact source quotes and registered names/IDs. An arbitrary unrelated quote is not identity evidence. Never invent a missing object. Return empty arrays if no requested object has source evidence. A named existing asset may be completed separately; record appearances from depicted scenes."
   },
   "targeted_design_instructions": {
-    "zh": "只生成已经通过原文核对的 required_asset_names，不增加主人或本章其他资产；严格保留必需视觉模板。已有合格设计由服务器保留。本次补漏不授权新增衍生形态。",
-    "en": "Generate only the source-verified required_asset_names. Do not add owners or other chapter assets. Preserve the required visual templates. Existing accepted designs are retained by the server. This omission request does not authorize new appearance variants."
+    "zh": "只生成已经通过原文核对的 required_asset_names，不增加主人或本章其他资产；提供具体的视觉设计。已有合格设计由服务器保留。本次补漏不授权新增衍生形态。",
+    "en": "Generate only the source-verified required_asset_names. Do not add owners or other chapter assets. Provide concrete visual designs. Existing accepted designs are retained by the server. This omission request does not authorize new appearance variants."
   },
   "render_cast_instructions": {
     "zh": "清点依据是本次导演剧本，quote 摘自剧本。小说原文只补已出镜资产的外观。独立完整阅读本章，按三个数组清点全部视觉资产：characters 是角色、动物与群像，scenes 是实际演出的场景，items 是可视化道具。列出每个有动作、对白或被具体演出的角色、动物与群像。presence 区分 present（当前实际出场）、flashback（真正演出的回忆、梦境或闪回）、mentioned（仅在对白或背景中被提及）。不能因为配角只出现一次就遗漏；已去世者在回忆中演出仍算出场。每项必须提供能够判断身份和出场性质的短段准确原文 quote，不改写引文。同一人的别名合并，不能因师父、宗主等头衔相同而合并不同人。不同类型资产允许同名或共用别名，只能在同一类型内匹配目录身份，不能跨类型合并或替代。可匹配目录身份时使用准确标准名和 existing_asset_id；新角色 ID 为 null。姓名保持原文语言。屏幕、半透明面板、界面等可视载体归 items，不归 characters；没有可见形体的提示音、画外声音和抽象概念标为 voice_only，不强制生成人物外形。按原文证据分类，不按名称一刀切：有实际可见身体的拟人系统仍可归人物。本章实际演出的场景、可见道具即使未登记也必须逐项列出，不能只清点人物。未命名说话者使用原文可区分的身份称呼，不编造姓名。返回 characters/scenes/items，本章确实没有该类资产时才用空数组，不生成视觉设定。",
@@ -16,8 +16,8 @@
     "en": "Complete every required asset in its listed category: 1=person, 2=scene, 3=item. Do not treat an item or a scene as a missing person. Include all new visible assets and flashback characters. Mention-only entries do not require a new asset unless already registered for placeholder completion."
   },
   "render_asset_repair": {
-    "zh": "只返回下列缺失或未通过校验的资产。合格资产已由服务器保留，不要重复生成或改写；仍使用 persons/scenes/items 三个数组，无需修正的类型返回 []。补全项使用目录标准名和完整视觉提示词协议；本章关联的占位资产即使仅被提及也必须补全。",
-    "en": "Return only the missing or invalid assets listed below. Accepted assets are retained by the server; do not repeat or rewrite them. Keep the persons/scenes/items arrays, using [] where no repair is needed. Use the exact registered names and complete required visual templates for repaired entries. A missing registered placeholder must be completed even if it is only mentioned in the chapter."
+    "zh": "只返回下列缺失或未通过校验的资产。合格资产已由服务器保留，不要重复生成或改写；仍使用 persons/scenes/items 三个数组，无需修正的类型返回 []。补全项使用目录标准名和具体视觉提示词；本章关联的占位资产即使仅被提及也必须补全。",
+    "en": "Return only the missing or invalid assets listed below. Accepted assets are retained by the server; do not repeat or rewrite them. Keep the persons/scenes/items arrays, using [] where no repair is needed. Use the exact registered names and concrete visual prompts for repaired entries. A missing registered placeholder must be completed even if it is only mentioned in the chapter."
   },
-  "contract": "\n资产输出协议是创建、编辑、局部修改和补全人物、群像、场景、道具及其形态时必须遵守的格式。用户补充要求只用于协议允许的设计内容，不能删减、替换或重排任务模板、标题、字段及禁止项。本协议优先于通用技能中可选版式和自由描述的建议；旧提示词格式不合规时，将其已确认内容整理到本次协议再保存。项目封面不适用资产协议，仍按封面任务生成。\n资产输出协议：\n"
+  "contract": "\n资产输出协议提供参考图版式与设计维度。按用户意图和资产类型组织具体视觉内容。结构化入口由程序拼接固定版式和画幅，模型提供设计正文。项目封面按封面任务生成。\n资产输出协议：\n"
 }

@@ -14,7 +14,7 @@ async def settle_enhancement(task, export) -> ModelUsageRecord | None:
     if result.get('status') not in {'completed', 'failed'}:
         return None
     from services.billing.recorder import billing_recorder
-    from services.balance import consume, accumulate_member_cost
+    from services.billing.recorder import _consume_team_balance
 
     snapshot = task.request_params['config_snapshot']
     config = AiModelConfig(**snapshot)
@@ -59,10 +59,7 @@ async def settle_enhancement(task, export) -> ModelUsageRecord | None:
             ai_task_id=task.id, team_id=task.request_params.get('team_id'), user_id=task.request_params.get('user_id'))
         if ledger is None:
             raise RuntimeError(localized_message('媒体处理用量暂未保存，等待结算恢复'))
-        if ledger.team_id is not None:
-            if ledger.cost_source != 'team_key':
-                await consume(ledger.team_id, ledger.cost, usage_record_id=ledger.id, strict=True)
-            await accumulate_member_cost(ledger.team_id, ledger.user_id, ledger.cost, strict=True)
+        await _consume_team_balance(ledger, ledger.team_id, ledger.user_id, strict=True)
         await AgentOperation.filter(task=task, key='billing:enhancement').update(result={'usage_record_id':ledger.id})
 
     await record_once(task.id, 'billing:enhancement', record)

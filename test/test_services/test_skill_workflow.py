@@ -302,8 +302,8 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
-@pytest.mark.parametrize("repair_format", [True, False])
-async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_result(language, custom_style, repair_format):
+@pytest.mark.parametrize("response", ["freeform", "repair_empty", "empty"])
+async def test_new_text_generation_uses_snapshot_and_preserves_model_wording(language, custom_style, response):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.messages import ModelResponse, ToolCallPart
@@ -318,15 +318,13 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     snapshot = snapshot_skills()
     snapshot["contents"]["image"] = "Frozen mandatory image layout rules"
     snapshot["contents"]["styles"] = '{"realistic-general":{"image":"Frozen project rendering"}}'
-    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_asset_contract
+    from test.test_services.test_asset_design_instructions import synthetic_asset_contract
     import json
     snapshot["contents"]["asset_contract"] = json.dumps(synthetic_asset_contract())
-    visual = fixed_asset_prompt(language)
+    visual = "A detective in a charcoal raincoat with narrow lapels and weathered brass buttons."
     attempts = 0
 
     def respond(messages, info):
-        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
         nonlocal attempts
         attempts += 1
         import json
@@ -351,7 +349,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
                                 "label": "人物",
                                 "aliases": [],
                                 "description": "Detective",
-                                "base_traits": "A natural prose description without the task or fixed fields." if attempts == 1 or not repair_format else visual,
+                                "base_traits": visual if response == "freeform" or (response == "repair_empty" and attempts > 1) else "",
                             }
                         ],
                         "scenes": [],
@@ -369,7 +367,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
         await task.save()
         await ai_task_executor.run(task)
     await task.refresh_from_db()
-    if not repair_format:
+    if response == "empty":
         assert task.status == 4
         assert attempts == 2  # One shared repair, rather than two SDK retries.
         assert not await Asset.filter(novel=novel).exists()
@@ -378,7 +376,7 @@ async def test_new_text_generation_uses_snapshot_agent_and_persists_validated_re
     assert (
         await Asset.get(novel=novel, canonical_name="Alex")
     ).base_traits == visual
-    assert attempts == 2  # Invalid format is retried before any asset is saved.
+    assert attempts == (1 if response == "freeform" else 2)
     assert task.response_data["conversation_id"]
 
 
@@ -510,8 +508,7 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     await assistant.save()
 
     def respond(messages, info):
-        payload = ({'characters': []} if 'characters' in info.output_tools[0].parameters_json_schema['properties']
-                   else {"persons": [], "scenes": [], "items": []})
+        payload = {"persons": [], "scenes": [], "items": []}
         return ModelResponse(
             parts=[
                 ToolCallPart(
@@ -534,14 +531,13 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
         for row in await AiTask.all()
         if row.request_params.get("parent_task_id") == str(task.id) and row.response_data is not None
     ]
-    # The short cast read and visual generation are each charged once; activity
-    # records and the parent task are not additional model requests.
-    assert len(children) == 2
+    # Only the visual generation makes a billable model request.
+    assert len(children) == 1
     for child in children:
         await record_ai_task_usage(child, result=child.response_data)
     await record_ai_task_usage(task, result=task.response_data)
     records = await ModelUsageRecord.filter(novel_id=novel.id)
-    assert len(records) == 2
+    assert len(records) == 1
     assert {record.ai_task_id for record in records} == {child.id for child in children}
     assert all(record.usage["input_tokens"] == 100 and record.usage["output_tokens"] == 20 for record in records)
     assert "api_key" not in str(task.request_params)
@@ -1367,7 +1363,7 @@ async def test_uncertain_cover_keeps_story_result_and_blocks_duplicate_paid_subm
 
     novel, chapter, _ = await enabled_project()
     await Novel.filter(id=novel.id).update(content="Alex waits.")
-    await AiModelConfig.create(
+    image_config = await AiModelConfig.create(
         name="image",
         model="image",
         task_type=2,
@@ -1390,14 +1386,14 @@ async def test_uncertain_cover_keeps_story_result_and_blocks_duplicate_paid_subm
     monkeypatch.setattr(SkillExecution, "generate", generate)
     submit = AsyncMock(side_effect=TimeoutError("Lost response"))
     monkeypatch.setattr("services.project_analysis.handler.generate_images", submit)
-    task = await novel_controller.analyze(novel.id)
+    task = await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.stage == "needs_review"
     assert task.response_data["story_outline"] == "Preserved outline"
     assert (await Novel.get(id=novel.id)).story_outline == "Preserved outline"
     with pytest.raises(HTTPException):
-        await novel_controller.analyze(novel.id)
+        await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
     submit.assert_awaited_once()
 
 
@@ -1528,7 +1524,7 @@ async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_ap
 
     novel, _, _ = await enabled_project()
     await Novel.filter(id=novel.id).update(content='第一章\nAlex waits.')
-    await AiModelConfig.create(name='image',model='image',task_type=2,api_key='test',
+    image_config = await AiModelConfig.create(name='image',model='image',task_type=2,api_key='test',
         base_url='https://example.test',image_model_type='seedream_5_lite',api_protocol='volcengine_ark',is_active=True)
 
     async def generate(self, skill, facts, output_type, **kwargs):
@@ -1536,7 +1532,7 @@ async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_ap
     monkeypatch.setattr(SkillExecution,'generate',generate)
     submit=AsyncMock(side_effect=TimeoutError('Lost image response'))
     monkeypatch.setattr('services.project_analysis.handler.generate_images',submit)
-    task=await novel_controller.analyze(novel.id)
+    task=await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
     task.request_params['prompt_language']='zh'
     await task.save()
     await ai_task_executor.run(task)

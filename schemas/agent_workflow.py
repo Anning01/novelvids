@@ -63,7 +63,7 @@ class RemakeAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1, max_length=100_000)
-    visual_fields: dict[str, str] = Field(description="资产协议中各设计字段的值；无固定字段的场景、道具返回空字典")
+    visual_fields: dict[str, str] = Field(description="补充视觉设计字段；无须补充时返回空字典")
     label: Literal["人物", "动物", "群像"] = "人物"
 
 

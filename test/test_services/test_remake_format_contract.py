@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
 from schemas.agent_workflow import RemakeShot
 from services.remake.storyboards import prepare_remake_prompt
-from services.remake.asset_validation import render_remake_assets, validate_remake_assets
+from services.remake.asset_validation import render_remake_assets
 from prompts.remake_render import compact_catalog
 from test.remake_fixtures import design_fields, remake_shot, synthetic_snapshot
 
@@ -40,7 +40,6 @@ def test_asset_renderer_uses_configured_template_field_order_and_ratio(language,
         'scenes':[{'name':'军帐','description':'A tent with clear spatial relationships','visual_fields':{}}],
         'objects':[{'name':'令牌','description':'A dark wooden token with a carved edge','visual_fields':{}}]}
     result = render_remake_assets(raw, snapshot, language, '9:16')
-    validate_remake_assets(result, snapshot, language, '9:16')
     person = result['characters'][0]['description']
     assert person.startswith(f'Task:{language}:{kind}:9:16')
     assert len(re.findall(r'^\*\*.+?\*\*：', person, re.M)) == count

@@ -61,7 +61,7 @@ def test_generation_cannot_redraw_same_location(change):
     from prompts.skill_pack import SkillSnapshot, snapshot_skills
     from services.storyboard.validation import prepare_skill_storyboard
     plan = BlockingMap.model_validate({**SHOT,"layout": {**LAYOUT, **change}})
-    result = SimpleNamespace(shots=[SimpleNamespace(blocking_map=plan)])
+    result = SimpleNamespace(shots=[SimpleNamespace(blocking_map=plan, duration_split_part=2)])
     with pytest.raises(ValueError, match="复用"):
         prepare_skill_storyboard(result, SkillSnapshot.model_validate(snapshot_skills()), "zh", [], "cinematic",
                                  scene_layouts={"hall-a": LAYOUT})

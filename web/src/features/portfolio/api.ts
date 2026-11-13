@@ -22,6 +22,7 @@ export interface WorkSummary {
   producer: string
   production_seconds?: number | null
   recorded_cost?: number | null
+  pending_cost?: boolean
   cost_scope?: 'project' | 'self' | null
   archived_at: string
   updated_at: string

@@ -44,7 +44,7 @@
       "suffix": ""
     },
     "scene": {
-      "task": "生成四宫格画面，展示同一个空场景的四个环境机位，画幅 {aspect_ratio}。左上平视正面，右上高位俯瞰整体布局，左下移到空间另一端朝相反方向回看，右下从侧面呈现纵深。四格均使用透视，保持建筑、固定陈设、材料、尺度、天气、时间和光照一致。只绘制静态环境，四格均无人物、动物、群像或临时道具。禁止生成任何文字、标签、Logo 或水印。",
+      "task": "生成四宫格画面，展示同一个空场景的四个环境机位，画幅 {aspect_ratio}。左上平视正面，右上高位俯瞰整体布局，左下移到空间另一端朝相反方向回看，右下从侧面呈现纵深。四格均使用透视，保持建筑、固定陈设、材料和尺度一致。只绘制静态环境，四格均无人物、动物、群像或临时道具。禁止生成任何文字、标签、Logo 或水印。",
       "heading": "场景描述:",
       "fields": [],
       "suffix": "四格都是空场景：只保留环境与固定陈设。包括远景、门窗及反射在内，画面中没有人物、动物、剪影或角色倒影。"
@@ -101,7 +101,7 @@
       "suffix": ""
     },
     "scene": {
-      "task": "Create a four-panel environment reference sheet of the same unoccupied location in a {aspect_ratio} frame. Top left: eye-level establishing view. Top right: high-angle overview of the layout. Bottom left: move to the opposite end of the space and look back. Bottom right: a side view showing depth. Use perspective in all four panels. Keep architecture, fixed furnishings, materials, scale, weather, time and lighting consistent. Show only the static environment, without people, animals, crowds or movable story props. No text, labels, logos or watermarks.",
+      "task": "Create a four-panel environment reference sheet of the same unoccupied location in a {aspect_ratio} frame. Top left: eye-level establishing view. Top right: high-angle overview of the layout. Bottom left: move to the opposite end of the space and look back. Bottom right: a side view showing depth. Use perspective in all four panels. Keep architecture, fixed furnishings, materials and scale consistent. Show only the static environment, without people, animals, crowds or movable story props. No text, labels, logos or watermarks.",
       "heading": "Scene description:",
       "fields": [],
       "suffix": "All four views are unoccupied environment plates with fixed furnishings only. Keep people, animals, silhouettes and character reflections out of every view, including the distance, doorways, windows and reflective surfaces."

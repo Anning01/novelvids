@@ -1,6 +1,20 @@
 """Public labels and tariffs come from active platform-owned configurations."""
 from math import isfinite
 from models.config import AiModelConfig
+from utils.enums import AiTaskTypeEnum
+
+
+PUBLIC_KINDS = {
+    AiTaskTypeEnum.extraction: "text",
+    AiTaskTypeEnum.reference_image: "image",
+    AiTaskTypeEnum.storyboard: "text",
+    AiTaskTypeEnum.video: "video",
+    AiTaskTypeEnum.project_analysis: "text",
+    AiTaskTypeEnum.remake_decomposition: "text",
+    AiTaskTypeEnum.creation_agent: "text",
+    AiTaskTypeEnum.screenplay: "text",
+    AiTaskTypeEnum.prompt_optimization: "text",
+}
 
 
 def public_tariff(raw):
@@ -12,6 +26,8 @@ def public_tariff(raw):
         "input_price_per_1m","cache_input_price_per_1m","output_price_per_1m","price_per_minute","discount"
     } and number(v)}
     data["currency"] = "CNY"
+    if raw.get("type") in {"text", "image", "video", "asr", "media_processing"}:
+        data["type"] = raw["type"]
     if raw.get("billing_unit") in {"token", "second", "minute"}:
         data["billing_unit"] = raw["billing_unit"]
     for k in ("prices","video_reference_prices"):
@@ -27,11 +43,20 @@ def public_tariff(raw):
 
 async def model_catalog():
     rows = await AiModelConfig.filter(scope="official", team_id__isnull=True, is_active=True).exclude(api_protocol="novelvids").order_by("id").values(
-        "id","name","image_model_type","video_model_type","api_protocol","task_type","task_types","pricing","supports_tool_calls","supports_json_output")
-    kinds = {2:"image", 4:"video", 8:"media_processing", 9:"asr"}
-    return [{"id": f"nv-{r['id']}", "name":r["name"],
-             "kinds":list(dict.fromkeys(kinds.get(t, "text") for t in (r["task_types"] or [r["task_type"]]))),
-             "image_model_type":r["image_model_type"], "video_model_type":r["video_model_type"],
-             "reference_image_urls":bool(r["image_model_type"] and r["api_protocol"] in {"volcengine_ark","openrouter_compatible"}),
-             "pricing":public_tariff(r["pricing"]), "tool_calls":r["supports_tool_calls"], "json_output":r["supports_json_output"]}
-            for r in rows]
+        "id","name","created_at","image_model_type","video_model_type","api_protocol","task_type","task_types","pricing","supports_tool_calls","supports_json_output")
+    models = []
+    for row in rows:
+        task_types = row["task_types"] or [row["task_type"]]
+        kinds = list(dict.fromkeys(PUBLIC_KINDS[task] for task in task_types if task in PUBLIC_KINDS))
+        if not kinds:
+            continue
+        models.append({
+            "id": f"nv-{row['id']}", "name": row["name"], "kinds": kinds,
+            "task_types": [task for task in task_types if task in PUBLIC_KINDS],
+            "created": int(row["created_at"].timestamp()),
+            "image_model_type": row["image_model_type"], "video_model_type": row["video_model_type"],
+            "reference_image_urls": bool(row["image_model_type"] and row["api_protocol"] in {"volcengine_ark", "openrouter_compatible"}),
+            "pricing": public_tariff(row["pricing"]), "tool_calls": row["supports_tool_calls"],
+            "json_output": row["supports_json_output"],
+        })
+    return models

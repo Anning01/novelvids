@@ -117,7 +117,10 @@ async def test_sheet_uses_existing_task_usage_and_preserves_prompt_and_scene_ide
     generate = AsyncMock(return_value=[object()])
     monkeypatch.setattr('services.reference.generator.generate_for_sora_consistency', generate)
     monkeypatch.setattr('services.reference.handler._persist_generated_image', AsyncMock(return_value='/media/sheet.png'))
-    first, second = await asyncio.gather(submit_sheet(scene.id), submit_sheet(scene.id))
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException, match='请选择生图模型'):
+        await submit_sheet(scene.id, model_config_id=None)
+    first, second = await asyncio.gather(submit_sheet(scene.id, model_config_id=config.id), submit_sheet(scene.id, model_config_id=config.id))
     assert first.id == second.id
     assert first.request_params['model_config_id'] == config.id
     assert 'api_key' not in first.request_params
@@ -131,6 +134,7 @@ async def test_sheet_uses_existing_task_usage_and_preserves_prompt_and_scene_ide
     assert scene.metadata['storyboard_sheet']['image_url'] == '/media/sheet.png'
     assert first.response_data['image_count'] == 1 and first.response_data['saved']
     assert 'line art storyboard' in generate.call_args.args[0]['base_traits']
+    assert generate.call_args.kwargs['model'] == config.model
     from models.usage_record import ModelUsageRecord
     assert await ModelUsageRecord.filter(ai_task_id=first.id, billing_type='image').count() == 1
     await executor.run(first)
@@ -145,8 +149,8 @@ async def test_sheet_changed_after_submission_never_calls_provider(monkeypatch):
     scene = await Scene.get(chapter__novel_id=conversation.novel_id)
     scene.prompt_params = _shot().model_dump()
     await scene.save()
-    await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
-    task = await submit_sheet(scene.id)
+    config = await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
+    task = await submit_sheet(scene.id, model_config_id=config.id)
     await Scene.filter(id=scene.id).update(prompt='新稿')
     generate = AsyncMock()
     monkeypatch.setattr('services.reference.generator.generate_for_sora_consistency', generate)
@@ -242,9 +246,9 @@ async def test_cancelling_parent_after_image_request_keeps_usage_without_attachi
     scene = await Scene.get(chapter__novel_id=conversation.novel_id)
     scene.prompt_params = _shot().model_dump()
     await scene.save()
-    await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
+    config = await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
     root = await AiTask.create(task_type=3, status=2, request_params={'novel_id': conversation.novel_id})
-    task = await submit_sheet(scene.id)
+    task = await submit_sheet(scene.id, model_config_id=config.id)
     task.request_params = {**task.request_params, 'origin_run_id': str(root.id)}
     await task.save()
     started, release = asyncio.Event(), asyncio.Event()
@@ -279,7 +283,7 @@ def test_official_prompt_rules_cannot_override_the_host_structured_output_contra
 
 
 @pytest.mark.asyncio
-async def test_enabled_storyboards_queue_images_without_waiting_for_another_execution_slot(monkeypatch):
+async def test_enabled_storyboards_wait_for_an_explicit_sheet_model(monkeypatch):
     from services.storyboard.handler import StoryboardTaskHandler
     from schemas.scene import Storyboard
     from services.ai_task_executor import ai_task_executor
@@ -294,7 +298,8 @@ async def test_enabled_storyboards_queue_images_without_waiting_for_another_exec
     run = AsyncMock()
     monkeypatch.setattr(ai_task_executor, 'run', run)
     result = await StoryboardTaskHandler().execute({'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'})
-    assert result['storyboard_sheet_task_ids'] == [str(task.id)]
+    assert result['storyboard_sheet_task_ids'] == []
+    submit.assert_not_awaited()
     assert result['scenes_created'] == 1
     run.assert_not_awaited()
 
@@ -311,12 +316,12 @@ async def test_automatic_sheet_requests_have_independent_idempotency_from_parent
     first.prompt_params = _shot().model_dump()
     await first.save()
     second = await Scene.create(chapter_id=first.chapter_id, sequence=2, prompt='已保存的第二镜', prompt_params=_shot(2).model_dump())
-    await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
+    config = await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
     token = submission.set({'submission_id': str(uuid4()), 'submission_hash': 'parent-request'})
     try:
         parent = await ai_task_executor.submit(AiTaskTypeEnum.storyboard, await prepare_workflow({'novel_id': conversation.novel_id, 'chapter_id': first.chapter_id}))
-        a, b = await submit_sheet(first.id), await submit_sheet(second.id)
-        again = await submit_sheet(first.id)
+        a, b = await submit_sheet(first.id, model_config_id=config.id), await submit_sheet(second.id, model_config_id=config.id)
+        again = await submit_sheet(first.id, model_config_id=config.id)
         assert len({parent.id, a.id, b.id}) == 3 and a.id == again.id
         assert a.request_params['submission_id'] != parent.request_params['submission_id']
     finally:

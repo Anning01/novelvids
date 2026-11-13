@@ -26,7 +26,9 @@ def scene_fingerprint(scene):
     return hashlib.sha256(json.dumps([scene.prompt, scene.prompt_params, scene.description], sort_keys=True).encode()).hexdigest()
 
 
-async def submit_sheet(scene_id, *, team_id=None, user_id=None, model_config_id=None):
+async def submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id=None):
+    if not model_config_id:
+        raise HTTPException(422, localized_message('请选择生图模型'))
     from uuid import UUID, uuid5
     from services.creation_agent.submissions import submission
     envelope = submission.get()
@@ -41,7 +43,7 @@ async def submit_sheet(scene_id, *, team_id=None, user_id=None, model_config_id=
             submission.reset(token)
 
 
-async def _submit_sheet(scene_id, *, team_id=None, user_id=None, model_config_id=None):
+async def _submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id=None):
     from controllers.config import ai_model_config_controller, general_config_controller
     from services.ai_task_executor import ai_task_executor
     from services.creation_agent.skill_execution import prepare_workflow
@@ -68,6 +70,8 @@ async def _submit_sheet(scene_id, *, team_id=None, user_id=None, model_config_id
             return previous
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.reference_image, status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]).using_db(db):
             if (task.request_params or {}).get('scene_id') == scene.id and (task.request_params or {}).get('operation') == 'storyboard_sheet':
+                if task.request_params.get('model_config_id') != config.id:
+                    raise HTTPException(409, localized_message('本镜已有使用其他模型的线稿任务，请等待完成'))
                 return await bind_submission(task, params)
         prepared = await prepare_workflow(params)
         for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):

@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 import httpx
+from services.platform.http_contract import check_upstream_response, public_task_error
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for, validate_selection
@@ -40,6 +41,7 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
             raise AutoDLGenerationError("AutoDL 视频接口网络请求失败") from exc
         # 仅记录结构与状态，Token、提示词、参考素材和结果签名 URL 均不入日志。
         logger.info("autodl_response endpoint=%s http_status=%s", safe_endpoint(url), response.status_code)
+        check_upstream_response(response)
         if response.status_code >= 400:
             raise AutoDLGenerationError(f"AutoDL 视频请求失败（HTTP {response.status_code}）")
         try:
@@ -122,7 +124,7 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
                         return self._build_result(TaskStatusEnum.completed, progress=100, url=video_url)
             raise AutoDLGenerationError("AutoDL 任务成功但未返回视频 URL")
         if status in {"FAILED", "ERROR"}:
-            return self._build_result(TaskStatusEnum.failed, error="AutoDL 视频生成任务失败，请在渠道后台检查任务")
+            return self._build_result(TaskStatusEnum.failed, error=public_task_error(data, "AutoDL 视频生成任务失败，请在渠道后台检查任务"))
         if status in {"CANCELLED", "CANCELED"}:
             return self._build_result(TaskStatusEnum.cancelled)
         if status == "QUEUED":

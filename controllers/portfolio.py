@@ -127,7 +127,9 @@ async def _attach_costs(works: list[WorkDetail], ctx: AuthContext) -> None:
     team_id, user_id = billing_scope(ctx)
     costs = await recorded_project_costs([work.project_id for work in works], team_id, user_id)
     for work in works:
-        work.recorded_cost = costs.get(work.project_id, 0)
+        total = costs.get(work.project_id, {})
+        work.recorded_cost = total.get("total_cost", 0)
+        work.pending_cost = bool(total.get("pending_records"))
         work.cost_scope = 'self' if user_id is not None else 'project'
 
 

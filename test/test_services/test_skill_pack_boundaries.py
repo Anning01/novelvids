@@ -9,6 +9,7 @@ import pytest
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
+from models.chapter import Chapter
 from prompts.styles import list_styles
 from prompts.labels import prompt_label
 from test.remake_fixtures import remake_shot
@@ -32,7 +33,7 @@ def test_scene_image_rules_require_cinematic_panels_without_design_sheet_labels(
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     rendered = instructions(snapshot, language, "image")
     assert f"language={language}" in rendered
-    for rule in ("2×2等大画面", "画面铺满到边缘", "不要留白", "标题栏", "不画文字", "视角名称", "正交投影", "室内与室外", "写进保存的完整提示词"):
+    for rule in ("2×2等大画面", "画面铺满到边缘", "不要留白", "标题栏", "不画文字", "视角名称", "正交投影", "室内与室外", "按用户要求调整"):
         assert rule in rendered
     assert snapshot.read("image") in rendered
 
@@ -122,7 +123,7 @@ def test_skill_manuscript_sampling_uses_facts_instead_of_templates(
     with_chapters
 ):
     novel = SimpleNamespace(content="Original manuscript. " * 4000)
-    chapters = [SimpleNamespace(number=1, name="Chapter 1: Arrival", content=novel.content)]
+    chapters = [Chapter(number=1, name="Chapter 1: Arrival", content=novel.content)]
     result = _build_analysis_material(
         novel, chapters if with_chapters else [], "en"
     )

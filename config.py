@@ -124,15 +124,20 @@ class Settings:
     tz = ZoneInfo(TIMEZONE)
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
-    # 登录与团队功能开关（个人本地使用默认关闭）
-    AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", False)
+    # 自建工作台默认启用本地账号与团队。
+    AUTH_ENABLED: bool = _env_bool("AUTH_ENABLED", DEPLOYMENT_ROLE == "studio")
     AUTH_PROVIDER: str = os.getenv("AUTH_PROVIDER", "password").strip().lower()
     if AUTH_PROVIDER not in {"password", "qiling"}:
         raise ValueError("AUTH_PROVIDER must be password or qiling")
+    if DEPLOYMENT_ROLE == "studio":
+        AUTH_PROVIDER = "password"
     QILING_API_BASE_URL: str = os.getenv(
         "QILING_API_BASE_URL", os.getenv("NOVELVIDS_DEV_QILING_API_BASE_URL", "")
     ).strip().rstrip("/")
     QILING_SIGNUP_ENABLED: bool = _env_bool("QILING_SIGNUP_ENABLED", False)
+    if DEPLOYMENT_ROLE == "studio":
+        QILING_API_BASE_URL = ""
+        QILING_SIGNUP_ENABLED = False
     SUPER_ADMIN_USERNAME: str = os.getenv("SUPER_ADMIN_USERNAME", "")
     SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "")
 
@@ -165,7 +170,9 @@ class Settings:
     STUDIO_TEMP_BUCKET = os.getenv("STUDIO_TEMP_BUCKET", "")
     STUDIO_TEMP_REGION = os.getenv("STUDIO_TEMP_REGION", "")
     STUDIO_TEMP_TEAM_BYTES = int(os.getenv("STUDIO_TEMP_TEAM_BYTES", str(20 * 1024**3)))
-    STUDIO_PLATFORM_BASE_URL = os.getenv("STUDIO_PLATFORM_BASE_URL", "").rstrip("/")
+    STUDIO_PLATFORM_BASE_URL = (
+        os.getenv("STUDIO_PLATFORM_BASE_URL", "").strip() or "https://shortdramas.xiazq.com/v1"
+    ).rstrip("/")
     STUDIO_PLATFORM_API_KEY = os.getenv("STUDIO_PLATFORM_API_KEY", "")
     STUDIO_MEDIA_CACHE_PATH = os.getenv("STUDIO_MEDIA_CACHE_PATH", "./data/studio-media")
 

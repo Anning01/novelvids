@@ -9,8 +9,8 @@ import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/
 import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { ProjectOverviewItem } from '@/types'
 
-const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; exportOnly?: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error'; costHint?: string }>()
-const emit = defineEmits<{ download: [project: ProjectOverviewItem]; remove: [project: ProjectOverviewItem] }>()
+const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; exportOnly?: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error' | 'pending'; costHint?: string }>()
+const emit = defineEmits<{ download: [project: ProjectOverviewItem]; cancelDownload: [projectId: number]; remove: [project: ProjectOverviewItem] }>()
 const menuOpen = ref(false)
 const actions = ref<HTMLElement | null>(null)
 const trigger = ref<InstanceType<typeof AppButton> | null>(null)
@@ -41,12 +41,18 @@ function outside(event: PointerEvent) {
 
 function moveFocus() {
   const target = document.activeElement === exportButton.value ? deleteButton.value : exportButton.value
-  target?.focus()
+  if (!target?.disabled) target?.focus()
 }
 
 function download() {
   closeMenu(true)
   emit('download', props.project)
+}
+
+function exportAction() {
+  if (!props.exporting) { download(); return }
+  closeMenu(true)
+  emit('cancelDownload', props.project.id)
 }
 
 function remove() {
@@ -60,7 +66,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 
 <template>
   <article class="project-overview-card" :class="{ 'is-deleting': deleting }" :aria-labelledby="`project-title-${project.id}`">
-    <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
+    <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="exportOnly ? undefined : tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
       <div class="project-overview-card__identity">
         <ProjectCover class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
         <div class="project-overview-card__copy">
@@ -92,18 +98,23 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
         <div><dt><BookOpen :size="13" aria-hidden="true" />{{ tr('章节数') }}</dt><dd>{{ projectNumber(project.production.chapter_count) }}</dd></div>
         <div :title="tr('当前绑定的图片、声音和视频，项目内按文件去重；已移除的素材不计入。')"><dt><Image :size="13" aria-hidden="true" />{{ tr('资产数') }}</dt><dd>{{ projectNumber(project.production.asset_count) }}</dd></div>
         <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_finished_duration_count ?? 0 }) : tr('每集按最新成功合成版本的实际时长统计。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
-        <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : tr('读取失败') }}</dd></div>
+        <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : costState === 'pending' ? tr('待结算') : tr('读取失败') }}</dd></div>
       </dl>
     </component>
 
     <footer v-if="!exportOnly && project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
-    <div v-if="editable" ref="actions" class="project-overview-card__actions" :class="{ 'is-open': menuOpen }" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="event => { if (!actions?.contains(event.relatedTarget as Node)) closeMenu() }">
-      <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting || exporting" :loading="exporting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
+    <div v-if="editable && exportOnly" class="project-overview-card__export">
+      <span v-if="exporting" role="status">{{ tr('正在导出') }}</span>
+      <AppButton variant="secondary" size="sm" @click="exportAction"><Download v-if="!exporting" :size="14" aria-hidden="true" />{{ exporting ? tr('取消导出') : tr('导出作品') }}</AppButton>
+    </div>
+    <div v-if="editable && !exportOnly" ref="actions" class="project-overview-card__actions" :class="{ 'is-open': menuOpen }" @keydown.esc.stop.prevent="closeMenu(true)" @focusout="event => { if (!actions?.contains(event.relatedTarget as Node)) closeMenu() }">
+      <AppButton ref="trigger" variant="ghost" icon-only size="sm" :aria-label="tr('项目「{p0}」更多操作', { p0: project.name })" aria-haspopup="menu" :aria-expanded="menuOpen" :disabled="deleting" @click.stop="openMenu" @keydown.down.prevent="openMenu">
         <Ellipsis :size="18" aria-hidden="true" />
       </AppButton>
+      <span v-if="exporting" class="project-overview-card__export-status" role="status">{{ tr('正在导出') }}</span>
       <div v-if="menuOpen" class="project-overview-card__menu" role="menu" :aria-label="tr('项目操作')" @keydown.up.prevent="moveFocus" @keydown.down.prevent="moveFocus">
-        <button ref="exportButton" type="button" role="menuitem" @click.stop="download"><Download :size="14" aria-hidden="true" />{{ tr('导出作品') }}</button>
-        <button v-if="!exportOnly" ref="deleteButton" class="remove-project" type="button" role="menuitem" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
+        <button ref="exportButton" type="button" role="menuitem" @click.stop="exportAction"><Download :size="14" aria-hidden="true" />{{ exporting ? tr('取消导出') : tr('导出作品') }}</button>
+        <button ref="deleteButton" class="remove-project" type="button" role="menuitem" :disabled="exporting" @click.stop="remove"><Trash2 :size="14" aria-hidden="true" />{{ tr('删除项目') }}</button>
       </div>
     </div>
   </article>
@@ -111,6 +122,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 
 <style scoped>
 .project-finished-link{padding:10px 20px 15px;font-size:12px;color:var(--app-accent)}
+.project-overview-card__export { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:0 20px 15px; color:var(--app-text-secondary); font-size:12px; }
 .project-overview-card { display:flex;flex-direction:column;position: relative; min-width: 0; border: 1px solid var(--app-border); border-radius: 18px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 3px 14px rgb(35 39 55 / 3%); transition: border-color 160ms ease, box-shadow 160ms ease; }
 .project-overview-card:hover, .project-overview-card:focus-within { border-color: var(--app-border-strong); box-shadow: 0 8px 24px rgb(35 39 55 / 7%); }
 .project-overview-card__link { display: flex; flex:1; min-width: 0; flex-direction: column; padding: 20px; border-radius: inherit; color: inherit; }
@@ -144,6 +156,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 .project-overview-card:hover .project-overview-card__actions > .app-button, .project-overview-card:focus-within .project-overview-card__actions > .app-button, .project-overview-card__actions.is-open > .app-button { opacity: 1; }
 .project-overview-card__menu { position: absolute; top: 36px; right: 0; width: 140px; padding: 5px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface); box-shadow: var(--app-shadow); }
 .project-overview-card__menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.project-overview-card__export-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.project-overview-card__menu button:disabled { opacity: .45; cursor: not-allowed; }
 .project-overview-card__menu .remove-project { color: var(--creation-danger); }
 .project-overview-card__menu button:hover, .project-overview-card__menu button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; background: var(--app-surface-muted); }
 .is-deleting { opacity: .6; pointer-events: none; }

@@ -2,6 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/api'
+import MaterialMentionInput from '@/features/workbench/components/MaterialMentionInput.vue'
+import CatalogResourcePicker from '@/features/resource-library/CatalogResourcePicker.vue'
+import { catalogApi } from '@/features/resource-library/catalog'
+import AppSelect from './AppSelect.vue'
 import { AssetTypeEnum, TaskStatusEnum, type Asset, type AssetVariant, type AudioReference, type DigitalHuman, type ImageGenerationModel, type PaginationResponse } from '@/types'
 import AppButton from './AppButton.vue'
 import AssetCreateDialog from './AssetCreateDialog.vue'
@@ -37,9 +41,134 @@ vi.mock('@/api', () => ({
   },
 }))
 
+vi.mock('@/features/resource-library/catalog', async (load) => {
+  const original = await load<typeof import('@/features/resource-library/catalog')>()
+  return { ...original, catalogApi: { ...original.catalogApi, projects: vi.fn(), projectCharacters: vi.fn() } }
+})
+
 beforeEach(() => {
+  vi.mocked(catalogApi.projects).mockResolvedValue({ data: { items: [] } } as never)
   vi.mocked(api.assetGenerationHistory).mockResolvedValue({ code: 0, message: 'ok', data: [] })
   vi.mocked(api.assetVariants).mockResolvedValue({ code: 0, message: 'ok', data: [] })
+})
+
+it.each(['light', 'dark'])('filters the character library by project and discards outdated responses (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  const empty = { code: 0, message: '', data: { items: [], pagination: { page: 1, pages: 0, page_size: 24, total: 0 } } }
+  vi.mocked(api.assetLibrary).mockResolvedValue(empty)
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: '', data: [] })
+  vi.mocked(catalogApi.projects).mockResolvedValue({ ...empty, data: { ...empty.data,
+    items: [{ id: 20, name: '第一部作品' }, { id: 21, name: '第二部作品' }] } } as never)
+  let finishFirst!: (result: PaginationResponse<Asset>) => void
+  const first = { ...editedAsset, id: 80, novel_id: 20, canonical_name: '第一部的人物', main_image: '/media/first.png' }
+  const second = { ...editedAsset, id: 81, novel_id: 21, canonical_name: '第二部的人物', main_image: '/media/second.png' }
+  vi.mocked(catalogApi.projectCharacters)
+    .mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve }))
+    .mockResolvedValueOnce({ ...empty, data: { ...empty.data, items: [second] } })
+  const w = mount(AssetCreateDialog, { props: { open: true, kind: 'character', novelId: 9, initialMode: 'library' },
+    global: { components: { AppButton }, stubs: { Teleport: true } } })
+  await flushPromises()
+  await w.findAll('.asset-library nav button').find(button => button.text() === '项目人物')!.trigger('click')
+  await flushPromises()
+  const picker = w.findAllComponents(AppSelect).find(component => component.props('ariaLabel') === '按项目筛选')!
+  expect(picker.props('searchable')).toBe(true)
+  expect(picker.props('options')).toContainEqual({ value: '21', label: '第二部作品' })
+  picker.vm.$emit('update:modelValue', '20')
+  await w.vm.$nextTick()
+  expect(w.get('.asset-library [role="status"]').text()).toContain('正在加载')
+  picker.vm.$emit('update:modelValue', '21')
+  await flushPromises()
+  finishFirst({ ...empty, data: { ...empty.data, items: [first] } })
+  await flushPromises()
+  expect(w.findAll('.asset-library__card').map(card => card.text())).toEqual([`${second.canonical_name}${second.description}`])
+  expect(catalogApi.projectCharacters).toHaveBeenNthCalledWith(1, 20)
+  expect(catalogApi.projectCharacters).toHaveBeenNthCalledWith(2, 21)
+  w.unmount()
+  vi.mocked(catalogApi.projectCharacters).mockClear()
+  delete document.documentElement.dataset.appTheme
+})
+
+it.each(['light', 'dark'])('keeps library originals and falls back to them when editor derivatives are missing (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  const source = { ...editedAsset, id: 81, novel_id: 80, canonical_name:'角色库人物',
+    main_image:'/media/source.png', main_image_thumbnail:'/media/derivatives/source-thumbnail.webp' }
+  const current = { ...editedAsset, main_image:'/media/current.png', main_image_preview:'/media/derivatives/current-preview.webp' }
+  vi.mocked(api.assetLibrary).mockResolvedValue({code:0,message:'',data:{items:[source],pagination:{page:1,pages:1,page_size:24,total:1}}})
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({code:0,message:'',data:[]})
+  vi.mocked(api.asset).mockResolvedValue({code:0,message:'',data:current})
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({code:0,message:'',data:{prompt:'用户设定',prompt_language:'zh'}})
+  vi.mocked(api.updateAsset).mockResolvedValue({code:0,message:'',data:{...current, main_image:source.main_image}})
+  const w = mount(AssetCreateDialog,{props:{open:true,kind:'character',novelId:9,asset:current},global:{components:{AppButton},stubs:{Teleport:true}}})
+  await flushPromises()
+  const preview = w.get('.asset-generated-preview__viewer img')
+  await preview.trigger('error')
+  expect(preview.attributes('src')).toBe(current.main_image)
+  const baseThumbnail = w.get('.asset-variant-item.is-base img')
+  await baseThumbnail.trigger('error')
+  expect(baseThumbnail.attributes('src')).toBe(current.main_image)
+  await w.findAll('.asset-mode button').find(button => button.text().includes('从角色库选择'))!.trigger('click')
+  const libraryCard = w.findAll('.asset-library__card').find(card => card.text().includes(source.canonical_name))!
+  expect(libraryCard.get('img').attributes('src')).toBe(source.main_image_thumbnail)
+  await libraryCard.trigger('click')
+  await w.get('form').trigger('submit')
+  await flushPromises()
+  expect(api.updateAsset).toHaveBeenCalledWith(current.id,expect.objectContaining({main_image:source.main_image}),expect.anything())
+  w.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
+it('adds references from the character library, own variants and resources and keeps @ bindings after removal', async () => {
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({code:0,message:'',data:{items:[],pagination:{page:1,pages:0,page_size:24,total:0}}})
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({code:0,message:'',data:[imageModel(12,'图生图模型')]})
+  const variant: AssetVariant = {id:31,asset_id:7,name:'白衣形态',images:['/media/white.png'],created_at:'',updated_at:''}
+  vi.mocked(api.assetVariants).mockResolvedValue({code:0,message:'',data:[variant]})
+  vi.mocked(api.asset).mockResolvedValue({code:0,message:'',data:editedAsset})
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({code:0,message:'',data:{prompt:'外观设定',prompt_language:'zh'}})
+  vi.mocked(api.updateAsset).mockImplementation(async (_id,payload) => ({code:0,message:'',data:{...editedAsset,...payload} as Asset}))
+  vi.mocked(api.generateAsset).mockResolvedValue({code:0,message:'',data:{id:'refs',task_type:2,status:TaskStatusEnum.COMPLETED,created_at:''}})
+  const w = mount(AssetCreateDialog,{props:{open:true,kind:'character',novelId:9,asset:editedAsset},global:{components:{AppButton},stubs:{Teleport:true,CatalogResourcePicker:true}}})
+  await flushPromises()
+  await w.findAll('.asset-reference-sources button').find(button => button.text()==='角色库')!.trigger('click')
+  await w.get('[aria-label="添加参考：多肉/花卉种植员"]').trigger('click')
+  await w.findAll('.asset-reference-sources button').find(button => button.text()==='自身形态')!.trigger('click')
+  await w.get('[aria-label="添加参考：白衣形态"]').trigger('click')
+  await w.findAll('.asset-reference-sources button').find(button => button.text()==='资源库')!.trigger('click')
+  w.getComponent(CatalogResourcePicker).vm.$emit('choose',[{url:'/media/costume.png'}])
+  await flushPromises()
+  expect(w.findAll('.asset-reference-input__grid figure')).toHaveLength(3)
+  await w.get('[aria-label="引用参考图 2"]').trigger('click')
+  await flushPromises()
+  const editor = w.getComponent(MaterialMentionInput)
+  expect(editor.props('modelValue')).toContain('@{参考图2}')
+  expect(w.findAll('.workbench-inline-mention')).toHaveLength(1)
+  await w.get('[aria-label="移除图生图参考图片 1"]').trigger('click')
+  await flushPromises()
+  expect(w.getComponent(MaterialMentionInput).props('modelValue')).toContain('@{参考图1}')
+  expect(w.getComponent(MaterialMentionInput).props('mentions')[0]!.previewUrl).toBe('/media/white.png')
+  await w.findAll('.asset-dialog__footer button').find(button => button.text().includes('生成图片'))!.trigger('click')
+  await flushPromises()
+  expect(api.generateAsset).toHaveBeenCalledWith(7,undefined,['/media/white.png','/media/costume.png'])
+  expect(api.updateAsset).toHaveBeenCalledWith(7,expect.objectContaining({base_traits:expect.stringContaining('@{参考图1}'),metadata:expect.objectContaining({generation_reference_images:['/media/white.png','/media/costume.png']})}),expect.anything())
+  w.unmount()
+})
+
+it('recovers an older library import whose main image was saved as a thumbnail', async () => {
+  const original = { ...editedAsset, id:81, main_image:'/media/old-source.png', main_image_thumbnail:'/media/derivatives/old-source-thumbnail.webp' }
+  const current = { ...editedAsset, main_image:original.main_image_thumbnail, metadata:{library_source:'project',source_asset_id:original.id} }
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({code:0,message:'',data:{items:[],pagination:{page:1,pages:0,page_size:24,total:0}}})
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({code:0,message:'',data:[]})
+  vi.mocked(api.asset).mockImplementation(async id => ({code:0,message:'',data:id === original.id ? original : current}))
+  vi.mocked(api.referencePromptPreview).mockResolvedValue({code:0,message:'',data:{prompt:'用户设定',prompt_language:'zh'}})
+  const w = mount(AssetCreateDialog,{props:{open:true,kind:'character',novelId:9,asset:current},global:{components:{AppButton},stubs:{Teleport:true}}})
+  await flushPromises()
+  const preview = w.get('.asset-generated-preview__viewer img')
+  await preview.trigger('error')
+  expect(preview.attributes('src')).toBe(original.main_image)
+  w.unmount()
 })
 
 const humans: DigitalHuman[] = [
@@ -160,7 +289,8 @@ it('notifies the outer card of a new asset generation before closing the drawer'
     global: { components: { AppButton }, stubs: { Teleport: true } } })
   await flushPromises()
   await wrapper.get('input[placeholder="请输入"]').setValue('办公室')
-  await wrapper.get('textarea[placeholder="描述场景的外观、材质、光影和视角要求"]').setValue('保存的完整场景提示词')
+  wrapper.getComponent(MaterialMentionInput).vm.$emit('update:modelValue', '保存的完整场景提示词')
+  await flushPromises()
   await wrapper.get('form').trigger('submit')
   await flushPromises()
   expect(api.generateAsset).toHaveBeenCalledOnce()
@@ -202,8 +332,8 @@ it('keeps the selected library card outline inside the scroll viewport', async (
   })
   await flushPromises()
 
-  expect(wrapper.get('textarea').element.value).toContain('上半身正面平视特写')
-  expect(wrapper.get('textarea').element.value).not.toContain(editedAsset.description)
+  expect(wrapper.getComponent(MaterialMentionInput).props('modelValue')).toContain('上半身正面平视特写')
+  expect(wrapper.getComponent(MaterialMentionInput).props('modelValue')).not.toContain(editedAsset.description)
 
   const libraryMode = wrapper.findAll('button').find(button => button.text().includes('从角色库选择'))
   expect(libraryMode).toBeDefined()
@@ -593,7 +723,7 @@ it('uploads an image-to-image reference and sends it with storyboard asset gener
   await generateButton!.trigger('click')
   await flushPromises()
 
-  expect(api.upload).toHaveBeenCalledWith(file)
+  expect(api.upload).toHaveBeenCalledWith(file, 12)
   expect(api.updateAsset).toHaveBeenCalledWith(assetWithImage.id, expect.objectContaining({
     metadata: expect.objectContaining({
       generation_reference_images: ['uploads/9/reference.png'],
@@ -717,14 +847,15 @@ it('switches and persists an independent JSON form version for each derived stat
 
   await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
   expect(wrapper.get<HTMLInputElement>('.asset-form-grid input').element.value).toBe('李火旺·练气期')
-  expect(wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').element.value).toBe('练气期白衣形态提示词')
+  expect(wrapper.getComponent(MaterialMentionInput).props('modelValue')).toBe('练气期白衣形态提示词')
   expect(wrapper.findAll<HTMLTextAreaElement>('.asset-field textarea').at(-1)!.element.value).toBe('练气期的独立角色描述')
 
   await wrapper.get('button[aria-label="切换到主形象"]').trigger('click')
   expect(wrapper.get<HTMLInputElement>('.asset-form-grid input').element.value).toBe('李火旺')
   await wrapper.get('button[aria-label="切换到练气期"]').trigger('click')
   await wrapper.get<HTMLInputElement>('.asset-form-grid input').setValue('李火旺·练气后期')
-  await wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').setValue('练气后期的新提示词')
+  wrapper.getComponent(MaterialMentionInput).vm.$emit('update:modelValue', '练气后期的新提示词')
+  await flushPromises()
   await wrapper.get('.asset-dialog').trigger('submit')
   await flushPromises()
 
@@ -975,7 +1106,7 @@ it('opens the requested variant with its own prompt without requiring a manual s
   vi.mocked(api.referencePromptPreview).mockResolvedValue({ code: 0, message: '', data: { prompt: '', prompt_language: 'zh' } })
   const wrapper = mount(AssetCreateDialog, { props: { open: true, kind: 'character', novelId: 9, asset: editedAsset, initialVariantId: 31 }, global: { stubs: { Teleport: true } } })
   await flushPromises()
-  expect(wrapper.get<HTMLTextAreaElement>('textarea[rows="8"]').element.value).toBe(variant.base_traits)
+  expect(wrapper.getComponent(MaterialMentionInput).props('modelValue')).toBe(variant.base_traits)
   expect(wrapper.get('.asset-variant-item.is-selected').text()).toContain('雨衣形态')
   wrapper.unmount()
 })

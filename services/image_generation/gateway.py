@@ -168,11 +168,15 @@ async def generate_images(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        platform_call = None
+        if api_protocol == ImageApiProtocol.novelvids.value:
+            from services.billing.platform import begin_platform_image
+            platform_call = await begin_platform_image(base_url, model, api_key)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=api_protocol != ImageApiProtocol.novelvids.value) as client:
             headers = {"Authorization": f"Bearer {api_key}"}
             if api_protocol == ImageApiProtocol.novelvids.value:
                 from uuid import uuid4
-                headers["Idempotency-Key"] = str(uuid4())
+                headers["Idempotency-Key"] = str(platform_call.request_key if platform_call else uuid4())
             if prepared.images:
                 try:
                     files = await image_uploads(client, prepared.images)
@@ -182,6 +186,9 @@ async def generate_images(
                     data={key: str(value) for key, value in prepared.payload.items()}, files=files)
             else:
                 response = await client.post(endpoint, headers=headers, json=prepared.payload)
+            if platform_call:
+                from services.billing.platform import capture_platform_response
+                await capture_platform_response(platform_call, response)
     except httpx.HTTPError as exc:
         logger.warning(
             "image_generation_network_error protocol=%s endpoint=%s error_type=%s",

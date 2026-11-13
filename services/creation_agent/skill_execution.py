@@ -324,7 +324,7 @@ class SkillExecution:
                 "\n" + additional_instructions if additional_instructions else ""
             ),
             output_type=agent_output,
-            retries=2,
+            retries=0 if skill == 'screenplay' else 2,
         )
 
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
@@ -333,7 +333,7 @@ class SkillExecution:
 
         # These phases already receive their full rules and evidence. Additional
         # skill lookups only repeat context and consume the user's call budget.
-        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured', 'remake'}:
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'screenplay', 'storyboard', 'video', 'structured', 'remake'}:
             agent.tool(read_skill)
 
         asset_checkpoint = None
@@ -356,11 +356,10 @@ class SkillExecution:
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
-                from services.remake.asset_validation import render_remake_assets, validate_remake_assets
+                from services.remake.asset_validation import render_remake_assets
                 from pydantic_ai import ModelRetry
                 try:
                     rendered = render_remake_assets(output.model_dump(), ctx.deps, self.language, request_aspect_ratio)
-                    validate_remake_assets(rendered, ctx.deps, self.language, request_aspect_ratio)
                     output = type(output).model_validate(rendered)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
@@ -377,7 +376,7 @@ class SkillExecution:
                 from prompts.extraction import render_asset_repair
 
                 attempted = output.model_dump(mode='json', warnings=False)
-                output = asset_candidates.merge(output, ctx.deps, self.language, request_aspect_ratio)
+                output = asset_candidates.merge(output)
                 if output_validator:
                     try:
                         await output_validator(output)
@@ -391,14 +390,10 @@ class SkillExecution:
                     raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
                 from pydantic_ai import ModelRetry
-                from prompts.creation_standards import ASSET_PROMPT_KINDS
-                from prompts.reference import GROUP_PORTRAIT
                 from services.extraction.extractor import validate_asset_design
 
-                kind = ('group' if facts['asset_type'] == 1 and facts.get('reference_layout') == GROUP_PORTRAIT
-                        else ASSET_PROMPT_KINDS[facts['asset_type']])
                 try:
-                    validate_asset_design(output.prompt, kind, ctx.deps, self.language, request_aspect_ratio)
+                    validate_asset_design(output.prompt)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
             if storyboard_candidates:
@@ -433,7 +428,7 @@ class SkillExecution:
             project = await Novel.get(id=self.params["novel_id"])
             request_aspect_ratio = project.aspect_ratio or "16:9"
             if initial_assets is not None and asset_candidates and not asset_checkpoint:
-                asset_candidates.merge(initial_assets, self.snapshot, self.language, request_aspect_ratio)
+                asset_candidates.merge(initial_assets)
             from prompts.project_settings import audiovisual_guidance
             project_facts = {
                 "name": project.name,
