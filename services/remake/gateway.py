@@ -164,6 +164,17 @@ class RemakeVideoAnalysisGateway:
                     media=[video_content],
                 )
             except Exception as error:
+                from services.remake.output_recovery import recover_shot_output
+                if schema is RemakeShot:
+                    recovered = await recover_shot_output(execution.params["task_id"], index)
+                    if recovered is not None:
+                        from models.agent_operation import AgentOperation
+                        data = recovered.model_dump(mode="json")
+                        await AgentOperation.filter(task_id=execution.params["task_id"],
+                            key=f"model:remake:RemakeShot:{index}").update(state="completed", result=data)
+                        if include_segment_metadata:
+                            data.update(shot_index=index, file=path.name)
+                        return data
                 self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='failed')
                 _log_provider_failure(error, model=str(self.config.model), schema_name=schema_name, attempt=1)
                 message, error_code = _provider_failure(error, index=index)

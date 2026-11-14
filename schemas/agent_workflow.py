@@ -105,7 +105,7 @@ class RemakeShot(StructuredSkillShot):
     blocking_map: RemakeBlockingMap | None = None
     model_config = ConfigDict(extra="forbid")
     asset_refs: list[RemakeReference] = Field(max_length=30)
-    confidence: float = Field(ge=0, le=1)
+    confidence: float | None = Field(None, ge=0, le=1)
 
     @field_validator("duration")
     @classmethod
