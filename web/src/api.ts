@@ -114,7 +114,9 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
     if (!(error instanceof SyntaxError)) throw error
     const code = response.ok ? 502 : response.status
     recordRequestFailure(scope, url, method, response.status, code)
-    throw new ApiRequestError(tr('服务暂不可用，请稍后重试'), code, response.status)
+    throw new ApiRequestError(response.status === 413
+      ? tr('上传内容超过服务器允许的大小，请减小文件后重试')
+      : tr('服务暂不可用，请稍后重试'), code, response.status)
   })
   if (!response.ok || payload.code !== 0) {
     recordRequestFailure(scope, url, method, response.status, Number(payload.code) || response.status)
@@ -521,16 +523,8 @@ export const api = {
       }
     }
     const data = new FormData(); data.append('files', file)
-    const response = await fetch(`${BASE}/file/upload`, { method: 'POST', body: data, headers: authHeaders() })
-    const payload = await response.json()
-    if (!response.ok || payload.code !== 0) {
-      if (payload.code === 401) {
-        clearAuthToken()
-        redirectToLogin()
-      }
-      throw new Error(payload.message || tr('上传失败'))
-    }
-    return payload.data.files[0] as UploadResult
+    const payload = await request<SingleResponse<{files: UploadResult[]}>>('/file/upload', { method: 'POST', body: data })
+    return payload.data.files[0]!
   },
 }
 

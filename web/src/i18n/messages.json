@@ -694,6 +694,7 @@
     "用户中心：{p0}": "Profile: {p0}",
     "请求失败": "Request failed",
     "服务暂不可用，请稍后重试": "The service is temporarily unavailable. Please try again shortly.",
+    "上传内容超过服务器允许的大小，请减小文件后重试": "The upload exceeds the server limit. Reduce the file size and try again.",
     "已完成的分镜会保留，部分请求正在等待结果核对。": "Completed storyboards are saved. Some requests are awaiting verification.",
     "已保存 {p0}/{p1} 个片段的分镜": "Storyboards saved for {p0} of {p1} clips",
     "重试未完成片段（{p0}）": "Retry unfinished clips ({p0})",

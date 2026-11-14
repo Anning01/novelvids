@@ -99,6 +99,9 @@ jobs:
           docker build -t novelvids-frontend:release -f "$RUNNER_TEMP/source/web/Dockerfile" "$RUNNER_TEMP/source"
           docker run --rm --entrypoint ffmpeg novelvids-backend:release -hide_banner -loglevel error -f lavfi -i color=s=16x16:r=1 -t 1 -f null -
           docker run --rm --entrypoint ffprobe novelvids-backend:release -version
+      - name: Verify large uploads through the shipped proxy
+        if: steps.release.outputs.already_published != 'true'
+        run: python test/integration/nginx_upload_acceptance.py
       - name: Publish verified release
         if: steps.release.outputs.already_published != 'true'
         env:
