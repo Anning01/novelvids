@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from models.ai_task import AiTask
 from models.config import AiModelConfig
 from models.novel import Novel
@@ -100,5 +101,81 @@ async def test_analysis_reference_in_batch_prevents_partial_paid_queue(client, c
     assert response.json()['code'] == 409, response.text
     assert await AiTask.filter(task_type=2).count() == 0
     assert await AgentSubmission.all().count() == 0
+    await assets[0].refresh_from_db()
+    assert not assets[0].metadata
+
+
+@pytest.mark.asyncio
+async def test_batch_submits_base_and_variants_and_skips_only_finished_or_active_targets(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    asset = assets[0]
+    variants = [await AssetVariant.create(asset=asset, name=f'Form {i}',
+        metadata={'model_config_id': 99999, 'aspect_ratio': '9:16'}) for i in range(3)]
+    variants[1].images = ['/media/existing-form.png']
+    await variants[1].save()
+    payload.update(asset_ids=[asset.id], variant_ids=[v.id for v in variants] + [variants[0].id])
+    headers = {'X-Creation-Request-Id': str(uuid4())}
+    first = await client.post('/api/asset/reference-batch', json=payload, headers=headers)
+    assert first.json()['code'] == 0, first.text
+    data = first.json()['data']
+    assert {t['request_params']['variant_id'] for t in data['tasks']} == {None, variants[0].id, variants[2].id}
+    assert data['skipped_variant_ids'] == [variants[1].id]
+    for task in data['tasks']:
+        assert task['request_params']['model_config_id'] == payload['model_config_id']
+        assert task['request_params']['aspect_ratio'] == '1:1'
+    retry = await client.post('/api/asset/reference-batch', json=payload, headers=headers)
+    assert [t['id'] for t in retry.json()['data']['tasks']] == [t['id'] for t in data['tasks']]
+    second = await client.post('/api/asset/reference-batch', json=payload)
+    assert second.json()['data']['tasks'] == []
+    assert set(second.json()['data']['skipped_variant_ids']) == {v.id for v in variants}
+    # A completed base image must not prevent submitting another empty form.
+    asset.main_image = '/media/base.png'
+    await asset.save()
+    new_form = await AssetVariant.create(asset=asset, name='Another form')
+    third = await client.post('/api/asset/reference-batch', json={**payload, 'asset_ids': [], 'variant_ids': [new_form.id]})
+    assert third.json()['code'] == 0, third.text
+    assert len(third.json()['data']['tasks']) == 1
+    assert third.json()['data']['tasks'][0]['request_params']['variant_id'] == new_form.id
+
+
+@pytest.mark.asyncio
+async def test_batch_validates_variant_project_before_submitting_any_target(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    other = await Novel.create(name='Other project')
+    foreign = await Asset.create(novel=other, canonical_name='Foreign asset', asset_type=1)
+    variant = await AssetVariant.create(asset=foreign, name='Foreign form')
+    response = await client.post('/api/asset/reference-batch', json={**payload, 'variant_ids': [variant.id]})
+    assert response.json()['code'] == 404, response.text
+    assert await AiTask.all().count() == 0
+    await assets[0].refresh_from_db()
+    assert not assets[0].metadata
+
+
+@pytest.mark.asyncio
+async def test_batch_requires_at_least_one_base_or_variant(client):
+    _, payload = await batch_fixture()
+    response = await client.post('/api/asset/reference-batch', json={**payload, 'asset_ids': [], 'variant_ids': []})
+    assert response.json()['code'] == 422, response.text
+
+
+@pytest.mark.asyncio
+async def test_variant_admission_failure_rolls_back_base_queue_and_form_settings(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    variant = await AssetVariant.create(asset=assets[0], name='Rejected form', metadata={'aspect_ratio': '9:16'})
+    original = asset_controller.reference
+
+    async def submit(identifier, **kwargs):
+        if kwargs.get('variant_id') == variant.id:
+            raise HTTPException(409, 'Selected model is unavailable')
+        return await original(identifier, **kwargs)
+
+    with patch.object(asset_controller, 'reference', side_effect=submit):
+        response = await client.post('/api/asset/reference-batch', json={**payload, 'variant_ids': [variant.id]},
+            headers={'X-Creation-Request-Id': str(uuid4())})
+    assert response.json()['code'] == 409, response.text
+    assert await AiTask.all().count() == 0
+    assert await AgentSubmission.all().count() == 0
+    await variant.refresh_from_db()
+    assert variant.metadata == {'aspect_ratio': '9:16'}
     await assets[0].refresh_from_db()
     assert not assets[0].metadata

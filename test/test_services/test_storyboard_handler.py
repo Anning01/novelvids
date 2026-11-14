@@ -214,14 +214,14 @@ async def test_same_identity_forms_can_be_saved_in_one_scene():
     novel = await Novel.create(name='形态冲突不部分保存')
     chapter = await Chapter.create(novel=novel, number=2, name='第二章', content='正文')
     asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三', base_traits='少年')
-    await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
+    adult = await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
     entities = generation_entities_for_assets(await Asset.filter(id=asset.id).prefetch_related('variants'), 2, {})
     result = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[
         _shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
     assert len(result) == 2
     scene = await Scene.filter(chapter=chapter, sequence=2).prefetch_related('assets').get()
     assert [item.id for item in scene.assets] == [asset.id]
-    assert (scene.metadata or {}).get('asset_variant_ids', {}) == {}
+    assert scene.metadata['asset_variant_ids'] == {str(asset.id): [None, adult.id]}
     assert '@{张三#成年}' in scene.prompt
 
 

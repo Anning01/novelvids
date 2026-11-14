@@ -92,6 +92,7 @@ temp/
 !.github/workflows/
 .github/workflows/*
 !.github/workflows/deploy-star-history.yml
+!.github/workflows/release-studio.yml
 .ruff_cache
 
 media
@@ -132,3 +133,5 @@ GEMINI.md
 
 # Host-managed release image selection
 /docker-compose.override.yml
+# Local Docker updater state, rollback backups and Compose overlay
+.novelvids-update/

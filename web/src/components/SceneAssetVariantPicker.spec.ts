@@ -43,6 +43,16 @@ afterEach(() => {
 })
 
 describe('SceneAssetVariantPicker', () => {
+  it('shows both base and derived forms checked and deselects only the requested form', async () => {
+    const wrapper = mount(SceneAssetVariantPicker, {
+      props: { open: true, anchorId: 'missing', label: '出镜角色', assets, selectedAssetIds: [1], selectedVariantIds: { 1: [null, 11] } },
+      global: { stubs: { Teleport: true } },
+    })
+    const buttons = wrapper.findAll('.scene-asset-variant-picker__variants button')
+    expect(buttons.map(button => button.attributes('aria-pressed'))).toEqual(['true', 'true'])
+    await buttons[1]!.trigger('click')
+    expect(wrapper.emitted('select')?.[0]).toEqual([{ assetId: 1, variantId: 11, selected: false }])
+  })
   it('shows asset subjects and their variants in separate columns', () => {
     const wrapper = mount(SceneAssetVariantPicker, {
       props: {

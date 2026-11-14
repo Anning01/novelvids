@@ -144,15 +144,20 @@ class WorkSync:
         return project
 
     async def scene_values(self, work_id, shot, urls):
+        from services.video.asset_resolver import add_variant_binding
+
         assets, bindings = [], {}
         for ref in shot.visual:
             asset = await self.mapping(work_id, '', 'asset', ref.asset_id)
-            assets.append(asset.local_id)
+            if asset.local_id not in assets:
+                assets.append(asset.local_id)
             if ref.variant_id:
                 variant = await self.mapping(work_id, '', 'variant', ref.variant_id)
                 if variant.payload['asset_id'] != ref.asset_id:
                     raise ValueError('形态不属于指定资产')
-                bindings[str(asset.local_id)] = variant.local_id
+                add_variant_binding(bindings, asset.local_id, variant.local_id)
+            else:
+                add_variant_binding(bindings, asset.local_id, None)
         voice_asset_ids = {}
         for key in dict.fromkeys(voice.asset_id for voice in shot.voices):
             asset = await self.mapping(work_id, '', 'asset', key)

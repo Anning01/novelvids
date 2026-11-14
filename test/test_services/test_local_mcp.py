@@ -337,3 +337,48 @@ async def test_recovery_version_ignores_timezone_representation_but_detects_edit
     assert await CreationObjects.recovery_version(variant) == previous
     variant.description = '真实修改'
     assert await CreationObjects.recovery_version(variant) != previous
+
+
+@pytest.mark.parametrize('forms', [('young',), (None, 'young', 'baby')])
+async def test_imported_qualified_forms_keep_their_bindings_and_generation_images(tmp_path, monkeypatch, forms):
+    import base64
+    from config import settings
+    from models.asset import Asset
+    from prompts.creation_standards import render_asset_design
+    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from services.video.asset_resolver import normalize_selected_variant_ids, resolve_assets
+    from services.video.content import process_subject_prompt
+
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    fields = json.loads(snapshot.read('asset_contract'))['zh']['person']['fields']
+    prompt = render_asset_design('', {field: '具体的古代粗布视觉设定' for field in fields}, 'person', snapshot, 'zh', '16:9')
+    root = package(tmp_path / 'forms', f'qualified-forms-{len(forms)}')
+    names = {None: '苏玄', 'young': '苏玄#前世少年', 'baby': '苏玄#婴儿'}
+    images = {}
+    for key in ('base', 'young', 'baby'):
+        images[key] = b'\x89PNG\r\n\x1a\n' + key.encode()
+        (root / f'{key}.png').write_bytes(images[key])
+    asset = {'id': 'hero', 'name': '苏玄', 'kind': 'person', 'prompt': prompt,
+        'media': [{'path': 'base.png', 'role': 'main'}], 'variants': [
+            {'id': key, 'name': names[key].split('#')[1], 'prompt': prompt,
+             'media': [{'path': f'{key}.png', 'role': 'reference'}]} for key in ('young', 'baby')]}
+    (root / 'assets.json').write_text(json.dumps({'assets': [asset]}, ensure_ascii=False))
+    board = json.loads((root / 'storyboard.json').read_text())
+    shot = board['shots'][0]
+    shot['visual'] = [{'asset_id': 'hero', 'variant_id': form} for form in forms]
+    shot['prompt'] = '、'.join('@{' + names[form] + '}' for form in forms) + '同时出现。'
+    (root / 'storyboard.json').write_text(json.dumps(board, ensure_ascii=False))
+    media_root = tmp_path / 'media'
+    monkeypatch.setattr(settings, 'MEDIA_PATH', str(media_root))
+    receipt = await WorkSync(tmp_path, media_root).import_episode(ImportEpisode(directory=str(root), request_id=f'forms-import-{len(forms)}', confirmed=True))
+    scene = await Scene.get(id=receipt['shots'][0]['local_id'])
+    assert scene.prompt == shot['prompt']
+    asset = await Asset.get(novel_id=receipt['novel_id'], canonical_name='苏玄')
+    subjects = await resolve_assets(scene.prompt, receipt['novel_id'], selected_asset_ids=[asset.id],
+        selected_variant_ids=normalize_selected_variant_ids(scene.metadata['asset_variant_ids']))
+    assert [subject['name'] for subject in subjects] == [names[form] for form in forms]
+    expected = ['data:image/png;base64,' + base64.b64encode(images[form or 'base']).decode() for form in forms]
+    assert [subject['images'] for subject in subjects] == [[image] for image in expected]
+    rendered, references = process_subject_prompt(scene.prompt, subjects, 30)
+    assert rendered == '、'.join(f'[图{i + 1}]' for i in range(len(forms))) + '同时出现。'
+    assert references == expected

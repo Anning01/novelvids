@@ -34,7 +34,7 @@ Choose one option and send its prompt to your AI assistant.
 **Download and run the studio**
 
 ```text
-Download NovelVids from https://github.com/Anning01/novelvids, start it on my computer with Docker, and show me where to open the studio and import my novel.
+Download NovelVids from https://github.com/Anning01/novelvids, start it on my computer with Docker, enable online updates with scripts/update/install-docker.sh, and show me where to open the studio and import my novel.
 ```
 
 **Use the creative skills on their own**
@@ -42,6 +42,12 @@ Download NovelVids from https://github.com/Anning01/novelvids, start it on my co
 ```text
 Use scripts/export_skill.py from https://github.com/Anning01/novelvids to install the screenplay, asset design and storyboard skills in my current project, then show me how to use them on the first chapter of my novel.
 ```
+
+## Online updates
+
+After a PR is merged into `main`, GitHub Actions checks the code, builds both Docker images and publishes a release. Versions advance automatically (`1.2.0 → 1.3.0 → 1.4.0`). Version metadata is generated in the release tag and package; the workflow never pushes a commit to `main`. Failed builds are not published.
+
+For an existing standard SQLite Compose installation, run `sh scripts/update/install-docker.sh` once from its installation directory. The updater runs in a separate container on Linux Docker or Docker Desktop, preserves existing Compose overrides and data mounts, and attaches its control socket by recreating only the backend. Only the updater receives the Docker socket needed to manage containers. Administrators can then select **Upgrade studio** when a newer release is available. The updater waits for active tasks, backs up the database, switches versions and rolls back if health checks fail. Migrate and stop an existing systemd updater before installing the container updater.
 
 ## Join the community
 

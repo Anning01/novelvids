@@ -116,8 +116,19 @@ it('adds the base to a variant-only shot without discarding the existing variant
   expect(store.edges.filter(edge => edge.target === 'shot-20').map(edge => edge.source)).toEqual(['asset-1-variant-7'])
   expect(store.connectMediaNode('asset-1', 'shot-20')).toBe(true)
   await flushPromises()
-  expect(store.scenes[0]?.metadata?.asset_variant_ids).toEqual({ '1': null })
-  expect(store.edges.filter(edge => edge.target === 'shot-20').map(edge => edge.source)).toEqual(['asset-1', 'asset-1-variant-7'])
+  expect(store.scenes[0]?.metadata?.asset_variant_ids).toEqual({ '1': [7, null] })
+  expect(store.edges.filter(edge => edge.target === 'shot-20').map(edge => edge.source)).toEqual(['asset-1-variant-7', 'asset-1'])
+})
+
+it('restores all saved simultaneous forms and removes just one bound appearance', async () => {
+  graph()
+  store.scenes = [{ ...store.scenes[0]!, metadata: { asset_variant_ids: { '1': [null, 7, 8] } } }]
+  store.rebuildGraph()
+  expect(store.edges.filter(edge => edge.target === 'shot-20').map(edge => edge.source)).toEqual(['asset-1', 'asset-1-variant-7', 'asset-1-variant-8'])
+  const young = store.edges.find(edge => edge.source === 'asset-1-variant-7')!
+  await store.removeReferenceEdge(young.key)
+  expect(store.scenes[0]?.metadata?.asset_variant_ids).toEqual({ '1': [null, 8] })
+  expect(store.edges.filter(edge => edge.target === 'shot-20').map(edge => edge.source)).toEqual(['asset-1', 'asset-1-variant-8'])
 })
 
 it('saves variant prompts using the variant endpoint and its own version precondition', async () => {
