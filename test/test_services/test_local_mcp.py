@@ -24,6 +24,55 @@ def package(root: Path, work='mcp-test'):
     return root
 
 
+async def test_import_keeps_image_dependencies_and_late_base_image_unblocks_variant(tmp_path):
+    from models.asset import Asset
+    from models.asset_variant import AssetVariant
+    from models.ai_task import AiTask
+    from prompts.creation_standards import render_asset_design
+    from prompts.skill_pack import SkillSnapshot, snapshot_skills
+    from services.reference.dependencies import ReferenceGraph, bind_image_dependencies
+    from services.creation_agent.waiting import WaitingForDependencies
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    fields = json.loads(snapshot.read('asset_contract'))['zh']['person']['fields']
+    prompt = render_asset_design('', {field: '古代人物，完整服饰与外观设定' for field in fields}, 'person', snapshot, 'zh', '16:9')
+    root = package(tmp_path / 'dependency-pack', 'dependency-work')
+    (root / 'assets.json').write_text(json.dumps({'assets': [
+        {'id': 'apprentice', 'name': '弟子', 'kind': 'person', 'prompt': prompt,
+         'image_references': [{'asset_id': 'master', 'variant_id': 'young'}]},
+        {'id': 'master', 'name': '赵无垢', 'kind': 'person', 'prompt': prompt,
+         'variants': [{'id': 'young', 'name': '十六年前', 'prompt': prompt,
+                       'image_references': [{'asset_id': 'master', 'variant_id': None}]}]},
+    ]}, ensure_ascii=False))
+    service = WorkSync(tmp_path, tmp_path / 'media')
+    request = ImportEpisode(directory=str(root), request_id='import-dependency-work', confirmed=True)
+    receipt = await service.import_episode(request)
+    assert receipt == await service.import_episode(request)
+    assert await AiTask.all().count() == 0
+    # Earlier packages did not serialize the new optional field. Reusing their
+    # catalog in another episode must not be mistaken for an asset modification.
+    mapping = await service.mapping('dependency-work', '', 'asset', 'master')
+    mapping.payload['source'].pop('image_references')
+    await mapping.save(update_fields=['payload'])
+    manifest = json.loads((root / 'episode.json').read_text())
+    manifest.update(episode={'id': 'ep2', 'name': '第二集'}, number=2)
+    (root / 'episode.json').write_text(json.dumps(manifest))
+    again = await service.import_episode(request.model_copy(update={'request_id': 'import-dependency-ep2'}))
+    assert again['novel_id'] == receipt['novel_id']
+    assert await AiTask.all().count() == 0
+    master = await Asset.get(novel_id=receipt['novel_id'], canonical_name='赵无垢')
+    disciple = await Asset.get(novel_id=receipt['novel_id'], canonical_name='弟子')
+    young = await AssetVariant.get(asset=master, name='十六年前')
+    graph = await ReferenceGraph.load(receipt['novel_id'])
+    assert graph.ordered([(disciple.id, None)]) == [(master.id, None), (master.id, young.id), (disciple.id, None)]
+    params = {'novel_id': master.novel_id, 'asset_id': master.id, 'variant_id': young.id}
+    with pytest.raises(WaitingForDependencies):
+        await bind_image_dependencies(params)
+    master.main_image = '/media/confirmed-main.png'
+    await master.save()
+    await bind_image_dependencies(params)
+    assert params['reference_images'] == [master.main_image]
+
+
 async def test_import_update_retry_order_and_conflict(tmp_path):
     root = package(tmp_path / 'pack')
     service = WorkSync(tmp_path, tmp_path / 'archive')

@@ -44,9 +44,9 @@ async def execute_step(task_id, key: str, action, *, external=False, atomic=Fals
             await AgentOperation.filter(id=row.id).update(
                 state="completed", result=result
             )
-    except BaseException:
+    except BaseException as error:
         # Model preflight can prove no request started; media keeps the conservative default.
-        uncertain = external and (external_started is None or external_started())
+        uncertain = external and getattr(error, 'submission_uncertain', True) and (external_started is None or external_started())
         await AgentOperation.filter(id=row.id).update(
             state="uncertain" if uncertain else "failed"
         )

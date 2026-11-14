@@ -268,6 +268,9 @@ class AiTaskExecutor:
         legacy_language = "zh" if task_type in {AiTaskTypeEnum.creation_agent, AiTaskTypeEnum.remake_decomposition} else "en"
         token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
+            if task_type == AiTaskTypeEnum.reference_image and task.request_params.get('asset_id'):
+                from services.reference.dependencies import bind_image_dependencies
+                await bind_image_dependencies(task.request_params)
             if timeout is None:
                 result = await self._execute_cancellable(task, handler)
             else:
@@ -277,6 +280,7 @@ class AiTaskExecutor:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
         except WaitingForDependencies:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
+            await task_signals.publish(str(task.id))
         except asyncio.CancelledError as error:
             # Preserve the existing uncertain-submission protection when a stop
             # interrupts an external request whose result has not arrived.
@@ -418,7 +422,8 @@ class AiTaskExecutor:
             task.stage = 'needs_review'
         if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
             task.stage = 'needs_review'
-            task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
+            review = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
+            task.error_message = f'{error_message}；{review}' if error_message and error_message != review else review
             # Cancellation cannot erase an uncertain external submission or make review impossible.
             await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).update(
                 status=TaskStatusEnum.failed.value, stage=task.stage, error_message=task.error_message,

@@ -40,6 +40,9 @@ jobs:
           test/test_services/test_release_artifacts.py
           test/test_services/test_studio_release.py
           test/test_services/test_scene_multi_forms.py
+          test/test_services/test_image_dependencies.py
+          test/test_services/test_image_failure_certainty.py
+          test/test_services/test_scene_prompt_optimization.py
           test/test_services/test_skill_export.py
           test/test_services/test_local_mcp.py
           test/test_services/test_remake_sync_contract.py

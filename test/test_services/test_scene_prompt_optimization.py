@@ -54,3 +54,32 @@ async def test_selected_models_and_retries_keep_the_original(configured_creation
     monkeypatch.setattr("services.storyboard.prompt_optimization.snapshot_optimizer", lambda *_: {"mode": "missing"})
     with pytest.raises(HTTPException, match="优化技能"):
         await submit_prompt_optimization(scene.id, body, AuthContext())
+
+
+@pytest.mark.parametrize('images', [[], [{'type': 'image', 'label': '苏玄'}]])
+async def test_optimizer_requires_named_asset_bindings_with_or_without_images(images):
+    from types import SimpleNamespace
+    from services.creation_agent.skill_execution import current_execution
+    from services.storyboard.prompt_optimization import PromptOptimizationHandler
+    from prompts.video_optimizer import validate_asset_markers
+    generic = '@{苏玄#十六岁}看着@{墓牌}，@{镜头时长:24s}'
+    async def generate(skill, facts, output_type, **kwargs):
+        assert 'without an actual submitted image' in kwargs['additional_instructions']
+        with pytest.raises(ValueError, match='资产引用'):
+            await kwargs['output_validator'](CompletePrompt(prompt='苏玄看着墓牌。'))
+        result = CompletePrompt(prompt='[核心任务] @{苏玄#十六岁}看着@{墓牌}。')
+        await kwargs['output_validator'](result)
+        return result
+    token = current_execution.set(SimpleNamespace(generate=generate))
+    try:
+        result = await PromptOptimizationHandler().execute({'scene_id': 1,
+            'video_optimizer': {'mode': 'optimize', 'model_type': 'wan_3', 'skill': 'wan3-pe', 'files': {}},
+            'prompt_inputs': {'generic_prompt': generic, 'submitted_media': images}})
+    finally:
+        current_execution.reset(token)
+    validate_asset_markers(result['prompt'], generic)
+    from services.video.content import process_subject_prompt
+    rendered, _ = process_subject_prompt(result['prompt'], [
+        {'name': '苏玄#十六岁', 'description': '十六岁灰蓝衣少年', 'images': []},
+        {'name': '墓牌', 'description': '旧木墓牌', 'images': []}], 10)
+    assert '十六岁灰蓝衣少年' in rendered and '旧木墓牌' in rendered

@@ -114,12 +114,16 @@ class StoryboardTaskHandler(BaseTaskHandler):
             if optimizer.get('mode') == 'optimize':
                 from schemas.agent_workflow import CompletePrompt
                 from services.creation_agent.video_optimizer import optimizer_instructions
+                from prompts.video_optimizer import validate_asset_markers
                 for shot in storyboard.shots:
+                    async def validate_optimized(draft):
+                        validate_asset_markers(draft.prompt, shot.prompt)
                     result = await execution.generate('video', {'segment': f'optimizer:{shot.sequence}', 'generic_prompt': shot.prompt,
                         'submitted_media': [],
                         'duration': shot.duration, 'selected_model_type': optimizer['model_type'],
                         'reference_assets': [entity.model_dump() for entity in entities]}, CompletePrompt,
-                        additional_instructions=optimizer_instructions(optimizer))
+                        additional_instructions=optimizer_instructions(optimizer), output_validator=validate_optimized)
+                    await validate_optimized(result)
                     optimized[shot.sequence] = {'model_type': optimizer['model_type'], 'skill': optimizer['skill'], 'prompt': result.prompt}
 
             # 4. 保存分镜到数据库

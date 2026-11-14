@@ -27,6 +27,7 @@ async def submit_prompt_optimization(scene_id, body, ctx):
         raise HTTPException(422, localized_message("当前视频模型尚未安装提示词优化技能"))
     facts = body.model_dump(exclude={"model_config_id"})
     facts["selected_model_type"] = model.video_model_type
+    facts["asset_reference_policy"] = "preserve-markers-v1"
     from services.storyboard.blocking_reference import blocking_source
     from prompts.storyboard_sheet_binding import blocking_rules
     if body.generation_mode == "reference" and blocking_source(scene.id, scene.metadata, scene.prompt_params):
@@ -55,8 +56,12 @@ async def submit_prompt_optimization(scene_id, body, ctx):
 class PromptOptimizationHandler(BaseTaskHandler):
     async def execute(self, params):
         optimizer = params["video_optimizer"]
+        from prompts.video_optimizer import validate_asset_markers
+        async def validate(draft):
+            validate_asset_markers(draft.prompt, params['prompt_inputs']['generic_prompt'])
         draft = await current_execution.get().generate("video", params["prompt_inputs"], CompletePrompt,
-            additional_instructions=optimizer_instructions(optimizer))
+            additional_instructions=optimizer_instructions(optimizer), output_validator=validate)
+        await validate(draft)
         if not draft.prompt.strip():
             raise ValueError(localized_message("模型未返回提示词"))
         return {"scene_id": params["scene_id"], "model_type": optimizer["model_type"], "prompt": draft.prompt}

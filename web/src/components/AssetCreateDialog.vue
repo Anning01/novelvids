@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr, dateLocale } from '@/i18n'
+import { imageReferenceCount } from '@/shared/assetImageDependencies'
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
@@ -271,11 +272,13 @@ const canAnnotateCurrentImage = computed(() => Boolean(
 const generationStatusText = computed(() => {
   if (generationError.value) return tr('生成失败')
   if (!generationTask.value) return tr('正在提交')
+  if (generationTask.value.stage === 'waiting_dependencies') return tr('等待参考图')
   return historyStatus(generationTask.value.status)
 })
 const generationStatusMessage = computed(() => {
   if (generationError.value) return generationError.value
   if (!generationTask.value) return tr('正在保存当前配置并创建生成任务…')
+  if (generationTask.value.stage === 'waiting_dependencies') return tr('参考图尚未就绪，生成或上传成功后自动继续。上游失败时会保持等待。')
   if (generationTask.value.status === TaskStatusEnum.PENDING) return tr('任务已提交，正在等待模型执行。')
   if (generationTask.value.status === TaskStatusEnum.QUEUED) return tr('当前任务正在队列中，轮到后会自动开始。')
   if (generationTask.value.status === TaskStatusEnum.PROCESSING) return tr('正在生成图像，完成后这里会自动显示最新结果。')
@@ -292,8 +295,11 @@ const historyStatus = (status: TaskStatusEnum) => ({
 
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
+const effectiveReferenceCount = computed(() => props.asset
+  ? imageReferenceCount(props.asset, variantDraft.value ? selectedVariant.value || {} : undefined, [props.asset], referenceImagePreviews.value.map(item => item.url))
+  : referenceImagePreviews.value.length)
 const estimatedCost = computed(() => estimateAssetImageCost(
-  selectedModel.value, imageParameters.value, referenceImagePreviews.value.length,
+  selectedModel.value, imageParameters.value, effectiveReferenceCount.value,
 ))
 const filteredLibraryItems = computed(() => availableLibraryItems.value.filter(item => {
   if (libraryScope.value !== 'all' && item.source !== libraryScope.value) return false
@@ -937,7 +943,7 @@ function onDrop(event: DragEvent) {
 
 function acceptReferenceFiles(files?: FileList | File[]) {
   if (!files) return
-  const available = Math.max(0, 10 - referenceImagePreviews.value.length)
+  const available = Math.max(0, 10 - effectiveReferenceCount.value)
   const accepted = Array.from(files).slice(0, available)
   if (Array.from(files).length > available) notice.info(tr('资产设定图最多支持 10 张参考图片'))
   accepted.forEach((file) => {
@@ -980,7 +986,7 @@ function removeReferenceImage(index: number) {
 function addReferenceImage(url: string) {
   if (!url) return
   if (referenceImages.value.includes(url)) return
-  if (referenceImagePreviews.value.length >= 10) {
+  if (effectiveReferenceCount.value >= 10) {
     notice.info(tr('资产设定图最多支持 10 张参考图片'))
     return
   }
@@ -1534,8 +1540,9 @@ onUnmounted(() => {
             <section class="asset-reference-input" aria-labelledby="asset-reference-input-title">
               <header>
                 <div><strong id="asset-reference-input-title">{{ tr('图生图参考图片') }}</strong><small>{{ tr('可选 · 最多 10 张') }}</small></div>
-                <span>{{ referenceImagePreviews.length }}/10</span>
+                <span>{{ effectiveReferenceCount }}/10</span>
               </header>
+              <p v-if="variantDraft">{{ tr('此形态会自动引用主形象；主形象未就绪时先等待，已有的手动参考图也会保留。') }}</p>
               <div class="asset-reference-input__grid">
                 <figure v-for="(image, index) in referenceImagePreviews" :key="image.key">
                   <button type="button" class="asset-reference-insert" :aria-label="tr('引用参考图 {p0}', { p0: index + 1 })" @mousedown.prevent @click="promptEditor?.insertMaterial(referenceMentions[index]!)">
@@ -1544,29 +1551,29 @@ onUnmounted(() => {
                   </button>
                   <AppButton type="button" variant="secondary" size="xs" icon-only :aria-label="tr('移除图生图参考图片 {p0}', { p0: index + 1 })" @click="removeReferenceImage(index)"><X :size="13" /></AppButton>
                 </figure>
-                <label v-if="referenceImagePreviews.length < 10" class="asset-reference-input__add">
+                <label v-if="effectiveReferenceCount < 10" class="asset-reference-input__add">
                   <input type="file" multiple accept="image/jpeg,image/png" @change="onReferenceFileInput" />
                   <ImagePlus :size="20" />
                   <span>{{ tr('添加参考图') }}</span>
                 </label>
               </div>
               <div class="asset-reference-sources">
-                <AppButton type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" :active="referenceSource === 'library'" @click="referenceSource = referenceSource === 'library' ? null : 'library'; if (kind === 'character' && referenceSource === 'library') void loadLibraryProjects()"><Library :size="14" />{{ config.library }}</AppButton>
-                <AppButton type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" @click="resourcePickerOpen = true"><Boxes :size="14" />{{ tr('资源库') }}</AppButton>
-                <AppButton v-if="asset" type="button" variant="secondary" size="sm" :disabled="referenceImagePreviews.length >= 10" :active="referenceSource === 'variants'" @click="referenceSource = referenceSource === 'variants' ? null : 'variants'"><UserRound :size="14" />{{ tr('自身形态') }}</AppButton>
+                <AppButton type="button" variant="secondary" size="sm" :disabled="effectiveReferenceCount >= 10" :active="referenceSource === 'library'" @click="referenceSource = referenceSource === 'library' ? null : 'library'; if (kind === 'character' && referenceSource === 'library') void loadLibraryProjects()"><Library :size="14" />{{ config.library }}</AppButton>
+                <AppButton type="button" variant="secondary" size="sm" :disabled="effectiveReferenceCount >= 10" @click="resourcePickerOpen = true"><Boxes :size="14" />{{ tr('资源库') }}</AppButton>
+                <AppButton v-if="asset" type="button" variant="secondary" size="sm" :disabled="effectiveReferenceCount >= 10" :active="referenceSource === 'variants'" @click="referenceSource = referenceSource === 'variants' ? null : 'variants'"><UserRound :size="14" />{{ tr('自身形态') }}</AppButton>
               </div>
               <div v-if="referenceSource" class="asset-reference-picker">
                 <header><label><Search :size="14" /><input v-model="referenceSearch" type="search" :aria-label="tr('搜索参考图片')" :placeholder="tr('搜索参考图片')" /></label><AppButton type="button" variant="ghost" size="xs" icon-only :aria-label="tr('关闭参考选择')" @click="referenceSource = null"><X :size="14" /></AppButton></header>
                 <AppSelect v-if="kind === 'character' && referenceSource === 'library'" class="asset-library__project-filter" :model-value="libraryProjectId" :options="libraryProjectOptions" :ariaLabel="tr('按项目筛选')" :disabled="libraryProjectsLoading" :menu-z-index="3000" searchable @update:model-value="selectLibraryProject" />
                 <div class="asset-reference-picker__grid" @scroll.passive="referenceSource === 'library' && onLibraryScroll($event)">
                   <template v-if="referenceSource === 'library'">
-                    <button v-for="item in referenceLibraryItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || referenceImagePreviews.length >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
+                    <button v-for="item in referenceLibraryItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || effectiveReferenceCount >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
                     <p v-if="projectLibraryError" role="alert">{{ projectLibraryError }} <AppButton type="button" size="xs" @click="selectLibraryProject(libraryProjectId)">{{ tr('重试') }}</AppButton></p>
                     <p v-else-if="!referenceLibraryItems.length">{{ loadingLibrary || projectLibraryLoading ? tr('正在加载资产库…') : tr('暂无可用参考图片') }}</p>
                     <AppButton v-if="libraryHasMore" type="button" variant="ghost" size="sm" :loading="loadingMoreLibrary" @click="loadMoreLibrary">{{ tr('加载更多') }}</AppButton>
                   </template>
                   <template v-else>
-                    <button v-for="item in ownReferenceItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || referenceImagePreviews.length >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
+                    <button v-for="item in ownReferenceItems" :key="item.key" type="button" :aria-label="tr('添加参考：{p0}', { p0: item.name })" :aria-pressed="referenceImages.includes(item.image)" :disabled="referenceImages.includes(item.image) || effectiveReferenceCount >= 10" @click="addReferenceImage(item.image)"><img :src="mediaUrl(item.thumbnail || imageDerivativeUrl(item.image))" alt="" @error="fallbackImage($event, mediaUrl(item.image))" /><span>{{ item.name }}</span></button>
                     <p v-if="!ownReferenceItems.length">{{ tr('暂无可用参考图片') }}</p>
                   </template>
                 </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ImageIcon, ListChecks, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -11,6 +11,7 @@ import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import { estimateAssetImageCost } from '@/shared/modelPricing'
+import { imageDependencyKeys, imageReferenceCount } from '@/shared/assetImageDependencies'
 import { AssetTypeEnum, type Asset, type ImageGenerationModel } from '@/types'
 
 interface BatchGenerateOptions {
@@ -31,6 +32,7 @@ const props = defineProps<{
   failedIds: Set<number>
   generatingTargets?: Set<string>
   failedTargets?: Set<string>
+  waitingTargets?: Set<string>
   submitting?: boolean
 }>()
 const emit = defineEmits<{ close: []; generate: [options: BatchGenerateOptions] }>()
@@ -64,12 +66,34 @@ const isGenerating = (target: GenerationTarget) => props.generatingTargets
 const hasFailed = (target: GenerationTarget) => props.failedTargets
   ? props.failedTargets.has(target.key) : props.failedIds.has(target.assetId)
 const eligibleAssets = computed(() => targets.value.filter(target => !target.image && !isGenerating(target)))
-const selectedTargets = computed(() => eligibleAssets.value.filter(target => selectedIds.value.includes(target.key)))
+const selectedTargets = computed(() => {
+  const selected = new Set(selectedIds.value.filter(key => eligibleAssets.value.some(target => target.key === key)))
+  for (const key of selected) {
+    const target = targets.value.find(item => item.key === key)
+    const asset = props.assets.find(item => item.id === target?.assetId)
+    if (!asset || !target) continue
+    const variant = asset.variants?.find(item => item.id === target.variantId)
+    for (const dependency of imageDependencyKeys(asset, variant)) {
+      if (eligibleAssets.value.some(item => item.key === dependency)) selected.add(dependency)
+    }
+  }
+  return eligibleAssets.value.filter(target => selected.has(target.key))
+})
+const automaticTarget = (key: string) => selectedTargets.value.some(target => target.key === key) && !selectedIds.value.includes(key)
+async function toggleTarget(key: string, event: Event) {
+  if (!(event.target instanceof HTMLInputElement)) return
+  const input = event.target
+  selectedIds.value = input.checked ? [...new Set([...selectedIds.value, key])] : selectedIds.value.filter(value => value !== key)
+  // A required reference remains selected even when it stops being an explicit target.
+  await nextTick()
+  input.checked = selectedTargets.value.some(target => target.key === key)
+}
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
 const estimatedCost = computed(() => selectedTargets.value.reduce((sum, target) => {
-  const refs = target.metadata?.generation_reference_images
-  return sum + estimateAssetImageCost(selectedModel.value, imageParameters.value, Array.isArray(refs) ? new Set(refs).size : 0)
+  const asset = props.assets.find(item => item.id === target.assetId)!
+  const variant = asset.variants?.find(item => item.id === target.variantId)
+  return sum + estimateAssetImageCost(selectedModel.value, imageParameters.value, imageReferenceCount(asset, variant, props.assets))
 }, 0))
 const allSelected = computed(() => Boolean(eligibleAssets.value.length) && eligibleAssets.value.every(asset => selectedIds.value.includes(asset.key)))
 const canGenerate = computed(() => selectedTargets.value.length > 0 && Boolean(modelId.value) && !props.submitting)
@@ -134,8 +158,8 @@ function submit() {
   if (!canGenerate.value) return
   const model = selectedModel.value
   emit('generate', {
-    assetIds: selectedTargets.value.filter(target => target.variantId === undefined).map(target => target.assetId),
-    variantIds: selectedTargets.value.flatMap(target => target.variantId === undefined ? [] : [target.variantId]),
+    assetIds: selectedTargets.value.filter(target => selectedIds.value.includes(target.key) && target.variantId === undefined).map(target => target.assetId),
+    variantIds: selectedTargets.value.flatMap(target => !selectedIds.value.includes(target.key) || target.variantId === undefined ? [] : [target.variantId]),
     modelConfigId: Number(modelId.value),
     concurrency: model?.concurrency || 1,
     clarity: imageParameters.value.clarity,
@@ -175,6 +199,7 @@ watch(selectedModel, model => {
 
         <div class="batch-dialog__body">
           <p>{{ tr('可一次选择角色、场景、道具的基础形象和衍生形态；已有图片或正在生成的项目会自动跳过。') }}</p>
+          <p>{{ tr('先生成主形象，再自动引用主形象生成衍生形态。缺少的引用图会加入本批次；引用图失败时，后续形态保持等待。') }}</p>
           <div class="batch-types" role="group" :aria-label="tr('按资产类型选择')">
             <label
               v-for="type in assetTypes"
@@ -200,19 +225,21 @@ watch(selectedModel, model => {
               v-for="target in targets"
               :key="target.key"
               class="batch-asset"
-              :class="{ 'is-selected': selectedIds.includes(target.key), 'is-disabled': target.image || isGenerating(target) }"
+              :class="{ 'is-selected': selectedTargets.some(item => item.key === target.key), 'is-disabled': target.image || isGenerating(target) }"
             >
               <input
-                v-model="selectedIds"
                 type="checkbox"
+                :checked="selectedTargets.some(item => item.key === target.key)"
+                @change="toggleTarget(target.key, $event)"
                 class="batch-checkbox"
                 :value="target.key"
-                :disabled="Boolean(target.image) || isGenerating(target)"
+                :disabled="Boolean(target.image) || isGenerating(target) || automaticTarget(target.key)"
               />
               <span class="batch-thumb"><img v-if="target.image" :src="target.thumbnail || target.image" alt="" /><ImageIcon v-else :size="18" /></span>
               <span class="batch-copy"><strong :title="target.name">{{ target.name }}</strong><small>{{ assetTypeLabel(target.asset_type) }} · {{ target.form }} · {{ target.description || tr('尚未填写描述') }}</small></span>
               <AppBadge v-if="target.image" class="batch-status" tone="warning" size="sm">{{ tr('已完成，不重复生成') }}</AppBadge>
-              <AppBadge v-else-if="isGenerating(target)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ tr('生成中') }}</AppBadge>
+              <AppBadge v-else-if="isGenerating(target)" class="batch-status is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ waitingTargets?.has(target.key) ? tr('等待参考图') : tr('生成中') }}</AppBadge>
+              <AppBadge v-else-if="automaticTarget(target.key)" class="batch-status" tone="neutral" size="sm">{{ tr('自动加入的参考图') }}</AppBadge>
               <AppBadge v-else-if="hasFailed(target)" class="batch-status" tone="danger" size="sm">{{ tr('上次失败，可重试') }}</AppBadge>
               <AppBadge v-else class="batch-status" tone="accent" size="sm">{{ tr('待生成') }}</AppBadge>
             </label>

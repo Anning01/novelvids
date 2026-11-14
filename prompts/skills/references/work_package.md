@@ -52,6 +52,10 @@ work、episode、场、镜头、资产、形态均用持久 ID（字母数字、
 
 `assets.json`：顶层 `assets` 数组；每项字段为 `id,name,kind,description,prompt,aliases,variants,media`。kind 只用 person/group/scene/item；prompt 必须符合当前资产协议，完整提示词原样保存。variants 每项为 `id,name,description,prompt,media`，形态 ID 在作品内唯一。media 为 `[{"path":"media/person.png","role":"main"}]`，资产图片用途 main/angle_1/angle_2/reference，其他文件用途 video/audio/blocking。群像用 group，动物用 person。不要添加商品或真人数字人。
 
+资产和形态均可提供 `image_references`，每项为 `{"asset_id":"资产稳定ID","variant_id":null}` 或指向该资产已登记形态的稳定 ID。衍生形态默认引用所属资产主形象，即使旧包省略该字段也如此；字段可增加其他参考来源。主形象也可引用另一资产/形态。引用必须在同一作品包登记，不能引用自己、错配资产与形态或形成依赖循环。数组顺序不代表生成顺序。
+
+例如赵无垢主形象为64岁，“十六年前”形态约48岁：先保存两份完整设定，在衍生形态写 `"image_references":[{"asset_id":"zhao-wugou","variant_id":null}]`。导入时保存稳定关系，不要求图片已存在，也不会调用生图服务。后续批量生成会补齐缺图的上游任务，等引用图生成后才启动下游图生图；上游失败时下游等待，补图后继续。已有主图和衍生图沿用，不因导入重复生成。该字段与出镜 visual、实际图片文件 media 分工不同。
+
 `storyboard.json`：
 
 ```json

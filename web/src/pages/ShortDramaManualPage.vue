@@ -103,8 +103,13 @@ let workspaceRefreshVersion = 0
 let refreshingWorkspace = false
 let discoveringGenerations = false
 let generationDiscoveryTimer: ReturnType<typeof setInterval> | undefined
-const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; result: Promise<boolean> }>())
+const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; stage?: string | null; result: Promise<boolean> }>())
 const generatingTargets = computed(() => new Set([...generationMonitors.values()].map(item => item.targetKey)))
+const waitingTargets = computed(() => new Set([...generationMonitors.values()].filter(item => item.stage === 'waiting_dependencies').map(item => item.targetKey)))
+const assetWaitingForReference = (assetId: number) => {
+  const tasks = [...generationMonitors.values()].filter(task => task.assetId === assetId)
+  return tasks.length > 0 && tasks.every(task => task.stage === 'waiting_dependencies')
+}
 const failedTargets = ref(new Set<string>())
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAssetClickUntil = 0
@@ -617,6 +622,8 @@ async function monitorAssetGeneration(assetId: number, taskId: string, variantId
     try {
       let task = (await api.task(taskId)).data
       while (current() && !terminalTaskStatuses.has(task.status)) {
+        const monitor = generationMonitors.get(taskId)
+        if (monitor) generationMonitors.set(taskId, { ...monitor, stage: task.stage })
         await sleep(2000)
         if (!current()) return false
         task = (await api.task(task.id)).data
@@ -858,7 +865,7 @@ onBeforeUnmount(() => {
             <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id), 'is-empty': !asset.main_image }">
               <div v-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
                 <span><LoaderCircle :size="24" /></span>
-                <strong>{{ tr('正在生成参考图') }}</strong>
+                <strong>{{ assetWaitingForReference(asset.id) ? tr('等待参考图') : tr('正在生成参考图') }}</strong>
                 <small>{{ tr('完成后将在这里自动显示') }}</small>
               </div>
               <img
@@ -870,7 +877,7 @@ onBeforeUnmount(() => {
                 @error="fallbackImage($event, asset.main_image)"
               />
               <component v-else :is="activeTabConfig.icon" :size="30" />
-              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ tr('生成中') }}</AppBadge>
+              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ assetWaitingForReference(asset.id) ? tr('等待参考图') : tr('生成中') }}</AppBadge>
               <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">{{ tr('生成失败') }}</AppBadge>
               <div v-if="!generatingAssetIds.has(asset.id)" class="asset-card-info">
                 <strong v-if="asset.main_image">{{ truncateText(asset.canonical_name, 16) }}</strong>
@@ -941,6 +948,7 @@ onBeforeUnmount(() => {
       :submitting="batchGenerating"
       :generating-targets="generatingTargets"
       :failed-targets="failedTargets"
+      :waiting-targets="waitingTargets"
       @close="showBatchDialog = false"
       @generate="batchGenerateAssets"
     />
