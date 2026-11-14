@@ -107,14 +107,18 @@ class RemakeShot(StructuredSkillShot):
     asset_refs: list[RemakeReference] = Field(max_length=30)
     confidence: float = Field(ge=0, le=1)
 
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value):
+        from math import isfinite
+        seconds = float(value.strip().lower().removesuffix("s"))
+        if not isfinite(seconds) or seconds <= 0:
+            raise ValueError("duration must be a positive number")
+        return f"{seconds:g}s"
+
     @model_validator(mode="after")
     def validate_segment_duration(self):
-        # The model often reports a rounded total and more precise segment times.
-        if self.segments:
-            total = sum(segment.duration for segment in self.segments)
-            if 1 <= total <= 30 and isclose(total, float(self.duration[:-1]), abs_tol=REMAKE_TIMELINE_ROUNDING_SECONDS):
-                self.duration = f"{total:g}s"
-        return super().validate_segment_duration()
+        return self
 
     @field_validator("blocking_map", mode="wrap")
     @classmethod
