@@ -296,6 +296,7 @@ class SkillExecution:
             # Each detected clip is a separate model step with its own durable retry allowance.
             repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
             stage=skill,
+            repair_attempts=2 if skill == "remake" else 1,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.candidates import StoryboardCandidateValidator

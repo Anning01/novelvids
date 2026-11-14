@@ -48,13 +48,16 @@ def retry_issues(messages):
     return issues
 
 
-async def claim_repair(task_id, issues):
+async def claim_repair(task_id, issues, *, attempts=1):
     digest = hashlib.sha256(json.dumps(issues, sort_keys=True, default=str).encode()).hexdigest()
-    row, _ = await AgentOperation.get_or_create(task_id=task_id, key='recovery:repair')
-    claimed = await AgentOperation.filter(id=row.id, state='pending').update(
-        state='completed', result={'fingerprint': digest, 'issues': issues})
-    if not claimed:
-        raise RepairExhausted(localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。'))
+    for attempt in range(attempts):
+        key = 'recovery:repair' if attempt == 0 else f'recovery:repair:{attempt + 1}'
+        row, _ = await AgentOperation.get_or_create(task_id=task_id, key=key)
+        claimed = await AgentOperation.filter(id=row.id, state='pending').update(
+            state='completed', result={'fingerprint': digest, 'issues': issues})
+        if claimed:
+            return
+    raise RepairExhausted(localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。'))
 
 
 async def failure_checkpoint(task_id, message_id, issues, *, stage='validation'):

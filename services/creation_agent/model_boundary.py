@@ -26,13 +26,14 @@ def main_request_count(calls) -> int:
 
 class RecordedAgentModel(WrapperModel):
     def __init__(self, model, *, message: AgentMessage, before_request, max_characters: int | None,
-                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation', manage_context=True):
+                 request_limit: int | None = None, total_tokens_limit: int | None = None, limits: AgentConfiguration | None = None, on_compact=None, on_activity=None, repair_root=None, stage='conversation', manage_context=True, repair_attempts=1):
         super().__init__(model)
         self.manage_context = manage_context
         self.message = message
         self.on_activity = on_activity
         self.repair_root = repair_root
         self.stage = stage
+        self.repair_attempts = repair_attempts
         self.before_request = before_request
         self.max_characters = max_characters
         self.calls = list((message.usage or {}).get("calls", []))
@@ -62,7 +63,7 @@ class RecordedAgentModel(WrapperModel):
                             [{'code': 'output_length'}], stage=self.stage)
                         raise ModelOutputLimitError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))
                     await failure_checkpoint(self.repair_root, self.message.id, issues, stage=self.stage)
-                    await claim_repair(self.repair_root, issues)
+                    await claim_repair(self.repair_root, issues, attempts=self.repair_attempts)
         if self.request_limit is not None and self.main_requests >= self.request_limit:
             raise ValueError(localized_message('本轮模型调用次数已达到配置上限'))
         used = sum(call.get('usage', {}).get('input_tokens', 0) + call.get('usage', {}).get('output_tokens', 0) for call in self.calls)

@@ -483,3 +483,13 @@ async def test_summary_output_limit_does_not_block_main_tool_repair():
     await model._begin([ModelRequest(parts=[RetryPromptPart('invalid tool arguments', tool_name='link_scene_references', tool_call_id='repair')])], ModelRequestParameters())
     repair = await AgentOperation.get(task=task, key='recovery:repair')
     assert repair.state == 'completed'
+
+
+@pytest.mark.asyncio
+async def test_remake_repairs_two_validation_failures_independently():
+    from services.creation_agent.reliability import claim_repair, RepairExhausted
+    task = await AiTask.create(task_type=7, status=2)
+    await claim_repair(task.id, [{'code': 'missing'}], attempts=2)
+    await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)
+    with pytest.raises(RepairExhausted):
+        await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)
