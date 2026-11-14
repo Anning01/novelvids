@@ -117,11 +117,13 @@ class AgentEventLog:
             for row in rows:
                 event = row['event']
                 loaded[row['message_id']].append(json.loads(event) if isinstance(event, str) else event)
+            cached_rows = []
             for identifier, version in missing.items():
                 self.projections[(db, identifier)] = (version, loaded[identifier])
                 message = next(message for message in messages if message.id == identifier)
-                await AgentOperation.update_or_create(task_id=message.task_id, key=f'view:events:{identifier}',
-                    defaults={'state': 'completed', 'result': {'projection_version': 1, 'seq': version, 'events': loaded[identifier]}})
+                cached_rows.append(AgentOperation(task_id=message.task_id, key=f'view:events:{identifier}',
+                    state='completed', result={'projection_version': 1, 'seq': version, 'events': loaded[identifier]}))
+            await AgentOperation.bulk_create(cached_rows, on_conflict=('task_id', 'key'), update_fields=('state', 'result'))
         while len(self.projections) > 32:
             self.projections.popitem(last=False)
         return loaded
