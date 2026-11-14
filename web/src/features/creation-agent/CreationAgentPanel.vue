@@ -122,7 +122,7 @@ function toggleAllMessages() {
   messageExpansion.value = Object.fromEntries(bubbles.value.map(message => [message.id, open]))
 }
 const currentProductionActive = computed(() => bubbles.value.some(message => message.task_id === store.currentRun?.task_id && message.status === 3 && message.activityStatus === 2))
-const statusLabel = computed(() => store.error ? store.busy ? tr('连接中断 · 后台状态待核对') : tr('本轮未完成 · 查看原因') : currentProductionActive.value ? tr('处理中') : store.statusText || tr('创作上下文'))
+const statusLabel = computed(() => store.error ? store.busy ? tr('连接中断 · 正在恢复状态') : tr('本轮未完成 · 查看原因') : currentProductionActive.value ? tr('处理中') : store.statusText || tr('创作上下文'))
 watch(() => store.error, error => { if (error) statusOpen.value = true })
 watch(() => store.conversationId, () => { messageExpansion.value = {}; statusOpen.value = false })
 
@@ -168,7 +168,7 @@ async function refreshTargetStatus() {
     pendingConstraints.value = Object.fromEntries(responses.flatMap(response => response.data).map(status => [`${status.kind}:${status.id}`, status.pending_constraints]))
     statusError.value = ''
   } catch {
-    if (epoch === statusEpoch) statusError.value = tr('暂时无法核对新约束，请稍后重新打开对象列表。')
+    if (epoch === statusEpoch) statusError.value = tr('暂时无法检查新约束，请稍后重新打开对象列表。')
   }
 }
 
@@ -363,7 +363,7 @@ onMounted(() => {
         <PromptChangeCard v-for="change in item.changes" :key="change.id" :change="change" :can-undo="Boolean(writable && !store.busy && !operationBusy)"
           @undo="operation(() => store.undo($event))" @locate="operation(() => locate($event))" />
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
-          <p>{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请核对以下操作，确认后会调用模型并产生费用。') }}</p>
+          <p>{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请检查以下操作，确认后会调用模型并产生费用。') }}</p>
           <AgentPlanDetails v-if="item.pending_production.plan_confirmation" :plan="item.pending_production" />
           <ul v-else><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
           <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
@@ -385,15 +385,15 @@ onMounted(() => {
     <footer v-if="ready && !store.loading">
       <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
-        <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
+        <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待应用', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('新要求') }} {{ pendingCount }}</button></template>
       <template v-if="store.currentRun?.recovery?.can_resume_production">
-        <AppButton size="xs" :disabled="store.busy || store.submitting" @click="store.resume()">{{ store.submitting ? tr('核对断点中…') : tr('从断点继续') }}</AppButton>
+        <AppButton size="xs" :disabled="store.busy || store.submitting" @click="store.resume()">{{ store.submitting ? tr('正在恢复…') : tr('从断点继续') }}</AppButton>
         <p class="creation-agent-panel__round-status">{{ tr('复用已完成步骤；已扣费但结果缺失的步骤直接重做，会产生新费用。执行中的请求不会重复提交。') }}</p>
       </template>
       <AppButton v-else-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">{{ tr('编辑后重试') }}</AppButton><AppButton size="xs" @click="router.push('/settings')">{{ tr('查看设置') }}</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">{{ tr('重新连接') }}</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy && store.error" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />{{ tr('重新连接') }}</AppButton>
-      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待核对') }} <span>{{ tr('查看') }}</span></button></p>
+      <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待应用') }} <span>{{ tr('查看') }}</span></button></p>
       <p v-if="statusError && (pickerOpen || targets.length)" class="creation-agent-panel__constraint-notice" role="status">{{ statusError }}</p>
       </AgentDisclosure>
       <AgentComposer ref="composer" v-model="draft" v-model:model-id="modelId" :models="store.capabilities?.models || []" :disabled="!ready || store.loading || store.sessionBusy || operationBusy || suspended" :busy="store.busy" :submitting="store.submitting" @submit="send" @stop="operation(store.stop)">

@@ -43,7 +43,7 @@ class ProductionRecovery:
                     # Chat tool calls have no replay-safe continuation cursor.
                     # Keep their transcript rather than reauthoring paid writes.
                     await AiTask.filter(id=task.id).update(status=4, stage='needs_review',
-                        error_message=localized_message('提交结果待核对，系统不会重复提交',
+                        error_message=localized_message('本次生成未完成，可以重新生成',
                             _language=task.request_params.get('prompt_language', 'en')))
                     continue
             if await AgentOperation.filter(
@@ -53,7 +53,7 @@ class ProductionRecovery:
                     status=4,
                     stage="needs_review",
                     error_message=localized_message(
-                        "提交结果待核对，系统不会重复提交",
+                        "本次生成未完成，可以重新生成",
                         _language=task.request_params.get("prompt_language", "en"),
                     ),
                 )

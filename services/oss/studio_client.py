@@ -126,7 +126,7 @@ class StudioMediaClient:
                             if check.status_code in (200, 206):
                                 return url
                             if check.status_code not in (403, 404, 410):
-                                raise VideoProviderError("临时参考素材暂时无法核对")
+                                raise VideoProviderError("临时参考素材暂时无法读取，请重新上传")
                 result = await http.post(self.endpoint, headers={"Authorization":"Bearer "+self.api_key}, json={
                     "content_type":obj.content_type, "byte_length":obj.byte_length, "content_md5":obj.content_md5})
                 if result.status_code != 200:

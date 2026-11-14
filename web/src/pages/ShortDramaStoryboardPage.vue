@@ -300,7 +300,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       }
       assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
       if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
-      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请核对后再保存。', { p0: conflicts.join('、') }))
+      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请检查后再保存。', { p0: conflicts.join('、') }))
       if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
       void nextTick(setupSceneTracking)
       return
@@ -314,7 +314,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
         const timer = sceneAutoSaveTimers.get(id)
         if (timer) clearTimeout(timer)
         sceneAutoSaveTimers.delete(id)
-        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。', { p0: current.sequence }))
+        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请检查后再保存。', { p0: current.sequence }))
       } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
       scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
     }
@@ -714,7 +714,7 @@ function sceneEnhancementEstimate(scene: Scene) {
   const model = enhancementModels.value.find(item => item.id === setting?.model_config_id)
   const target = model?.resolutions.find(item => item.value === setting?.resolution)
   const estimate = target ? enhancementEstimate(model?.pricing, target.short_side, sceneDuration(scene)) : null
-  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待核对')
+  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待结算')
 }
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
@@ -2316,7 +2316,7 @@ async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
   try {
     // Drain existing autosaves before atomically merging parameters; prompts remain untouched.
     for (const scene of scenes.value.filter(item => sceneAutoSaveTimers.has(item.id))) {
-      if (!await saveScene(scene)) throw new Error(tr('请先保存或核对未保存的分镜修改'))
+      if (!await saveScene(scene)) throw new Error(tr('请先保存或检查未保存的分镜修改'))
     }
     await Promise.all([...sceneSaveQueues.values()])
     const response = await api.applyVideoDefaults(projectId.value, chapterId, settings, remember)

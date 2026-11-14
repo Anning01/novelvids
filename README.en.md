@@ -149,7 +149,7 @@ flowchart LR
     F --> G[Episode / video enhancement]
 ```
 
-Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
+Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Failed requests can be retried explicitly while completed results are preserved. Regenerating missing results may incur a new charge.
 
 ## Local development
 

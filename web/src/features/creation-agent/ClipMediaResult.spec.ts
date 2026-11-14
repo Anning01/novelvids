@@ -60,7 +60,7 @@ it('distinguishes missing, unsettled and explicitly free ledger entries', async 
   expect(wrapper.get('[role="alert"]').text()).toBe('供应商拒绝请求')
   expect(wrapper.get('.clip-media-result__cost').text()).toBe('费用暂未同步')
   await wrapper.setProps({ records: [{ ...record, cost: 0, usage: { missing_usage: true } }] })
-  expect(wrapper.get('.clip-media-result__cost').text()).toBe('费用待核对')
+  expect(wrapper.get('.clip-media-result__cost').text()).toBe('费用待结算')
   await wrapper.setProps({ records: [{ ...record, cost: 0 }] })
   expect(wrapper.get('.clip-media-result__cost').text()).toBe('¥0')
   await wrapper.setProps({ showCosts: false })

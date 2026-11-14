@@ -65,8 +65,8 @@ async def test_deleted_project_rejects_late_writes_and_releases_its_title():
 async def test_deleted_project_keeps_task_review_access_but_blocks_creative_access(monkeypatch):
     from auth.deps import AuthContext, ensure_novel_access, require_task_access
     from config import settings
-    from schemas.ai_task import TaskReviewResolution
-    from services.creation_agent.review import close_uncertain_task
+    from test.legacy_review_fixture import TaskReviewResolution
+    from test.legacy_review_fixture import close_uncertain_task
     project, task = await project_task(status=4)
     await AiTask.filter(id=task.id).update(stage='needs_review')
     await AgentOperation.create(task=task, key='model:remake', state='uncertain', external=True)

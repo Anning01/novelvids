@@ -82,7 +82,7 @@ describe('ChapterExportPanel', () => {
     expect(wrapper.text()).toContain('正在保存高清成片')
     expect(wrapper.text()).toContain('Provider rejected')
     expect(wrapper.find('.spin').exists()).toBe(true)
-    expect(wrapper.text()).toContain('后续步骤已停止，已人工核对')
+    expect(wrapper.text()).toContain('后续步骤已停止')
     expect(wrapper.findAll('button').filter(button => button.text().includes('下载原片'))).toHaveLength(3)
     wrapper.unmount()
   })

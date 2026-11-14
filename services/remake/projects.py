@@ -435,14 +435,6 @@ class RemakeProjectService:
             from services.remake.checkpoints import partial_retry, resume_position
             stage, progress, _, total = await resume_position(previous, source)
             held, retryable = await partial_retry(previous, total)
-            if previous_params.get('held_shots') and not retryable:
-                raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '剩余片段正在等待结果核对')
-            if previous_params.get('workflow_version'):
-                from models.agent_operation import AgentOperation
-                unresolved = await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True)
-                from services.remake.receipt_check import rejected_inline_upload
-                if unresolved and not (held and retryable) and not await rejected_inline_upload(previous, unresolved):
-                    raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '请先核对未完成的外部请求')
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
             task = await AiTask.create(
                 using_db=connection,

@@ -307,7 +307,7 @@ async def test_handler_checks_agent_model_capabilities_before_processing_media(t
 
 
 @pytest.mark.asyncio
-async def test_pending_results_preserve_review_reason_and_source_status(tmp_path):
+async def test_unfinished_results_have_retry_copy_and_preserve_source_status(tmp_path):
     from unittest.mock import AsyncMock
     from services.remake.pipeline import RemakeAwaitingResults
     from services.creation_agent.operation_receipts import SubmissionUncertain
@@ -328,4 +328,4 @@ async def test_pending_results_preserve_review_reason_and_source_status(tmp_path
     await ai_task_executor._fail(task, str(raised.value), error=raised.value, record_usage=False)
     await task.refresh_from_db()
     assert task.stage == "needs_review"
-    assert "等待结果核对" in task.error_message
+    assert "可以重试" in task.error_message and "核对" not in task.error_message

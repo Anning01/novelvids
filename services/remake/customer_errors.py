@@ -4,8 +4,6 @@ from uuid import uuid5
 
 from models.agent_operation import AgentOperation
 from models.creation_agent import AgentMessage
-from models.studio_call import StudioCall
-from services.remake.checkpoints import completed_outputs
 from utils.enums import TaskStatusEnum
 from utils.messages import localized_message
 
@@ -29,38 +27,13 @@ _STAGES = {
 }
 
 
-async def accepted_shots_awaiting_result(task):
-    if task.stage != 'needs_review':
-        return []
-    keys = await AgentOperation.filter(task=task, state='uncertain', external=True,
-        key__startswith='model:remake:RemakeShot:').values_list('key', flat=True)
-    children = {uuid5(task.id, key): int(key.rsplit(':', 1)[1]) for key in keys
-                if re.fullmatch(r'model:remake:RemakeShot:\d+', key)}
-    messages = await AgentMessage.filter(task_id__in=list(children), role='assistant').values('id','task_id','usage')
-    # Match the failed call itself, not a preceding accepted validation attempt.
-    candidates = {m['id']: (children[m['task_id']], call.get('studio_call_id'))
-                  for m in messages for call in (m['usage'] or {}).get('calls', [])[-1:]
-                  if call.get('status') == 'failed' and call.get('studio_call_id')}
-    receipts = await StudioCall.filter(message_id__in=list(candidates), platform_request_id__not_isnull=True).values('id','message_id')
-    return sorted(candidates[r['message_id']][0] for r in receipts if r['id'] == candidates[r['message_id']][1])
-
-
-async def failure_message(task, accepted_shots=None):
+async def failure_message(task):
     if task.status == TaskStatusEnum.cancelled:
         return localized_message('本集拆解已取消。')
     if task.status != TaskStatusEnum.failed:
         return None
-    if task.request_params.get('held_shots') and task.stage == 'needs_review':
-        return localized_message('已保存完成的分镜。剩余片段的提交结果待核对。')
     if task.stage == 'needs_review':
-        if accepted_shots is None:
-            accepted_shots = await accepted_shots_awaiting_result(task)
-        if accepted_shots:
-            outputs = await completed_outputs({**task.request_params, 'retry_of_task_id':str(task.id)})
-            saved = sum(key.startswith('model:remake:RemakeShot:') for key in outputs)
-            return localized_message('已保留 {p0} 个片段的分镜。模型服务已受理第 {p1} 段的请求，但工作台未收到完整结果。请导出诊断日志交给管理员核对，避免重复扣费。',
-                p0=saved, p1=', '.join(map(str, accepted_shots)))
-        return localized_message('尚未确认模型服务是否已受理本次拆解。请联系管理员核对，以免重复扣费。')
+        return localized_message('本集拆解未完成，点击重试可继续未完成片段，已完成分镜会保留。')
     diagnostic = task.error_message or ''
     for code, text in _SERVICE_ERRORS.items():
         if code in diagnostic:

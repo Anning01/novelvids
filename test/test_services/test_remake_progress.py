@@ -148,7 +148,7 @@ async def test_failed_clip_progress_explains_verified_saved_work_and_next_action
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('stage,diagnostic,expected', [
-    ('needs_review', 'raw provider body', '以免重复扣费'),
+    ('needs_review', 'raw provider body', '点击重试'),
     ('extracting_assets','unauthorized（错误代码：REMAKE_ANALYSIS_AUTH_FAILED）','管理员检查模型密钥'),
     ('generating_storyboards','第 2 个视频片段分析失败：private payload','第 2 个片段未能完成分镜分析'),
 ])
@@ -167,10 +167,10 @@ async def test_receipt_on_failed_clip_displays_acceptance_and_keeps_completed_co
     source = await create_source(novel,1,status=4,stage='needs_review',progress=59)
     await AgentOperation.create(task_id=source.analysis_task_id, key='model:remake:RemakeShot:1',state='completed',result={})
     from unittest.mock import AsyncMock
-    monkeypatch.setattr('services.remake.progress.accepted_shots_awaiting_result',AsyncMock(return_value=[14,16]))
     task = (await RemakeProgressService().snapshot(novel))['sources'][0]['task']
-    assert task['awaiting_platform_result']
-    assert '已保留 1 个片段' in task['error_message'] and '14, 16' in task['error_message']
+    assert task['awaiting_platform_result'] is False
+    assert '点击重试' in task['error_message'] and '核对' not in task['error_message']
+    assert await AgentOperation.filter(task_id=source.analysis_task_id, state='completed').count() == 1
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_restart_queues_remake_from_saved_clips_and_refresh_keeps_position
 
 
 @pytest.mark.asyncio
-async def test_partial_retry_inherits_uncertain_shots_and_counts_only_unsubmitted(tmp_path, monkeypatch):
+async def test_explicit_retry_releases_all_unfinished_clips_and_preserves_completed_ones(tmp_path, monkeypatch):
     from models.agent_operation import AgentOperation
     from services.remake.checkpoints import partial_retry, write_scene_manifest
     novel = await Novel.create(name='片段续跑', workflow_kind='remake')
@@ -215,8 +215,8 @@ async def test_partial_retry_inherits_uncertain_shots_and_counts_only_unsubmitte
     for suffix in ['RemakeAssets:1','RemakeShot:1']:
         await AgentOperation.create(task=task,key='model:remake:'+suffix,state='completed')
     await AgentOperation.create(task=task,key='model:remake:RemakeShot:3',state='uncertain',external=True)
-    assert await partial_retry(task,4) == ([2,3],1)
+    assert await partial_retry(task,4) == ([],3)
     snapshot = (await RemakeProgressService().snapshot(novel))['sources'][0]['task']
-    assert snapshot['retryable_clips'] == 1
+    assert snapshot['retryable_clips'] == 3
     await AgentOperation.create(task=task,key='model:remake:RemakeShot:4',state='completed')
-    assert await partial_retry(task,4) == ([2,3],0)
+    assert await partial_retry(task,4) == ([],2)

@@ -418,7 +418,7 @@ class AiTaskExecutor:
             task.stage = 'needs_review'
         if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
             task.stage = 'needs_review'
-            task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
+            task.error_message = localized_message('本次生成未取得完整结果，可重新生成。', _language=task.request_params.get('prompt_language', 'en'))
             # Cancellation cannot erase an uncertain external submission or make review impossible.
             await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).update(
                 status=TaskStatusEnum.failed.value, stage=task.stage, error_message=task.error_message,

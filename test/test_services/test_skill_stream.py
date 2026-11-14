@@ -231,7 +231,7 @@ async def test_named_model_step_streams_before_completion_and_survives_snapshot(
 @pytest.mark.parametrize('skill,label', [
     ('screenplay', '编写本集剧本'), ('planning_request', '梳理创作需求'),
     ('creation_planning', '制定创作方案'), ('source_reading', '阅读原文素材'),
-    ('creative_check', '核对生成内容与创作要求'),
+    ('creative_check', '检查生成内容与创作要求'),
 ])
 def test_production_phase_has_specific_activity_name(skill, label):
     from services.creation_agent.skill_stream import skill_activity_label

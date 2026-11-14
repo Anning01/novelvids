@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator, field_serializer
 from pydantic.json_schema import SkipJsonSchema
 
 from schemas.scene import BlockingMap, ScenePromptSegment
@@ -195,6 +195,11 @@ class AgentActivityOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    @field_serializer('error_message')
+    def public_error(self, value):
+        from utils.messages import public_generation_error
+        return public_generation_error(value)
+
     recovery: dict | None = None
     activity: list[AgentActivityOut] = Field(default_factory=list)
     started_at: datetime | None = None

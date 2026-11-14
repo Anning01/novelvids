@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.remake.customer_errors import accepted_shots_awaiting_result, failure_message
+from services.remake.customer_errors import failure_message
 from models.novel import Novel
 from models.remake_source import RemakeSource
 from utils.enums import TaskStatusEnum
@@ -61,7 +61,6 @@ class RemakeProgressService:
             versions.append(source.updated_at)
             if task is not None:
                 versions.append(task.updated_at)
-            accepted = await accepted_shots_awaiting_result(task) if task and status == TaskStatusEnum.failed else []
             retryable = 0
             if task and status == TaskStatusEnum.failed:
                 from services.remake.checkpoints import partial_retry
@@ -83,8 +82,8 @@ class RemakeProgressService:
                             "progress": progress,
                             "completed_clips": completed_clips,
                             "total_clips": total_clips,
-                            "error_message": await failure_message(task, accepted),
-                            "awaiting_platform_result": bool(accepted or held or (task.request_params or {}).get("held_shots")),
+                            "error_message": await failure_message(task),
+                            "awaiting_platform_result": False,
                             "retryable_clips": retryable,
                             "updated_at": task.updated_at.isoformat(),
                         }

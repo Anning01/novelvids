@@ -93,7 +93,7 @@ describe('creation assistant panel', () => {
     store.submitting = true
     store.error = '核对中'
     await flushPromises()
-    expect(wrapper.findAll('button').find(item => item.text() === '核对断点中…')?.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(item => item.text() === '正在恢复…')?.attributes('disabled')).toBeDefined()
     wrapper.unmount()
     delete document.documentElement.dataset.appTheme
   })
@@ -341,17 +341,17 @@ it('shows scoped pending rules without sending a request or changing selection',
   const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
   await flushPromises()
   const send = vi.spyOn(useCreationAgentStore(pinia), 'send')
-  expect(wrapper.text()).toContain('1 个对象有新设定待核对')
-  await wrapper.findAll('button').find(button => button.text().includes('新设定待核对'))!.trigger('click')
+  expect(wrapper.text()).toContain('1 个对象有新设定待应用')
+  await wrapper.findAll('button').find(button => button.text().includes('新设定待应用'))!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('待核对约束')
+  expect(wrapper.text()).toContain('新增创作要求')
   expect(wrapper.text()).toContain('当前场景使用柔和暖光')
   expect(wrapper.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(false)
   expect(send).not.toHaveBeenCalled()
   vi.mocked(agentApi.promptStatus).mockResolvedValue({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [] }] })
   useCreationAgentStore(pinia).changesRevision += 1
   await flushPromises()
-  expect(wrapper.text()).not.toContain('待核对约束')
+  expect(wrapper.text()).not.toContain('新增创作要求')
   wrapper.unmount()
 })
 
@@ -364,7 +364,7 @@ it('does not show status returned for a previous chapter after switching chapter
   await flushPromises()
   resolveOld({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [{ id: 1, content: '前章旧状态' }] }] })
   await flushPromises()
-  expect(wrapper.text()).not.toContain('新设定待核对')
+  expect(wrapper.text()).not.toContain('新设定待应用')
   wrapper.unmount()
 })
 

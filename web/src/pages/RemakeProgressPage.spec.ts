@@ -148,7 +148,7 @@ describe('RemakeProgressPage', () => {
   })
 })
 
-it('marks the interrupted stage and suppresses replay of accepted clips', async () => {
+it('marks the interrupted stage and always offers retry of unfinished clips', async () => {
   const snapshot = progressSnapshot({aggregate_status:'failed', terminal:true, overall_progress:59})
   Object.assign(snapshot.sources[0]!.task!, {status:TaskStatusEnum.FAILED, stage:'needs_review', progress:59,
     awaiting_platform_result:true, error_message:'已受理，结果待核对'})
@@ -156,7 +156,7 @@ it('marks the interrupted stage and suppresses replay of accepted clips', async 
   const wrapper = mount(RemakeProgressPage)
   await flushPromises()
   expect(wrapper.get('.pipeline-list .is-failed').text()).toContain('生成专业分镜')
-  expect(wrapper.findAll('button').some(button => button.text().includes('重试'))).toBe(false)
+  expect(wrapper.findAll('button').some(button => button.text().includes('重试'))).toBe(true)
   wrapper.unmount()
 })
 

@@ -197,7 +197,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     if before is not None:
                         old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
                         if {str(row.id): await object_version(row) for row in old_scenes} != before:
-                            raise ValueError(localized_message('原分镜已有新修改，请核对后重新生成'))
+                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
                         objects = CreationObjects(chapter.novel_id)
                         snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
                         task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}

@@ -124,7 +124,7 @@ async def read_chapter_cast(execution, messages, *, target_requirements=None) ->
     await validate(cast)
     await AgentOperation.update_or_create(task_id=execution.params['task_id'], key=f'model:structured:ChapterCast:{segment}',
         defaults={'state': 'completed', 'result': cast.model_dump(mode='json')})
-    await plan_activity(execution, 'chapter-cast', localized_message('已核对本章资产清单'), status='completed',
+    await plan_activity(execution, 'chapter-cast', localized_message('已检查本章资产清单'), status='completed',
         detail=str(len(cast.required_assets())))
     return cast
 

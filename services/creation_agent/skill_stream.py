@@ -22,7 +22,7 @@ def skill_activity_label(skill, language):
         'image': '准备图片提示词', 'storyboard': '生成分镜', 'remake': '分析参考视频',
         'video': '准备视频提示词', 'screenplay': '编写本集剧本',
         'planning_request': '梳理创作需求', 'creation_planning': '制定创作方案',
-        'source_reading': '阅读原文素材', 'creative_check': '核对生成内容与创作要求',
+        'source_reading': '阅读原文素材', 'creative_check': '检查生成内容与创作要求',
         'structured': '整理创作内容',
     }.get(skill, '生成创作内容'), _language=language)
 

@@ -36,7 +36,7 @@ export function autoEnhancementLabel(video: Video | null | undefined): string {
   const state = video?.metadata?.auto_enhancement as { stage?: string } | undefined
   return ({ waiting_video: tr('生成成功后将自动高清化'), preparing: tr('正在准备自动高清化'), enhancing: tr('正在自动高清化'),
     completed: tr('自动高清化已完成'), failed: tr('自动高清化未完成，原视频已保留'),
-    needs_review: tr('高清化提交结果待核对，请勿重复提交'), needs_confirmation: tr('增强配置已变化，请重新确认高清化'),
+    needs_review: tr('高清化未完成，可以重新生成'), needs_confirmation: tr('增强配置已变化，请重新确认高清化'),
     skipped: tr('目标清晰度不高于原视频，已跳过增强'), cancelled: tr('自动高清化已停止') } as Record<string, string>)[state?.stage || ''] || ''
 }
 

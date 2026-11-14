@@ -141,7 +141,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         },
       })
     } catch (caught) {
-      if (revision === epoch && subscription === handle) error.value = tr('实时连接中断，正在核对后台状态')
+      if (revision === epoch && subscription === handle) error.value = tr('实时连接中断，正在恢复任务状态')
     } finally {
       if (revision === epoch && subscription === handle) {
         streamConnected.value = false
@@ -149,7 +149,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         try {
           const response = await snapshot(taskId)
           if (revision === epoch) applySnapshot(response.data)
-        } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接核对实际结果') }
+        } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接') }
       }
     }
   }
@@ -314,7 +314,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           { id: localId, role: 'user', content: frozenInput.message, task_id: response.data.task_id, status: response.data.status, changes: [], usage: {}, created_at: new Date().toISOString() },
           { id: localId - 1, role: 'assistant', content: response.data.content, task_id: response.data.task_id, status: response.data.status, changes: response.data.changes, usage: response.data.usage, created_at: new Date().toISOString() },
         )
-        error.value = tr('要求已提交，对话记录暂时未同步。可重新连接核对结果。')
+        error.value = tr('要求已提交，对话记录暂时未同步，可重新连接。')
       }
       if (revision !== epoch) return false
       applySnapshot(response.data)
@@ -331,7 +331,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       }
       return true
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('提交失败，请重试以核对结果')
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('提交未完成，请重试')
       return false
     } finally { submitting.value = false }
   }
@@ -371,7 +371,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       applySnapshot(response.data)
       if (isAgentRunning(response.data.status)) void follow(taskId)
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('续跑失败，请稍后核对')
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('续跑失败，请稍后检查')
     } finally { submitting.value = false }
   }
 

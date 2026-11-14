@@ -9,8 +9,8 @@ from models.agent_operation import AgentOperation
 from models.scene import Scene
 from models.video import Video
 from models.usage_record import ModelUsageRecord
-from schemas.ai_task import TaskReviewResolution
-from services.creation_agent.review import close_uncertain_task
+from test.legacy_review_fixture import TaskReviewResolution
+from test.legacy_review_fixture import close_uncertain_task
 from services.creation_agent.operation_receipts import execute_step, SubmissionUncertain
 from test.test_services.test_skill_workflow import enabled_project
 

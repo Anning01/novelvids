@@ -28,7 +28,7 @@ async def execute_step(task_id, key: str, action, *, external=False, atomic=Fals
     )
     if not claimed:
         raise SubmissionUncertain(
-            localized_message("步骤执行中或结果待核对，不能重复提交")
+            localized_message("此步骤尚未完成，请在任务结束后点击重置并重试")
         )
     try:
         if atomic:

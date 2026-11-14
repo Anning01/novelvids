@@ -57,7 +57,7 @@ async def claim_repair(task_id, issues, *, attempts=1):
             state='completed', result={'fingerprint': digest, 'issues': issues})
         if claimed:
             return
-    raise RepairExhausted(localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。'))
+    raise RepairExhausted(localized_message('本次自动修复已结束，候选和调用记录已保留，可点击重置并重试。'))
 
 
 async def failure_checkpoint(task_id, message_id, issues, *, stage='validation'):

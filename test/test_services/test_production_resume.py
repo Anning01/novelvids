@@ -10,7 +10,7 @@ from config import settings
 from models.ai_task import AiTask
 from models.agent_operation import AgentOperation
 from models.creation_agent import AgentMessage, AgentConversation
-from services.creation_agent.production_resume import resume_production, check_external_step
+from services.creation_agent.production_resume import resume_production
 from services.creation_agent.run_recovery import checkpoint_inputs
 from services.creation_agent.event_log import agent_event_log
 from services.creation_agent.operation_receipts import execute_step
@@ -58,13 +58,12 @@ async def test_resume_reuses_original_receipts_and_double_click_does_not_generat
 
 
 @pytest.mark.asyncio
-async def test_uncertain_step_is_not_reset_when_audit_fails():
+async def test_user_retry_resets_unfinished_step_without_manual_review():
     task, _ = await failed_run()
     op = await AgentOperation.create(task=task, key='model:structured:Output:2', state='uncertain', external=True)
-    with pytest.raises(HTTPException, match='结果待核对'):
-        await resume_production(task.id, AuthContext())
+    await resume_production(task.id, AuthContext())
     await task.refresh_from_db(); await op.refresh_from_db()
-    assert task.status == 4 and op.state == 'uncertain'
+    assert task.status == 6 and op.state == 'pending'
 
 
 @pytest.mark.asyncio
@@ -98,10 +97,7 @@ async def test_resume_retries_only_missing_step_after_receipt_check():
     task, _ = await failed_run()
     kept = await AgentOperation.create(task=task, key='model:storyboard:Output:1', state='completed', result={'shots': [1]})
     missing = await AgentOperation.create(task=task, key='model:structured:Output:11', state='uncertain', external=True)
-    with patch('services.creation_agent.production_resume.check_external_step', AsyncMock()) as check:
-        await resume_production(task.id, AuthContext())
-        check.assert_awaited_once()
-        assert check.await_args.args[1].id == missing.id
+    await resume_production(task.id, AuthContext())
     await kept.refresh_from_db(); await missing.refresh_from_db()
     assert kept.state == 'completed' and kept.result == {'shots': [1]}
     assert missing.state == 'pending'
@@ -149,30 +145,21 @@ async def test_catalog_refresh_and_project_touch_do_not_invalidate_identical_pro
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('status,settlement,allowed', [('completed', 'settled', True), ('completed', 'pending', False), ('submitted', 'pending', False), ('rejected', 'not_charged', True)])
-async def test_finished_missing_results_can_retry_but_inflight_requests_cannot(status, settlement, allowed):
-    from types import SimpleNamespace
-    task, message = await failed_run()
-    op = await AgentOperation.create(task=task, key='model:structured:Output:2', state='uncertain', external=True)
-    child = await AgentMessage.create(task_id=(await AiTask.create(id=uuid5(task.id, op.key), task_type=7, status=4)).id,
-        conversation_id=message.conversation_id, role='assistant', request_id=uuid4(), request_hash='child',
-        usage={'calls': [{'status': 'failed', 'studio_call_id': 1}]})
-    receipt_id = uuid4()
-    row = SimpleNamespace(model_config_id=1, base_url='https://example.invalid/v1', platform_request_id=receipt_id)
-    config = SimpleNamespace(base_url=row.base_url, api_key='fake')
-    response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'id': str(receipt_id), 'model': 'test',
-        'status': status, 'usage': {}, 'pricing': {}, 'settlement': {'status': settlement, 'amount': '0.14'}})
-    client = AsyncMock(); client.get.return_value = response
-    with patch('models.studio_call.StudioCall.get_or_none', AsyncMock(return_value=row)), \
-         patch('models.config.AiModelConfig.get_or_none', AsyncMock(return_value=config)), \
-         patch('httpx.AsyncClient') as factory:
-        factory.return_value.__aenter__.return_value = client
-        if allowed:
-            await check_external_step(task, op)
-        else:
-            with pytest.raises(HTTPException):
-                await check_external_step(task, op)
-        client.get.assert_awaited_once()
-        assert not client.post.called
-    await op.refresh_from_db()
-    assert op.state == 'uncertain'
+async def test_manual_retry_does_not_call_provider_review_endpoint():
+    task, _ = await failed_run()
+    operation = await AgentOperation.create(task=task, key='model:structured:Output:11', state='uncertain', external=True)
+    with patch('httpx.AsyncClient.send', AsyncMock(side_effect=AssertionError('No receipt check required'))) as network:
+        await resume_production(task.id, AuthContext())
+        network.assert_not_awaited()
+    await operation.refresh_from_db()
+    assert operation.state == 'pending'
+
+
+@pytest.mark.asyncio
+async def test_running_task_is_not_reset_or_resubmitted():
+    task, _ = await failed_run()
+    await AiTask.filter(id=task.id).update(status=2)
+    operation = await AgentOperation.create(task=task, key='media:image', state='running', external=True)
+    current = await resume_production(task.id, AuthContext())
+    await operation.refresh_from_db()
+    assert current.status == 2 and operation.state == 'running'
