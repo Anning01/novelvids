@@ -14,7 +14,7 @@ from schemas.work_package import ImportEpisode, ReadEpisode, UpdateShot
 from services.local_mcp.sync import SyncConflict, WorkSync
 
 TOOLS = {
-    'import_episode': (ImportEpisode, '导入用户已确认的一集作品包；首次导入或相同请求重试，不覆盖已有集。'),
+    'import_episode': (ImportEpisode, '导入用户已确认的一集剧本或已完成拆解的重制作品包；首次导入或相同请求重试，不覆盖已有集。'),
     'read_episode': (ReadEpisode, '读取作品/集定位与镜头当前版本、内容；同步前用于比较本地修改。'),
     'update_shot': (UpdateShot, '用户明确要求同步时，按稳定 ID 和 base_version 更新一个镜头；冲突停止，不影响顺序或旧视频。'),
 }
@@ -87,8 +87,6 @@ class MCPServer:
 
 
 async def run(args):
-    if settings.AUTH_ENABLED and not settings.DATABASE_URL.startswith("sqlite://"):
-        raise ValueError("登录模式的本机 MCP 需要本地 SQLite 作品库")
     import models
     await Tortoise.init(db_url=settings.DATABASE_URL,
                         modules={'models': [f'models.{name}' for name in models.__all__] + (['auth.models'] if settings.AUTH_ENABLED else [])}, use_tz=True, timezone=settings.TIMEZONE)

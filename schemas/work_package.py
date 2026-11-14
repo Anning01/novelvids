@@ -12,6 +12,21 @@ class Identity(StrictModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class RemakeSourceFile(StrictModel):
+    path: str = Field(min_length=1)
+
+
+class SourceRange(StrictModel):
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode='after')
+    def check_order(self):
+        if self.end <= self.start:
+            raise ValueError('来源时间段结束必须晚于开始')
+        return self
+
+
 class Episode(StrictModel):
     format_version: Literal[1]
     work: Identity
@@ -27,6 +42,14 @@ class Episode(StrictModel):
     assets: str = 'assets.json'
     storyboard: str = 'storyboard.json'
     originals: list[str] = Field(default_factory=list)
+    workflow_kind: Literal['script', 'remake'] = 'script'
+    remake_source: RemakeSourceFile | None = None
+
+    @model_validator(mode='after')
+    def check_source(self):
+        if (self.workflow_kind == 'remake') != (self.remake_source is not None):
+            raise ValueError('重制作品必须提供来源视频；普通剧本不能携带重制来源')
+        return self
 
 
 class Media(StrictModel):
@@ -70,6 +93,7 @@ class Shot(Identity):
     visual: list[VisualReference] = Field(default_factory=list)
     voices: list[Voice] = Field(default_factory=list)
     media: list[Media] = Field(default_factory=list)
+    source_range: SourceRange | None = None
 
     @model_validator(mode='after')
     def check_timing(self):
