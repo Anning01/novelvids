@@ -2,6 +2,18 @@ import { expect, it } from 'vitest'
 import { applyActivityEvent } from './activity'
 import type { AgentActivityStep } from './types'
 
+it('appends batched Unicode deltas once and tolerates an overlapping snapshot', () => {
+  const steps: AgentActivityStep[] = []
+  const value = { id: 'thought', kind: 'thinking' as const, label: '思考', status: 'running' as const }
+  applyActivityEvent(steps, { type: 'CUSTOM', name: 'agent_activity', value: { ...value, detail: '🐱' } })
+  const event = { type: 'CUSTOM', name: 'agent_activity_delta', value: { ...value, detail_offset: 2, detail_delta: '新内容' } }
+  applyActivityEvent(steps, event)
+  applyActivityEvent(steps, event)
+  expect(steps[0]!.detail).toBe('🐱新内容')
+  applyActivityEvent(steps, { type: 'CUSTOM', name: 'agent_activity_delta', value: { ...value, detail_offset: 2, detail_delta: '新内容继续' } })
+  expect(steps[0]!.detail).toBe('🐱新内容继续')
+})
+
 it('shows actual reasoning and tool execution without exposing arguments or results', () => {
   const steps: AgentActivityStep[] = []
   applyActivityEvent(steps, { type: 'REASONING_START', timestamp: 1000 })

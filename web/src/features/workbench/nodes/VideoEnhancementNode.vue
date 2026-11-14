@@ -49,7 +49,7 @@ const displayedRatio = computed(() => {
   return probe?.width && probe.height ? `${probe.width}:${probe.height}` : input.value?.ratio || '16:9'
 })
 const locked = computed(() => busy.value || submitted.value || !canWrite.value)
-const stageLabel = computed(() => row.value?.stage === 'needs_review' ? tr('需要核对')
+const stageLabel = computed(() => row.value?.stage === 'needs_review' ? tr('未完成，可重试')
   : row.value?.stage === 'billing_pending' ? tr('用量正在结算') : row.value?.status === 3 ? tr('已完成') : '')
 const disabledReason = computed(() => {
   if (!canWrite.value) return tr('当前账号仅可查看')

@@ -164,8 +164,8 @@ async def test_local_export_upload_and_paid_submission_are_both_reused_on_replay
 @pytest.mark.parametrize('cancelled', [False, True])
 async def test_unqueryable_accepted_task_requires_review_and_never_resubmits(status_code, cancelled):
     from test.test_services.test_skill_workflow import enabled_project
-    from schemas.ai_task import TaskReviewResolution
-    from services.creation_agent.review import close_uncertain_task
+    from test.legacy_review_fixture import TaskReviewResolution
+    from test.legacy_review_fixture import close_uncertain_task
     from fastapi import HTTPException
     novel, chapter, _ = await enabled_project()
     task, export, _ = await pending_export()

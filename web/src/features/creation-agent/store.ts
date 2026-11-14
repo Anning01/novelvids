@@ -14,6 +14,15 @@ const activeStatuses = new Set([1, 2, 6])
 export const isAgentRunning = (status: number) => activeStatuses.has(status)
 
 export const useCreationAgentStore = defineStore('creation-agent', () => {
+  const snapshotRequests = new Map<string, ReturnType<typeof agentApi.snapshot>>()
+  function snapshot(taskId: string) {
+    const key = `${epoch}:${taskId}`
+    const pending = snapshotRequests.get(key)
+    if (pending) return pending
+    const request = agentApi.snapshot(taskId).finally(() => snapshotRequests.delete(key))
+    snapshotRequests.set(key, request)
+    return request
+  }
   const projectId = ref(0)
   const conversations = ref<AgentConversation[]>([])
   const deletedConversations = ref<AgentConversation[]>([])
@@ -127,20 +136,20 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           statusText.value = creationAgentToolProgressLabel(event.toolCallName)
         },
         async onToolCallResultEvent() {
-          const result = await agentApi.snapshot(taskId)
+          const result = await snapshot(taskId)
           if (revision === epoch && subscription === handle) applySnapshot(result.data)
         },
       })
     } catch (caught) {
-      if (revision === epoch && subscription === handle) error.value = tr('实时连接中断，正在核对后台状态')
+      if (revision === epoch && subscription === handle) error.value = tr('实时连接中断，正在恢复任务状态')
     } finally {
       if (revision === epoch && subscription === handle) {
         streamConnected.value = false
         subscription = null
         try {
-          const response = await agentApi.snapshot(taskId)
+          const response = await snapshot(taskId)
           if (revision === epoch) applySnapshot(response.data)
-        } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接核对实际结果') }
+        } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接') }
       }
     }
   }
@@ -170,7 +179,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       const latestTaskId = conversations.value.find(item => item.id === id)?.active_task_id
         ?? [...messages.value].reverse().find(message => message.role === 'assistant')?.task_id
       if (latestTaskId) {
-        const response = await agentApi.snapshot(latestTaskId)
+        const response = await snapshot(latestTaskId)
         if (revision !== epoch) return
         applySnapshot(response.data)
         if (isAgentRunning(response.data.status)) void follow(latestTaskId)
@@ -305,7 +314,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           { id: localId, role: 'user', content: frozenInput.message, task_id: response.data.task_id, status: response.data.status, changes: [], usage: {}, created_at: new Date().toISOString() },
           { id: localId - 1, role: 'assistant', content: response.data.content, task_id: response.data.task_id, status: response.data.status, changes: response.data.changes, usage: response.data.usage, created_at: new Date().toISOString() },
         )
-        error.value = tr('要求已提交，对话记录暂时未同步。可重新连接核对结果。')
+        error.value = tr('要求已提交，对话记录暂时未同步，可重新连接。')
       }
       if (revision !== epoch) return false
       applySnapshot(response.data)
@@ -322,7 +331,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       }
       return true
     } catch (caught) {
-      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('提交失败，请重试以核对结果')
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('提交未完成，请重试')
       return false
     } finally { submitting.value = false }
   }
@@ -332,7 +341,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
       && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))]
     await Promise.allSettled(runs.map(async taskId => {
-      const response = await agentApi.snapshot(taskId)
+      const response = await snapshot(taskId)
       if (revision !== epoch) return
       if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }
       const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
@@ -350,6 +359,22 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     applySnapshot(response.data)
   }
 
+  async function resume() {
+    if (!currentRun.value || submitting.value || busy.value) return
+    const revision = epoch
+    const taskId = currentRun.value.task_id
+    submitting.value = true
+    try {
+      const response = await agentApi.resume(taskId)
+      if (revision !== epoch) return
+      disconnect()
+      applySnapshot(response.data)
+      if (isAgentRunning(response.data.status)) void follow(taskId)
+    } catch (caught) {
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('续跑失败，请稍后检查')
+    } finally { submitting.value = false }
+  }
+
   async function undo(changeId: number) {
     const response = await agentApi.undo(changeId)
     reportChanges([response.data])
@@ -357,6 +382,6 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
     streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
-    open, history, send, stop, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
+    open, history, send, stop, resume, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
     deleteConversation, restoreConversation, loadDeletedConversations, refreshConversations }
 })

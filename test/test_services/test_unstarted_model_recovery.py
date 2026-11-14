@@ -48,23 +48,19 @@ async def test_analysis_api_admits_a_fresh_task_after_a_proven_unstarted_failure
     assert str(run.await_args.args[0].id) == body['data']['id']
     await old.refresh_from_db()
     await receipt.refresh_from_db()
-    assert old.status == 4 and old.stage == 'failed'
-    assert '未发出' in old.error_message
-    assert receipt.state == 'failed'
-    audit = await AgentOperation.get(task=old, key='reconcile:unstarted_model')
-    assert audit.result['previous_error'] == '外部请求结果待核对，系统不会自动重试'
-    assert audit.result['steps'][0]['child_task_id'] == str(child.id)
-    assert audit.result['steps'][0]['previous_state'] == 'uncertain'
+    assert old.status == 4 and old.stage == 'needs_review'
+    assert receipt.state == 'uncertain'
+    assert not await AgentOperation.filter(task=old, key='reconcile:unstarted_model').exists()
     assert await ModelUsageRecord.all().count() == 0
     replay = (await client.post(f'/api/novel/{novel.id}/analyze', headers={'X-Creation-Request-Id': 'db757eba-4d4a-42e3-8e98-3de44d0f1fd4'})).json()
     assert replay['data']['id'] == body['data']['id']
     assert await AiTask.filter(task_type=5).count() == 2
-    assert await AgentOperation.filter(task=old, key='reconcile:unstarted_model').count() == 1
+    assert await AgentOperation.filter(task=old, key='reconcile:unstarted_model').count() == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('evidence', ['started', 'missing_child', 'missing_message', 'running_child', 'wrong_parent', 'native_result', 'media', 'completed_external', 'ledger'])
-async def test_analysis_api_keeps_genuine_or_unverifiable_external_uncertainty_blocked(client, monkeypatch, evidence):
+async def test_explicit_analysis_request_does_not_require_manual_resolution_of_old_failure(client, monkeypatch, evidence):
     novel, parent, child, message, receipt = await rejected_story()
     if evidence == 'started':
         message.usage = {'calls': [{'status': 'in_progress', 'usage_reported': False}], 'requests': 1}
@@ -94,14 +90,14 @@ async def test_analysis_api_keeps_genuine_or_unverifiable_external_uncertainty_b
     run = AsyncMock()
     monkeypatch.setattr('api.novel.ai_task_executor.run', run)
     response = await client.post(f'/api/novel/{novel.id}/analyze')
-    assert response.json()['code'] == 409
-    run.assert_not_awaited()
+    assert response.json()['code'] == 0
+    run.assert_awaited_once()
     await parent.refresh_from_db()
     await receipt.refresh_from_db()
     assert parent.stage == 'needs_review'
     assert receipt.state == 'uncertain' and receipt.result == original
     assert not await AgentOperation.filter(task=parent, key='reconcile:unstarted_model').exists()
-    assert await AiTask.filter(task_type=5).count() == 1
+    assert await AiTask.filter(task_type=5).count() == 2
 
 
 @pytest.mark.asyncio

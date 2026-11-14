@@ -152,8 +152,9 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
     assert task.status == 4
     assert len(requests) == 1 and not requests[0].get("tools")
     messages = str(requests[0]["messages"])
-    assert "episode_pacing" in messages and "本集不限总时长" in messages
-    assert "Episode duration limit:" in messages
+    assert "episode_pacing" in messages and "本集按剧情自然展开" in messages
+    assert "Target episode duration:" in messages
+    assert "不是硬性上限" in messages
 
 
 @pytest.mark.asyncio

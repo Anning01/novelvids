@@ -130,16 +130,3 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if f"@{{镜头时长:{duration:g}s}}" not in prompt:
         raise ValueError(localized_message("分镜提示词缺少镜头时长标记"))
     validate_skill_storyboard_timing(shot)
-
-
-def validate_episode_duration(storyboard, limit: int | None) -> None:
-    if limit is None:
-        return
-    from decimal import Decimal
-
-    total = sum(Decimal(shot.duration.removesuffix("s")) for shot in storyboard.shots)
-    if total > limit:
-        raise ValueError(localized_message(
-            "分镜总时长 {p0} 秒，超过本集上限 {p1} 秒。请调整剧本节奏或时长上限。",
-            p0=f"{total:f}", p1=limit,
-        ))

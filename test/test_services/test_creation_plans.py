@@ -548,7 +548,9 @@ async def test_prepared_plan_cannot_be_reported_as_completed_generation(monkeypa
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     reply = await AgentMessage.get(task=task, role='assistant')
-    assert '确认执行' in reply.content and '全部分镜已生成' not in reply.content
+    from utils.messages import localized_message
+    assert reply.content == localized_message('创作方案已准备，可点击下方按钮执行。', _language=task.request_params['prompt_language'])
+    assert '全部分镜已生成' not in reply.content
     assert await plan_proposal(task.id) is not None
 
 

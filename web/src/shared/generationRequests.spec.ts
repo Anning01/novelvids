@@ -21,3 +21,9 @@ it('fails before a new request if persistence is unavailable', async () => {
   try { await expect(generationRequest('identity', '/video/generate/', '{}')).rejects.toThrow('Full') }
   finally { write.mockRestore() }
 })
+
+it('does not block new requests behind a manual review limit', async () => {
+  const first = await generationRequest('identity', '/generate', 'first')
+  for (let index = 0; index < 105; index++) await generationRequest('identity', '/generate', String(index))
+  expect((await generationRequest('identity', '/generate', 'first')).id).toBe(first.id)
+})

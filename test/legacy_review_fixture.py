@@ -1,4 +1,4 @@
-"""Explicit human closure of uncertain external requests; never replays a step."""
+"""Build historical ledger fixtures for compatibility tests; not an application workflow."""
 
 from datetime import datetime, timezone
 from dataclasses import asdict
@@ -215,3 +215,15 @@ async def close_uncertain_task(task_id, resolution, *, user_id=None):
             export.collection_complete = True
             await export.save(update_fields=['submission_slot','collection_complete','updated_at'])
         return task
+
+
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field
+
+class TaskReviewResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    outcome: Literal[
+        "not_submitted", "provider_failed", "completed_unrecoverable", "completed"
+    ]
+    evidence_id: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
+    note: str = Field(min_length=10, max_length=2000)

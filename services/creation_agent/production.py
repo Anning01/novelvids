@@ -290,3 +290,8 @@ async def finish_production_message(task):
     await AgentConversation.filter(
         id=message.conversation_id, active_task_id=task.id
     ).update(active_task_id=None)
+    if task.request_params.get('resume_count'):
+        from services.creation_agent.event_log import agent_event_log
+        event = ({'type': 'RUN_FINISHED', 'runId': str(task.id), 'threadId': str(message.conversation_id)}
+            if task.status == 3 else {'type': 'RUN_ERROR', 'message': task.error_message or text})
+        await agent_event_log.append(message.id, [event], await agent_event_log.start(message))

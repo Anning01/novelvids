@@ -12,7 +12,7 @@ from services.creation_objects import project_write
 from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source, require_upscale, RESOLUTION_SHORT_SIDE
 from services.video_enhancement.media import digest, export_media
 from services.video_enhancement.sources import current_selection, freeze_chapter, freeze_video, require_generation_scope
-from utils.messages import localized_message
+from utils.messages import localized_message, public_generation_error
 from utils.enums import AiTaskTypeEnum
 
 
@@ -85,7 +85,10 @@ class ChapterExports:
             export = await ChapterExport.get_or_none(identity_key=identity).using_db(db)
             if export and export.task_id:
                 task = await AiTask.get(id=export.task_id).using_db(db)
-                return export, await bind_submission(task, params)
+                if task.status not in {4, 5}:
+                    return export, await bind_submission(task, params)
+                export.identity_key = digest(['previous-attempt', identity, export.id])
+                await export.save(using_db=db, update_fields=['identity_key'])
             export = await ChapterExport.create(novel_id=chapter.novel_id, chapter_id=chapter_id,
                 source_video_id=video_id,
                 team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None,
@@ -171,7 +174,15 @@ class ChapterExports:
             existing, identity = await self._enhancement(source, quote['recipe'], ctx, sha=sha)
             if existing and existing.task_id:
                 task = await AiTask.get(id=existing.task_id).using_db(db)
-                return existing, await bind_submission(task, params)
+                if task.status not in {4, 5} or origin_task_id is not None:
+                    return existing, await bind_submission(task, params)
+                if not task.request_params.get('provider_client_token'):
+                    task.request_params = {**task.request_params, 'provider_client_token': existing.identity_key}
+                    await task.save(using_db=db, update_fields=['request_params'])
+                existing.identity_key = digest(['previous-attempt', identity, existing.id])
+                await existing.save(using_db=db, update_fields=['identity_key'])
+                from uuid import uuid4
+                params['provider_client_token'] = uuid4().hex
             export = await ChapterExport.create(novel_id=source.novel_id, chapter_id=source.chapter_id,
                 source_video_id=source.source_video_id,
                 team_id=ctx.team_id, created_by=ctx.user.id if ctx.user else None, parent_export_id=source.id,
@@ -224,7 +235,7 @@ class ChapterExports:
             'url': f'/api/video/exports/{export.id}/download' if export.media_ref else None,
             'task_id': str(export.task_id) if export.task_id else None,
             'status': task.status if task else None, 'stage': task.stage if task else None,
-            'error': task.error_message if task else None, 'created_at': export.created_at.isoformat(),
+            'error': public_generation_error(task.error_message) if task else None, 'created_at': export.created_at.isoformat(),
             'recipe': export.recipe}
 
 

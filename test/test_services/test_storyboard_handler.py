@@ -231,7 +231,7 @@ async def test_same_identity_forms_can_be_saved_in_one_scene():
     ("Episode duration limit: 3s", None),
     ("\n\n**本集时长上限：** 3 秒", {"preset": "smart", "max_seconds": None}),
 ])
-async def test_storyboard_uses_only_the_explicit_episode_budget(monkeypatch, header, pacing):
+async def test_storyboard_passes_episode_target_without_rejecting_longer_output(monkeypatch, header, pacing):
     from models.scene import Scene
     novel = await Novel.create(name="集时长")
     chapter = await Chapter.create(novel=novel, number=1, name="救人", content="原文",
@@ -246,16 +246,12 @@ async def test_storyboard_uses_only_the_explicit_episode_budget(monkeypatch, hea
     run = StoryboardTaskHandler().execute({
         'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test',
     })
-    if (pacing or {}).get('max_seconds') is None:
-        assert (await run)['scenes_created'] == 1
-    else:
-        with pytest.raises(Exception, match=r'4.*3'):
-            await run
-        assert await Scene.filter(chapter=chapter).values_list('id', flat=True) == [old.id]
+    assert (await run)['scenes_created'] == 1
+    assert await Scene.filter(chapter=chapter, duration=4).exists()
 
 
 @pytest.mark.asyncio
-async def test_storyboard_respects_a_tighter_limit_saved_while_generating(monkeypatch):
+async def test_lowering_reference_duration_while_generating_does_not_discard_output(monkeypatch):
     from models.scene import Scene
 
     novel = await Novel.create(name="生成期间调整时长")
@@ -268,8 +264,21 @@ async def test_storyboard_respects_a_tighter_limit_saved_while_generating(monkey
         return Storyboard(shots=[_shot()]), {}
 
     monkeypatch.setattr('services.storyboard.handler.generate_storyboard', generate)
-    with pytest.raises(Exception, match=r'4.*3'):
-        await StoryboardTaskHandler().execute({
-            'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test',
-        })
-    assert not await Scene.filter(chapter=chapter).exists()
+    result = await StoryboardTaskHandler().execute({
+        'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test',
+    })
+    assert result['scenes_created'] == 1
+    assert await Scene.filter(chapter=chapter, duration=4).exists()
+
+
+@pytest.mark.asyncio
+async def test_226_second_storyboard_is_saved_with_180_second_reference():
+    novel = await Novel.create(name='参考时长')
+    chapter = await Chapter.create(novel=novel, number=1, name='第一集', content='原文',
+        episode_pacing={'preset': 'fast', 'max_seconds': 180})
+    shots = [_shot(i).model_copy(update={'duration': f'{duration}s'}) for i, duration in enumerate([30] * 7 + [16], 1)]
+    rows = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=shots), {}, 0)
+    assert sum(row.duration for row in rows) == 226
+    from services.storyboard.validation import validate_storyboard_duration
+    with pytest.raises(ValueError):
+        validate_storyboard_duration(shots[0], [4, 15])

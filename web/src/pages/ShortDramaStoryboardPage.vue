@@ -140,6 +140,7 @@ const route = useRoute()
 const router = useRouter()
 const stageModelId = ref('')
 const sheetModelId = ref('')
+const generateBlockingMaps = ref(false)
 const updatingSheetOptions = ref(false)
 const submittingSheets = ref(false)
 const missingGenerationOptions = computed(() => !stageModelId.value || updatingSheetOptions.value ||
@@ -299,7 +300,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       }
       assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
       if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
-      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请核对后再保存。', { p0: conflicts.join('、') }))
+      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请检查后再保存。', { p0: conflicts.join('、') }))
       if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
       void nextTick(setupSceneTracking)
       return
@@ -313,7 +314,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
         const timer = sceneAutoSaveTimers.get(id)
         if (timer) clearTimeout(timer)
         sceneAutoSaveTimers.delete(id)
-        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。', { p0: current.sequence }))
+        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请检查后再保存。', { p0: current.sequence }))
       } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
       scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
     }
@@ -713,7 +714,7 @@ function sceneEnhancementEstimate(scene: Scene) {
   const model = enhancementModels.value.find(item => item.id === setting?.model_config_id)
   const target = model?.resolutions.find(item => item.value === setting?.resolution)
   const estimate = target ? enhancementEstimate(model?.pricing, target.short_side, sceneDuration(scene)) : null
-  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待核对')
+  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待结算')
 }
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
@@ -1584,7 +1585,7 @@ async function generateChapterStoryboard(chapterId: number, replaceExisting = fa
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -2315,7 +2316,7 @@ async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
   try {
     // Drain existing autosaves before atomically merging parameters; prompts remain untouched.
     for (const scene of scenes.value.filter(item => sceneAutoSaveTimers.has(item.id))) {
-      if (!await saveScene(scene)) throw new Error(tr('请先保存或核对未保存的分镜修改'))
+      if (!await saveScene(scene)) throw new Error(tr('请先保存或检查未保存的分镜修改'))
     }
     await Promise.all([...sceneSaveQueues.values()])
     const response = await api.applyVideoDefaults(projectId.value, chapterId, settings, remember)
@@ -2565,7 +2566,7 @@ onBeforeUnmount(() => {
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
             <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
-            <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
+            <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
             <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
             <AppButton v-if="isAgent && scenes.length && project?.storyboard_enabled" variant="secondary" size="sm" :disabled="!sheetModelId || generatingStoryboard || waitingAnalysis || updatingSheetOptions" :loading="submittingSheets" @click="fillChapterSheets">{{ tr('补齐本集故事版') }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建分镜') }}</AppButton>
@@ -2575,10 +2576,10 @@ onBeforeUnmount(() => {
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
-            <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
+            <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
         <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
-            <StoryboardGenerationOptions v-model="sheetModelId" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
+            <StoryboardGenerationOptions v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>

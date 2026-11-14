@@ -342,11 +342,6 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             await ai_model_config_controller.get_active(
                 AiTaskTypeEnum.reference_image, cover_model_config_id, team_id=team_id,
             )
-        from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
-        for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
-            if pending.request_params.get("novel_id") == novel_id:
-                if not await reconcile_unstarted_model_task(pending):
-                    raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 

@@ -130,7 +130,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     wrapper.unmount()
   })
 
-  it('sends the chosen text model for storyboard generation', async () => {
+  it.each([false, true])('sends the chosen text model and blocking-map switch (%s)', async blocking => {
     vi.mocked(api.novelMeta).mockResolvedValue({data:{id:9,name:'测试',author:'Agent 创建'}} as never)
     vi.mocked(api.chapters).mockResolvedValue({data:{items:[chapter],pagination:{page:1,pages:1}}} as never)
     vi.mocked(api.workbenchBootstrap).mockResolvedValue({data:{chapter,assets:[],scenes:[],videos:{}}} as never)
@@ -140,9 +140,12 @@ describe('人工模式无章节时创建第一个分镜', () => {
     await wrapper.get('[aria-label="选择分镜模型"]').trigger('click')
     document.querySelector<HTMLElement>('[role="option"] [title="Storyboard text"]')!.click()
     await flushPromises()
+    const toggle = wrapper.findAll('label').find(label => label.text() === '生成空间定位图')!.get('input')
+    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    await toggle.setValue(blocking)
     await wrapper.findAll('button').find(button => button.text() === '生成全部分镜')!.trigger('click')
     await flushPromises()
-    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, undefined)
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, undefined, blocking)
     wrapper.unmount()
   })
 
@@ -154,7 +157,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     vi.mocked(api.generateScenes).mockRejectedValue(new Error('test submission'))
     const wrapper = await mountPage()
     await flushPromises()
-    expect(wrapper.get<HTMLInputElement>('.sheet-options input').element.checked).toBe(true)
+    expect((wrapper.findAll('label').find(label => label.text() === '同时生成故事版')!.get('input').element as HTMLInputElement).checked).toBe(true)
     const button = wrapper.findAll('button').find(b => b.text() === '生成全部分镜')!
     for (const [label, model] of [['选择分镜模型','Storyboard text'], ['线稿生图模型','Sheet image']]) {
       expect(button.attributes('disabled')).toBeDefined()
@@ -164,7 +167,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     }
     await button.trigger('click')
     await flushPromises()
-    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, 42)
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, 42, false)
     wrapper.unmount()
   })
 

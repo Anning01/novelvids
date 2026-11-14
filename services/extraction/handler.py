@@ -212,7 +212,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
                         kind, identifier = key.split(':')
                         target = await (Asset if kind == 'asset' else AssetVariant).get_or_none(id=int(identifier))
                         if target is None or await object_version(target) != version:
-                            raise ValueError(localized_message('待补全的设定已有新修改，已保留人工编辑，请重新核对'))
+                            raise ValueError(localized_message('待补全的设定已有新修改，已保留人工编辑，请重新生成'))
                 before = {asset.id: await object_state(asset) for asset in await Asset.filter(novel_id=novel_id)} if plan_context else {}
                 before_variants = {variant.id: await object_state(variant) for variant in
                     await AssetVariant.filter(asset__novel_id=novel_id)} if plan_context else {}

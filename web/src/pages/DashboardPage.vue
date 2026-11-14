@@ -183,7 +183,7 @@ async function remove(project: ProjectOverviewItem) {
   if (deletingIds.value.has(project.id) || !editable.value) return
   if (!await appConfirm({
     title: tr('删除项目「{p0}」？', { p0: project.name }),
-    get message() { return tr('删除会停止排队任务及未提交的后续步骤，并将作品从列表和工作台移除。账单会保留，模型调用记录也会单独保留；已提交调用继续结算或核对，不影响删除。已发生费用不会退款。') },
+    get message() { return tr('删除会停止排队任务及未提交的后续步骤，并将作品从列表和工作台移除。账单会保留，模型调用记录也会单独保留；已提交调用继续同步用量和结算，不影响删除。已发生费用不会退款。') },
     get confirmLabel() { return tr('删除项目') },
     tone: 'danger',
   })) return

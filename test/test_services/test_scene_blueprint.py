@@ -90,6 +90,7 @@ async def test_model_supplies_distinct_shot_positions_and_receives_previous_came
     close = await place_shot(execution, shot, entities, layouts, state, '剧本', 'two')
     calls = execution.generate.await_args_list
     assert [c.args[2] for c in calls] == [NewLocationPlacement, ShotPlacement]
+    assert all(c.kwargs['activity_label'] == f'补充第 {shot.sequence} 镜空间定位图' for c in calls)
     assert calls[1].args[1]['previous_shot'] == state
     assert wide.blocking_map.layout == close.blocking_map.layout
     assert wide.blocking_map.cameras != close.blocking_map.cameras
@@ -97,7 +98,8 @@ async def test_model_supplies_distinct_shot_positions_and_receives_previous_came
 
 
 @pytest.mark.asyncio
-async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh():
+@pytest.mark.parametrize('blocking', [None, True, False])
+async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh(blocking):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from schemas.agent_workflow import StructuredSkillStoryboard
@@ -108,8 +110,11 @@ async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh(
     from test.test_services.test_prompt_language import _shot
 
     evidence = []
+    labels = []
     async def generate(skill, facts, output_type, **options):
+        labels.append(options['activity_label'])
         if skill == 'storyboard':
+            assert facts.get('generate_blocking_maps', True) is (blocking is not False)
             count = 7 if facts['source_scene_number'] == '1-2' else 1
             shots = []
             for index in range(count):
@@ -126,14 +131,23 @@ async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh(
     entities = [SceneEntity(name='展厅', asset_type='场景', aliases=[], description='展厅'),
                 SceneEntity(name='访客', asset_type='人物', aliases=[], description='访客')]
     execution = SimpleNamespace(snapshot=SkillSnapshot.model_validate(snapshot_skills()),
-        params={'assistant_model_config_id':1}, generate=generate)
+        params={'assistant_model_config_id':1, **({'generate_blocking_maps': blocking} if blocking is not None else {})}, generate=generate)
     token = current_execution.set(execution)
     try:
         result, _ = await generate_storyboard(None, '1-2 展厅 内 日\n两人相向走近。\n1-3 展厅 内 夜\n散场。', entities, 'mock')
     finally:
         current_execution.reset(token)
+    if blocking is False:
+        assert len(result.shots) == 8
+        assert all(shot.blocking_map is None and shot.duration_split_part is None for shot in result.shots)
+        assert evidence == []
+        assert labels == ['生成场次 1-2 的分镜', '生成场次 1-3 的分镜']
+        return
     assert [s.duration_split_part for s in result.shots] == [None, 2, 3, 4, 5, 6, 7, None]
     assert [bool(s.blocking_map) for s in result.shots] == [False, *([True]*6), False]
     assert [s['transition'] for s in evidence] == [f'第{i}段走位落点' for i in range(1,7)]
     assert evidence[0]['map'] is None and evidence[0]['spatial_relationships']
     assert all(s['map'] for s in evidence[1:])
+    assert labels == ['生成场次 1-2 的分镜',
+                      *[f'场次 1-2 · 补充第 {part}/7 镜空间定位图' for part in range(2, 8)],
+                      '生成场次 1-3 的分镜']

@@ -91,8 +91,8 @@ def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = Fa
     last_finish = next((call['finish_reason'] for call in reversed(calls) if call.get('finish_reason') and call.get('phase', 'main') != 'summary'), None)
     if last_finish == 'length':
         return localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。')
-    if '增量修复已用完' in message or 'incremental repair' in message:
-        return localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。')
+    if any(marker in message for marker in ('自动修复已结束', '增量修复已用完', 'incremental repair', 'Automatic repair ended')):
+        return localized_message('本次自动修复已结束，候选和调用记录已保留，可点击重置并重试。')
     if any(marker in message.lower() for marker in ('exceeded maximum retries', 'exceeded max retries count')):
         return localized_message('模型连续提交的内容未通过工具或输出校验，本轮已停止。请缩小修改范围后重试；已保存的修改可在记录中查看。')
     return localized_message('创作助手执行失败。请查看已保存的修改，确认模型可用后重试。')
@@ -206,7 +206,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             if request_params.get('has_creation_plan'):
                 # Preparing a plan is not a production receipt. Do not let a
                 # conversational closing sentence misreport it as completed work.
-                final_text = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
+                final_text = localized_message('创作方案已准备，可点击下方按钮执行。')
             yield TextMessageStartEvent(message_id=final_message_id)
             yield TextMessageContentEvent(message_id=final_message_id, delta=final_text)
             yield TextMessageEndEvent(message_id=final_message_id)
@@ -239,7 +239,7 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 except UnexpectedModelBehavior:
                     raise ValueError(localized_message('助手未能完成内部内容校验，已保留已完成步骤，可继续本次任务。')) from None
                 if plan is not None:
-                    content = localized_message('创作方案已准备，请核对下方的范围和操作后确认执行。')
+                    content = localized_message('创作方案已准备，可点击下方按钮执行。')
                     buffer.extend([
                         {'type': 'TEXT_MESSAGE_START', 'messageId': final_message_id, 'role': 'assistant'},
                         {'type': 'TEXT_MESSAGE_CONTENT', 'messageId': final_message_id, 'delta': content},

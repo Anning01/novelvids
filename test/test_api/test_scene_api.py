@@ -448,3 +448,21 @@ async def test_extraction_and_storyboard_accept_independent_models(client, confi
         different = other.id if chosen == configured_creation_agent.id else configured_creation_agent.id
         conflict = await client.post(url, json={**body, "assistant_model_config_id": different})
         assert conflict.json()["code"] == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('enabled', [None, False, True])
+async def test_generate_freezes_blocking_map_option_without_starting_models(client, configured_creation_agent, enabled):
+    _, chapter, _ = await _setup_scene_env()
+    payload = {'chapter_id': chapter.id}
+    if enabled is not None:
+        payload['generate_blocking_maps'] = enabled
+    with patch.object(ai_task_executor, 'run', AsyncMock()):
+        body = (await client.post('/api/scene/generate/', json=payload)).json()
+    assert body['code'] == 0, body
+    task = await AiTask.get(id=body['data']['id'])
+    assert task.request_params['generate_blocking_maps'] is (enabled is True)
+    with patch.object(ai_task_executor, 'run', AsyncMock()):
+        conflict = (await client.post('/api/scene/generate/', json={
+            'chapter_id': chapter.id, 'generate_blocking_maps': not (enabled is True)})).json()
+    assert conflict['code'] == 409

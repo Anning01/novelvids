@@ -1354,7 +1354,7 @@ async def test_joining_an_existing_generation_does_not_replace_its_snapshot_or_o
 
 
 @pytest.mark.asyncio
-async def test_uncertain_cover_keeps_story_result_and_blocks_duplicate_paid_submission(
+async def test_failed_cover_keeps_story_result_and_allows_an_explicit_new_attempt(
     monkeypatch,
 ):
     from controllers.novel import novel_controller
@@ -1396,8 +1396,9 @@ async def test_uncertain_cover_keeps_story_result_and_blocks_duplicate_paid_subm
     assert task.stage == "needs_review"
     assert task.response_data["story_outline"] == "Preserved outline"
     assert (await Novel.get(id=novel.id)).story_outline == "Preserved outline"
-    with pytest.raises(HTTPException):
-        await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
+    retry = await novel_controller.analyze(novel.id, cover_only=True, cover_model_config_id=image_config.id)
+    assert retry.id != task.id
+    assert (await Novel.get(id=novel.id)).story_outline == "Preserved outline"
     submit.assert_awaited_once()
 
 

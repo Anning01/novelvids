@@ -143,6 +143,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         team_id: int | None = None,
         user_id: int | None = None,
         *, assistant_model_config_id: int | None = None, sheet_model_config_id: int | None = None,
+        generate_blocking_maps: bool | None = None,
     ):
         """提交分镜生成任务，返回任务记录供前端轮询。
 
@@ -180,6 +181,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "prompt_language": await general_config_controller.get_prompt_language(),
             "storyboard_strategy": strategy.key,
             "sheet_model_config_id": sheet_model_config_id,
+            "generate_blocking_maps": generate_blocking_maps if generate_blocking_maps is not None else False,
         }
         if getattr(config, "thinking", None):
             request_params["thinking"] = config.thinking
@@ -217,6 +219,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                     # 避免离开页面再返回时重复提交被 400 拒绝
                     if t.request_params.get("sheet_model_config_id") != sheet_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
+                    if generate_blocking_maps is not None and t.request_params.get('generate_blocking_maps', True) != generate_blocking_maps:
+                        raise HTTPException(409, localized_message('请等待当前任务完成后再切换空间定位图设置'))
                     if assistant_model_config_id is not None and t.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
                     return await bind_submission(t, {**request_params, "team_id": team_id, "user_id": user_id})

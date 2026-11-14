@@ -316,7 +316,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
       if (editingId && !assets.value.some(asset => asset.id === editingId)) {
         notice.info(tr('当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。'))
-      } else if (editingId && ids.has(editingId)) notice.info(tr('助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。'))
+      } else if (editingId && ids.has(editingId)) notice.info(tr('助手已保存设定调整。当前编辑草稿已保留，请检查后再保存。'))
       return
     }
     const updated = await Promise.all([...ids].map(async id => (await api.asset(id)).data))

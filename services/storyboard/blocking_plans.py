@@ -19,7 +19,7 @@ def ending_state(shot):
             'map': shot.blocking_map.model_dump() if shot.blocking_map else None}
 
 
-async def place_shot(execution, shot, entities, layouts, previous, scene_text, segment):
+async def place_shot(execution, shot, entities, layouts, previous, scene_text, segment, *, activity_label=None):
     visible = set(shot.visible_asset_names or [])
     location = next((e.name for e in entities if e.asset_type == "场景" and e.name in visible), None)
     layout = next((item for item in layouts.values() if item["name"] == location), None)
@@ -47,6 +47,7 @@ async def place_shot(execution, shot, entities, layouts, previous, scene_text, s
         facts = {'segment': segment, 'screenplay': scene_text, 'shot': shot.model_dump(exclude={'prompt', 'blocking_map'}),
                  'location_name': location, 'fixed_layout': layout, 'previous_shot': previous}
         generated = await execution.generate('structured', facts, ShotPlacement if layout else NewLocationPlacement,
+            activity_label=activity_label or localized_message('补充第 {p0} 镜空间定位图', p0=shot.sequence),
             additional_instructions=execution.snapshot.read('blocking_guide'), output_validator=check)
         plan = await check(generated)
     layouts[plan.layout.id] = plan.layout.model_dump()

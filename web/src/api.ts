@@ -94,6 +94,11 @@ export async function exportDiagnostics() {
   return available
 }
 
+export async function resetGenerationRequest(url: string, body?: BodyInit | null): Promise<void> {
+  const receipt = await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, body)
+  finishGenerationRequest(receipt.key)
+}
+
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = options?.body instanceof FormData
     ? authHeaders()
@@ -392,9 +397,13 @@ export const api = {
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
-  generateStoryboardSheet: (sceneId: number, modelConfigId: number) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/storyboard-sheet${qs({ model_config_id: modelConfigId })}`, {method: 'POST'}),
+  generateStoryboardSheet: async (sceneId: number, modelConfigId: number, restart = false) => {
+    const url = `/scene/${sceneId}/storyboard-sheet${qs({ model_config_id: modelConfigId })}`
+    if (restart) await resetGenerationRequest(url)
+    return request<SingleResponse<AiTask>>(url, { method: 'POST' })
+  },
   generateChapterSheets: (chapterId: number, modelConfigId: number) => request<SingleResponse<string[]>>(`/scene/chapter/${chapterId}/storyboard-sheets${qs({model_config_id: modelConfigId})}`, {method: 'POST'}),
-  generateScenes: (chapterId: number, replaceExisting = false, assistantModelConfigId?: number, sheetModelConfigId?: number) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, sheet_model_config_id: sheetModelConfigId, assistant_model_config_id: assistantModelConfigId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
+  generateScenes: (chapterId: number, replaceExisting = false, assistantModelConfigId?: number, sheetModelConfigId?: number, generateBlockingMaps = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, generate_blocking_maps: generateBlockingMaps, sheet_model_config_id: sheetModelConfigId, assistant_model_config_id: assistantModelConfigId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),

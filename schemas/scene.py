@@ -339,6 +339,7 @@ class SceneFullProperties(SceneProperties):
 
 class SceneGenerateCreate(BaseModel):
     sheet_model_config_id: int | None = Field(None, gt=0)
+    generate_blocking_maps: bool = Field(False, strict=True)
     assistant_model_config_id: int | None = Field(None, gt=0)
     replace_existing: bool = False
     """创建请求：chapter_id 必填"""

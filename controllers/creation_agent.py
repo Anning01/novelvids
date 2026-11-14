@@ -81,7 +81,7 @@ class CreationAgentController:
     async def snapshot(self, task_id, ctx: AuthContext) -> AgentRunOut:
         conversation, assistant = await agent_sessions.for_task(task_id, ctx)
         task = await AiTask.get(id=task_id)
-        events = await agent_event_log.load(assistant)
+        events = (await agent_event_log.load_projection_many([assistant]))[assistant.id]
         changes = await message_changes(assistant, conversation.novel_id, events)
         assistant.task = task
         production = await production_receipts_for([task])
@@ -90,7 +90,7 @@ class CreationAgentController:
             production=production[str(task.id)], task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
             changes=[change_projection(change) for change in changes], usage=(await usage_summaries([assistant]))[assistant.id],
-            event_count=len(events), query_results=query_results(events))
+            event_count=await agent_event_log.size(assistant), query_results=query_results(events))
 
     async def messages(self, conversation_id: int, ctx: AuthContext, before: int | None):
         conversation = await agent_sessions.get(conversation_id, ctx)
@@ -100,7 +100,7 @@ class CreationAgentController:
         rows = await query.order_by('-id').select_related('task').limit(50)
         visible = [row for row in rows if not (row.run_input or {}).get("internal_production_step")]
         assistants = [row for row in visible if row.role == 'assistant']
-        events = await agent_event_log.load_many(assistants)
+        events = await agent_event_log.load_projection_many(assistants)
         changes = await changes_by_message(assistants, conversation.novel_id, events)
         usages = await usage_summaries(assistants)
         pending = await pending_productions([row.task for row in assistants])

@@ -55,4 +55,4 @@
 
 读取 episode_pacing。compact 压缩过渡与重复反应；fast 用主要动作和对白推进；smart 按内容自然估时；slow 给重要反应留白；detailed 展开有叙事作用的细节。按自然语速试读对白和 OS，能与台词同时发生的动作不重复计时。
 
-max_seconds 缺省或为 null 时，本集按剧情自然展开，省略时长上限行。仅在提供 max_seconds 数值时，将「本集时长上限：90 秒」放在集标题下一行，数值使用用户设置的 max_seconds。英文写作使用「Episode duration limit: 90s」。时长与用户指定原话冲突时，优先压缩其他可省内容。
+max_seconds 是本集参考时长，不是硬性上限。缺省或为 null 时，本集按剧情自然展开，省略参考时长行。提供数值时，将「本集参考时长：约 90 秒」放在集标题下一行，数值使用用户设置的 max_seconds。英文写作使用「Target episode duration: about 90s」。优先保证故事、对白和动作的完整与表现效果，允许适度超出参考值，不为凑秒数删掉必要内容。

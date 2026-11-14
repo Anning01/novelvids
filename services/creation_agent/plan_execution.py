@@ -77,7 +77,7 @@ class CreationPlanRunner:
                     continue
                 if records[step.id].result.get('status') in {'completed', 'skipped'}:
                     records[step.id] = await self.finish(step, {'status': 'failed', 'coalesced': True,
-                        'error': localized_message('旧分段任务已有保存结果，需核对完整章节后继续')})
+                        'error': localized_message('已有分段结果已保存，可重新生成本章以补齐内容')})
                     continue
                 records.pop(step.id)
             if any(records.get(key) and records[key].result.get('status') in {'failed', 'blocked'} for key in step.depends_on):

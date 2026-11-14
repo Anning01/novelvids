@@ -7,13 +7,22 @@ export interface ActivityEvent {
   toolCallName?: string
   delta?: string
   name?: string
-  value?: AgentActivityStep
+  value?: AgentActivityStep & { detail_delta?: string; detail_offset?: number }
 }
 
 /** Build the visible timeline from the same events used for stream replay. */
 export function applyActivityEvent(steps: AgentActivityStep[], event: ActivityEvent): void {
   const at = event.timestamp === undefined ? undefined : new Date(event.timestamp).toISOString()
   if (event.type === 'RUN_STARTED') { steps.splice(0); return }
+  if (event.type === 'CUSTOM' && event.name === 'agent_activity_delta' && event.value) {
+    const value = event.value
+    let step = steps.find(item => item.id === value.id)
+    if (!step) { step = { id: value.id, kind: value.kind, label: value.label, status: value.status, detail: '', started_at: value.started_at }; steps.push(step) }
+    const detail = step.detail || ''
+    const offset = value.detail_offset ?? 0
+    if (offset <= detail.length) step.detail = detail + (value.detail_delta || '').slice(detail.length - offset)
+    return
+  }
   if (event.type === 'CUSTOM' && event.name === 'agent_activity' && event.value) {
     const existing = steps.find(step => step.id === event.value!.id)
     if (existing) Object.assign(existing, event.value)

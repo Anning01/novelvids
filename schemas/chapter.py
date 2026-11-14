@@ -21,7 +21,7 @@ class EpisodePacing(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     preset: Literal["compact", "fast", "smart", "slow", "detailed"] = "smart"
-    max_seconds: int | None = Field(None, ge=1, strict=True)
+    max_seconds: int | None = Field(None, ge=1, strict=True, description="本集参考时长，不作为总时长硬性上限；字段名保留以兼容已有项目")
 
 
 class ChapterFullProperties(ChapterProperties):

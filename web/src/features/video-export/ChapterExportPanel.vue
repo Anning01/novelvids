@@ -32,8 +32,8 @@ const scope = computed(() => `${props.videoId ? 'video:' + props.videoId : 'chap
 const active = computed(() => exports.value.some(row => [1, 2, 6].includes(row.status || 0) || row.stage === 'billing_pending'))
 
 function status(row: ChapterExport) {
-  if (row.stage === 'review_closed') return row.status === 5 ? tr('后续步骤已停止，已人工核对') : tr('已人工核对')
-  if (row.stage === 'needs_review') return tr('需要核对')
+  if (row.stage === 'review_closed') return row.status === 5 ? tr('后续步骤已停止') : tr('已结束')
+  if (row.stage === 'needs_review') return tr('未完成，可重试')
   if (row.stage === 'billing_pending') return tr('用量正在结算')
   if (row.status === 5) return tr('后续步骤已停止')
   if (row.status === 4) return tr('导出失败')
