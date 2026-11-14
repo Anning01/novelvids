@@ -228,22 +228,49 @@ class ChapterRecognitionStrategy(ABC):
 class RegexChapterRecognitionStrategy(ChapterRecognitionStrategy):
     """基于正则表达式的章节识别策略。"""
 
-    # 匹配 "第X章"，X 可以是中文数字或阿拉伯数字
+    # 匹配 "第X章/第X集"，X 可以是中文数字或阿拉伯数字
     # 捕获组: (完整匹配), (数字部分), (标题部分)
     CHAPTER_PATTERN = re.compile(
-        r"^[ \t]*(?:#{1,6}[ \t]+)?((?:第[ \t]*([0-9零一二三四五六七八九十百千万亿]+)[ \t]*章)|(?:(?:Chapter|Episode)[ \t]+(?:[0-9]+|[IVXLCDM]+)\b))(.*)$", re.MULTILINE | re.IGNORECASE
+        r"^[ \t]*(?:#{1,6}[ \t]+)?((?:第[ \t]*([0-9零一二三四五六七八九十百千万亿]+)[ \t]*[章集])|(?:(?:Chapter|Episode)[ \t]+(?:[0-9]+|[IVXLCDM]+)\b))(.*)$", re.MULTILINE | re.IGNORECASE
     )
 
     def recognize(self, text: NovelText) -> list[ParsedChapterResult]:
-        """使用正则表达式和中文数字转换识别章节。"""
+        """识别章/集标题，并合并正文前连续出现的同集标题。
+
+        参数：
+            text: 要按标题分段的原始文本。
+
+        返回：
+            保留外层标题、正文及原始索引的章节列表。
+        """
         if text.is_empty():
             return []
 
         chapters: list[ParsedChapterResult] = []
-        matches = list(self.CHAPTER_PATTERN.finditer(text.content))
+        matches: list[tuple[re.Match[str], int]] = []
+        previous_episode_number = None
 
-        for i, match in enumerate(matches):
-            chapter_marker = match.group(1)  # "第X章"
+        for match in self.CHAPTER_PATTERN.finditer(text.content):
+            episode_number = None
+            if match.group(1).endswith("集"):
+                # 统一中文数字和带前导零的集号，避免同一集因写法不同被重复拆分。
+                number = match.group(2)
+                episode_number = int(number) if number.isdecimal() else chinese2digit(number)
+
+            # 只合并之间没有正文的同集标题，保留外层标题并更新正文起点。
+            if (
+                matches
+                and episode_number is not None
+                and episode_number == previous_episode_number
+                and not text.content[matches[-1][1]:match.start()].strip()
+            ):
+                matches[-1] = (matches[-1][0], match.end())
+            else:
+                matches.append((match, match.end()))
+            previous_episode_number = episode_number
+
+        for i, (match, content_start) in enumerate(matches):
+            chapter_marker = match.group(1)  # "第X章/第X集" 或英文标题
             title_suffix = match.group(3).strip()  # 标题
 
             # 组合完整标题
@@ -253,12 +280,11 @@ class RegexChapterRecognitionStrategy(ChapterRecognitionStrategy):
 
             # 结束索引为下一个匹配的开始位置或字符串末尾
             if i + 1 < len(matches):
-                end_index = matches[i + 1].start()
+                end_index = matches[i + 1][0].start()
             else:
                 end_index = text.length
 
-            # 提取章节内容（从匹配结束位置到下一章开始）
-            content_start = match.end()
+            # 提取章节内容（从最后一个合并标题之后到下一章开始）
             chapter_content = text.content[content_start:end_index].strip()
 
             # 正则匹配的置信度为 1.0

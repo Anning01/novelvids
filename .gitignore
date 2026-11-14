@@ -129,3 +129,4 @@ GEMINI.md
 # Local investigation and preview artifacts
 /output/
 /web/.*-smoke.html
+/local-dev/
