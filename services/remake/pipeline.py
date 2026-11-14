@@ -34,6 +34,10 @@ class RemakePipelineError(RuntimeError):
     pass
 
 
+class RemakeAwaitingResults(RemakePipelineError):
+    pass
+
+
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
 
@@ -94,7 +98,7 @@ class RemakeDecompositionPipeline:
         snapshot = execution.snapshot if execution else SkillSnapshot.model_validate(snapshot_skills())
         language = execution.language if execution else task_language.get() or 'zh'
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
-        saved = await completed_outputs({**execution.params, 'model_config_id':model_config.id}) if execution else {}
+        saved = await completed_outputs({**execution.params, 'retry_of_task_id': execution.params.get('task_id') or execution.params.get('retry_of_task_id'), 'model_config_id':model_config.id}) if execution else {}
         raw_assets = saved.get('model:remake:RemakeAssets:1')
         if cached is None or raw_assets is None:
             if remote:
@@ -147,6 +151,7 @@ class RemakeDecompositionPipeline:
 
         completed = {i: saved[f'model:remake:RemakeShot:{i}'] for i in range(1, len(scene_paths) + 1)
                      if f'model:remake:RemakeShot:{i}' in saved}
+        held = frozenset(execution.params.get("held_shots", [])) - completed.keys() if execution else set()
         raw_prompts = await gateway.analyze_many(
             scene_paths,
             prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
@@ -155,8 +160,12 @@ class RemakeDecompositionPipeline:
             context_builder=lambda index: {'assets': catalog, 'duration_seconds': durations[index - 1],
                                           'storyboard_strategy': strategy},
             on_completed=report_scene_progress,
+            **({"held_shots": held} if held else {}),
             **({"completed_results": completed} if completed else {}),
         )
+        if held:
+            await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
+            raise RemakeAwaitingResults("剩余片段正在等待结果核对")
         prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
             strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 

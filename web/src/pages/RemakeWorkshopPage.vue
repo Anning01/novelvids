@@ -28,6 +28,7 @@ type UploadState = 'empty' | 'uploading' | 'ready' | 'failed'
 type SourceMode = 'single_upload' | 'folder_upload' | 'history'
 
 const router = useRouter()
+const analysisModelId = ref<number | null>(null)
 const capabilities = ref<RemakeCapabilities | null>(null)
 const loadingCapabilities = ref(true)
 const capabilityError = ref('')
@@ -82,6 +83,7 @@ const sourceReady = computed(() => {
 })
 const canSubmit = computed(() => (
   Boolean(capabilities.value)
+  && analysisModelId.value !== null
   && sourceReady.value
   && Boolean(projectName.value.trim())
   && Boolean(aspectRatio.value)
@@ -140,6 +142,7 @@ async function loadCapabilities() {
   try {
     const response = await api.remakeCapabilities()
     capabilities.value = response.data
+    analysisModelId.value = response.data.analysis_models[0]?.id ?? null
     setDefaults(response.data)
   } catch (error) {
     capabilityError.value = (error as Error).message || tr('重制能力加载失败')
@@ -353,6 +356,7 @@ async function createProject() {
     const response = await api.createRemakeProject({
       name: projectName.value.trim(),
       source_mode: sourceMode.value,
+      model_config_id: analysisModelId.value ?? undefined,
       aspect_ratio: aspectRatio.value,
       resolution: resolution.value,
       style_key: ['auto', 'custom'].includes(styleKey.value) ? null : styleKey.value,
@@ -483,6 +487,18 @@ onBeforeUnmount(() => {
             <History :size="15" />{{ tr('历史项目') }} </AppButton>
         </template>
 
+        <AppSelect
+          class="analysis-model-select"
+          :model-value="analysisModelId === null ? '' : String(analysisModelId)"
+          :ariaLabel="tr('视频拆解模型')"
+          :menu-label="tr('视频拆解模型')"
+          menu-width="trigger"
+          :disabled="creating || !capabilities.analysis_models.length"
+          :options="capabilities.analysis_models.length ? capabilities.analysis_models.map(model => ({value: String(model.id), label: model.name})) : [{value: '', label: tr('暂无可用的视频拆解模型')}]"
+          @update:model-value="analysisModelId = $event ? Number($event) : null"
+        >
+          <template #leading><Sparkles :size="15" /></template>
+        </AppSelect>
         <AppSelect v-model="aspectRatio" class="format-select" :ariaLabel="tr('画面比例')" :options="capabilities.aspect_ratios">
           <template #leading><Film :size="15" /></template>
         </AppSelect>
@@ -550,6 +566,7 @@ onBeforeUnmount(() => {
 .folder-status { color: var(--app-text-secondary); }.folder-status.is-ready { color: var(--creation-success); }.folder-status.is-failed, .folder-status.is-invalid { color: var(--creation-danger); }.folder-status.is-ignored { color: var(--app-text-muted); }.folder-issue { max-width: 240px; color: var(--creation-danger); overflow: hidden; text-overflow: ellipsis; }
 .gap-warning { display: flex; padding: 12px 13px; align-items: flex-start; gap: 9px; border: 1px solid color-mix(in srgb, var(--creation-warning) 28%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--creation-warning) 7%, var(--app-surface)); cursor: pointer; }.gap-warning input { margin-top: 2px; }.gap-warning span { display: grid; gap: 3px; }.gap-warning strong { color: var(--creation-warning); font-size: 11px; }.gap-warning small { color: var(--app-text-muted); font-size: 10px; }
 .form-error { margin: 11px 0 0; color: var(--creation-danger); font-size: 12px; }
+.analysis-model-select { width: 210px; max-width: 100%; }
 .format-select { width: 110px; }.style-select { width: 136px; }
 .select-thumbnail { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }.custom-style-icon { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); }
 .project-name-field { display: flex; min-height: 44px; align-items: center; gap: 12px; margin-top: 10px; padding: 0 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); box-shadow: var(--app-shadow); }.project-name-field span { flex: 0 0 auto; color: var(--app-text-secondary); font-size: 11px; font-weight: 650; }.project-name-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; }.project-name-field input::placeholder { color: var(--app-text-muted); }
@@ -558,6 +575,6 @@ onBeforeUnmount(() => {
 .source-panel-enter-active, .source-panel-leave-active { transition: opacity .16s ease, transform .16s ease; }.source-panel-enter-from, .source-panel-leave-to { opacity: 0; transform: translateY(5px); }
 .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 880px) { .format-select { width: 118px; }.style-select { width: 150px; } }
-@media (max-width: 620px) { .source-stage { min-height: 190px; padding: 18px 14px; }.history-selector { grid-template-columns: 1fr; }.format-select { width: calc(50% - 4px); }.style-select { width: 100%; }.folder-table td:nth-child(2) { max-width: 150px; }.project-name-field { align-items: flex-start; flex-direction: column; gap: 4px; padding: 10px 12px; }.project-name-field input { width: 100%; } }
+@media (max-width: 620px) { .analysis-model-select { width: 100%; } .source-stage { min-height: 190px; padding: 18px 14px; }.history-selector { grid-template-columns: 1fr; }.format-select { width: calc(50% - 4px); }.style-select { width: 100%; }.folder-table td:nth-child(2) { max-width: 150px; }.project-name-field { align-items: flex-start; flex-direction: column; gap: 4px; padding: 10px 12px; }.project-name-field input { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 </style>

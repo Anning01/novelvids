@@ -147,3 +147,37 @@ describe('RemakeProgressPage', () => {
     expect(replace).toHaveBeenCalledWith('/create/short-drama/manual/28')
   })
 })
+
+it('marks the interrupted stage and suppresses replay of accepted clips', async () => {
+  const snapshot = progressSnapshot({aggregate_status:'failed', terminal:true, overall_progress:59})
+  Object.assign(snapshot.sources[0]!.task!, {status:TaskStatusEnum.FAILED, stage:'needs_review', progress:59,
+    awaiting_platform_result:true, error_message:'已受理，结果待核对'})
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snapshot})
+  const wrapper = mount(RemakeProgressPage)
+  await flushPromises()
+  expect(wrapper.get('.pipeline-list .is-failed').text()).toContain('生成专业分镜')
+  expect(wrapper.findAll('button').some(button => button.text().includes('重试'))).toBe(false)
+  wrapper.unmount()
+})
+
+it('shows the saved clip count from the progress snapshot after reopening the page', async () => {
+  const snapshot = progressSnapshot({overall_progress:59,terminal:true,aggregate_status:'failed'})
+  Object.assign(snapshot.sources[0]!.task!, {stage:'generating_storyboards', progress:59,completed_clips:14,total_clips:103})
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snapshot})
+  const wrapper = mount(RemakeProgressPage)
+  await flushPromises()
+  expect(wrapper.text()).toContain('已保存 14/103 个片段的分镜')
+  expect(api.retryRemakeSource).not.toHaveBeenCalled()
+  wrapper.unmount()
+})
+
+it('offers retry for untouched clips while submitted clips await results', async () => {
+  const snapshot = progressSnapshot({aggregate_status:'failed', terminal:true, overall_progress:59})
+  Object.assign(snapshot.sources[0]!.task!, {status:TaskStatusEnum.FAILED, stage:'needs_review',
+    awaiting_platform_result:true, completed_clips:14, total_clips:103, retryable_clips:79})
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snapshot})
+  const wrapper = mount(RemakeProgressPage)
+  await flushPromises()
+  expect(wrapper.findAll('button').some(button => button.text().includes('重试未完成片段（79）'))).toBe(true)
+  wrapper.unmount()
+})

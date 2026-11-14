@@ -24,6 +24,7 @@ vi.mock('@/api', () => ({
 }))
 
 const capabilities = {
+  analysis_models: [{id: 11, name: '视频分析 A'}, {id: 22, name: '视频分析 B'}],
   media: { extensions: ['mp4', 'mov'], max_bytes: 500 * 1024 * 1024, max_duration_seconds: 1200 },
   aspect_ratios: ['9:16', '16:9'],
   resolutions: ['720p', '1080p'],
@@ -78,7 +79,7 @@ describe('RemakeWorkshopPage', () => {
 
     expect(wrapper.findComponent(CreationEntryShell).exists()).toBe(true)
     expect(wrapper.findComponent(CreationConfigBar).exists()).toBe(true)
-    expect(wrapper.findAllComponents(AppSelect)).toHaveLength(3)
+    expect(wrapper.findAllComponents(AppSelect)).toHaveLength(4)
     expect(wrapper.get('.creation-entry-heading').text()).toContain('重制精品短剧')
     expect(api.remakeCapabilities).toHaveBeenCalledOnce()
     expect(wrapper.get('[data-source-mode="single_upload"]').attributes('aria-pressed')).toBe('true')
@@ -133,6 +134,10 @@ describe('RemakeWorkshopPage', () => {
 
     await input.trigger('change')
     await flushPromises()
+    await wrapper.get('[aria-label="视频拆解模型"]').trigger('click')
+    await flushPromises()
+    // Select through the shared component so the submitted id remains numeric.
+    wrapper.findAllComponents({name: 'AppSelect'}).find(item => item.props('ariaLabel') === '视频拆解模型')!.vm.$emit('update:modelValue', '22')
     await wrapper.get('input[name="projectName"]').setValue('新重制项目')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -140,6 +145,7 @@ describe('RemakeWorkshopPage', () => {
     expect(api.uploadRemakeVideo).toHaveBeenCalledWith(file)
     expect(api.createRemakeProject).toHaveBeenCalledWith(expect.objectContaining({
       name: '新重制项目',
+      model_config_id: 22,
       source_mode: 'single_upload',
       aspect_ratio: '9:16',
       resolution: '720p',

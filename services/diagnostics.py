@@ -71,6 +71,14 @@ async def recent_tasks(ctx):
             if call["state"] in {"settled","pending","review","rejected"}:
                 receipt["platform_call_state"] = call["state"]
             receipts[owner] = receipt
+    from models.creation_agent import AgentMessage
+    messages = await AgentMessage.filter(task_id__in=ids, role="assistant").values("task_id", "usage")
+    capacity = {}
+    for message in messages:
+        for call in (message["usage"] or {}).get("calls", []):
+            if call.get("rate_limit_reason") == "model_concurrency":
+                capacity[str(message["task_id"])] = {key: call[key] for key in
+                    ("rate_limit_reason", "retry_after_seconds", "admission_retry_count") if key in call}
     rows = []
     for task in tasks:
         identifier = str(task.id)
@@ -79,6 +87,7 @@ async def recent_tasks(ctx):
                'task_type':AiTaskTypeEnum(task.task_type).name if task.task_type in AiTaskTypeEnum._value2member_map_ else 'unknown',
                'status':TaskStatusEnum(task.status).name if task.status in TaskStatusEnum._value2member_map_ else 'unknown'}
         row.update(receipts.get(identifier, {}))
+        row.update(capacity.get(identifier, {}))
         if task.stage in STAGES:
             row['stage'] = task.stage
         for key in ('novel_id','chapter_id','scene_id','asset_id','model_config_id','assistant_model_config_id','attempt'):

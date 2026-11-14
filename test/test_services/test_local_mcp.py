@@ -321,3 +321,19 @@ async def test_confirmed_style_and_shot_artwork_survive_import_and_partial_updat
     await service.update_shot(UpdateShot(**base, base_version=edited['shots'][0]['version'], request_id='artwork-clear', changes={'media':[]}))
     await scene.refresh_from_db()
     assert 'storyboard_sheet' not in scene.metadata and scene.metadata['imported_media']==[]
+
+
+async def test_recovery_version_ignores_timezone_representation_but_detects_edits():
+    from datetime import timezone
+    from models.novel import Novel
+    from models.asset import Asset
+    from models.asset_variant import AssetVariant
+    work = await Novel.create(name='时区版本验收')
+    asset = await Asset.create(novel=work, canonical_name='主角', asset_type=1)
+    variant = await AssetVariant.create(asset=asset, name='冬装')
+    await variant.refresh_from_db()
+    previous = await CreationObjects.recovery_version(variant)
+    variant.created_at = variant.created_at.astimezone(timezone.utc)
+    assert await CreationObjects.recovery_version(variant) == previous
+    variant.description = '真实修改'
+    assert await CreationObjects.recovery_version(variant) != previous

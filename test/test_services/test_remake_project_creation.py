@@ -367,12 +367,15 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     second = await ready_upload(upload_service, "第2话.mp4")
     service = RemakeProjectService(upload_service=upload_service)
 
+    from models.config import AiModelConfig
+    selected = await AiModelConfig.create(name='chosen', model='video-reader', task_type=6,
+        supports_json_output=True, base_url='https://example.test', api_key='test', is_active=True)
     result = await service.create(
         folder_payload([
             {"episode_number": 3, "upload_token": third.id},
             {"episode_number": 1, "upload_token": first.id},
             {"episode_number": 2, "upload_token": second.id},
-        ]),
+        ]).model_copy(update={"model_config_id": selected.id}),
         team_id=3,
         user_id=5,
     )
@@ -382,6 +385,8 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     assert await Chapter.filter(novel_id=result["novel_id"]).count() == 3
     assert await RemakeSource.filter(novel_id=result["novel_id"]).count() == 3
     assert len({item["task_id"] for item in result["sources"]}) == 3
+    for item in result["sources"]:
+        assert (await AiTask.get(id=item["task_id"])).request_params["model_config_id"] == selected.id
     for upload in (first, second, third):
         await upload.refresh_from_db()
         assert upload.status == "committed"
@@ -539,7 +544,9 @@ async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task
 
 
 @pytest.mark.asyncio
-async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent):
+@pytest.mark.parametrize('media_status', ['failed', 'processing'])
+@pytest.mark.parametrize('has_uncertain_clip', [False, True])
+async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent, has_uncertain_clip, media_status):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -552,14 +559,28 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     old_task = await AiTask.get(id=source.analysis_task_id)
     old_task.status = TaskStatusEnum.failed.value
     await old_task.save(update_fields=["status", "updated_at"])
-    source.media_status = "failed"
+    source.media_status = media_status
     await source.save(update_fields=["media_status", "updated_at"])
 
-    result = await service.retry(source.id, team_id=3, user_id=5)
+    from models.agent_operation import AgentOperation
+    from services.remake.checkpoints import write_scene_manifest
+    from unittest.mock import patch
+    paths = [tmp_path / f'clip-{index}.mp4' for index in range(4)]
+    for path in paths:
+        path.write_bytes(b'clip')
+    write_scene_manifest(tmp_path, paths, [1.0]*4)
+    for key in ('RemakeAssets:1', 'RemakeShot:1', 'RemakeShot:3'):
+        await AgentOperation.create(task=old_task, key='model:remake:'+key, state='completed', result={})
+    if has_uncertain_clip:
+        await AgentOperation.create(task=old_task,key='model:remake:RemakeShot:2',state='uncertain',external=True)
+    with patch('services.remake.checkpoints.scene_cache_directory', return_value=tmp_path):
+        result = await service.retry(source.id, team_id=3, user_id=5)
 
     await source.refresh_from_db()
     task = await AiTask.get(id=result["task_id"])
+    assert task.request_params.get('held_shots', []) == ([2] if has_uncertain_clip else [])
     assert task.id != old_task.id
+    assert (task.stage,task.progress) == ('generating_storyboards', 71)
     assert task.status == TaskStatusEnum.queued.value
     assert task.request_params["attempt"] == 2
     assert task.request_params["ai_task_id"] == str(task.id)

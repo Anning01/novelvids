@@ -68,7 +68,7 @@ beforeEach(() => {
   }})
   vi.mocked(api.imageGenerationModels).mockResolvedValue({code: 0, message: '', data: []})
   vi.mocked(api.remakeCapabilities).mockResolvedValue({code: 0, message: '', data: {
-    media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
+    analysis_models: [], media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
     aspect_ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '1080P'],
     styles: [{key: 'auto', label: 'AI 识别风格'}, {key: 'xianxia-3d', label: '3D仙侠'}],
   }})

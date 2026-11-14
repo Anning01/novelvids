@@ -296,6 +296,7 @@ class SkillExecution:
             # Each detected clip is a separate model step with its own durable retry allowance.
             repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
             stage=skill,
+            repair_attempts=2 if skill == "remake" else 1,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.candidates import StoryboardCandidateValidator
@@ -347,15 +348,6 @@ class SkillExecution:
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
-            if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'professional_video_prompt_material':
-                from services.remake.storyboards import prepare_remake_prompt
-                from pydantic_ai import ModelRetry
-                context = facts['assets']
-                try:
-                    prepare_remake_prompt(output.model_dump(), context['assets'], ctx.deps, self.language,
-                        strategy_key=context['storyboard_strategy'], duration_seconds=context['duration_seconds'])
-                except ValueError as error:
-                    raise ModelRetry(str(error)) from None
             if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
                 from services.remake.asset_validation import render_remake_assets
                 from pydantic_ai import ModelRetry

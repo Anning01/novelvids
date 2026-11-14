@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.remake.customer_errors import failure_message
+from services.remake.customer_errors import accepted_shots_awaiting_result, failure_message
 from models.novel import Novel
 from models.remake_source import RemakeSource
 from utils.enums import TaskStatusEnum
@@ -41,6 +41,11 @@ class RemakeProgressService:
             if task is None and source.media_status == "completed":
                 status = TaskStatusEnum.completed.value
             progress = max(0, min(100, int(task.progress or 0))) if task else 0
+            completed_clips, total_clips = 0, None
+            if task and status != TaskStatusEnum.completed and (progress >= 42 or task.request_params.get('retry_of_task_id')):
+                from services.remake.checkpoints import resume_position
+                _, saved_progress, completed_clips, total_clips = await resume_position(task, source)
+                progress = max(progress, saved_progress)
             if status in self._QUEUED:
                 summary["queued"] += 1
             elif status == TaskStatusEnum.running.value:
@@ -56,6 +61,13 @@ class RemakeProgressService:
             versions.append(source.updated_at)
             if task is not None:
                 versions.append(task.updated_at)
+            accepted = await accepted_shots_awaiting_result(task) if task and status == TaskStatusEnum.failed else []
+            retryable = 0
+            if task and status == TaskStatusEnum.failed:
+                from services.remake.checkpoints import partial_retry
+                held, retryable = await partial_retry(task, total_clips)
+            else:
+                held = []
             source_items.append(
                 {
                     "source_id": source.id,
@@ -69,7 +81,11 @@ class RemakeProgressService:
                             "status": task.status,
                             "stage": task.stage or "queued",
                             "progress": progress,
-                            "error_message": await failure_message(task),
+                            "completed_clips": completed_clips,
+                            "total_clips": total_clips,
+                            "error_message": await failure_message(task, accepted),
+                            "awaiting_platform_result": bool(accepted or held or (task.request_params or {}).get("held_shots")),
+                            "retryable_clips": retryable,
                             "updated_at": task.updated_at.isoformat(),
                         }
                         if task is not None

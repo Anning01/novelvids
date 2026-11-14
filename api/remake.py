@@ -31,7 +31,7 @@ from services.remake.media import (
 from services.remake.history import remake_history_catalog
 from services.remake.episodes import EPISODE_PATTERN_EXAMPLES
 from services.remake.dispatcher import remake_task_dispatcher
-from services.remake.projects import remake_project_service
+from services.remake.projects import available_analysis_models, remake_project_service
 from services.remake.progress import remake_progress_service
 from services.remake.uploads import remake_upload_service
 from utils.enums import TaskStatusEnum
@@ -67,7 +67,7 @@ def _upload_data(upload) -> dict:
 
 
 @router.get("/capabilities", summary="获取重制工坊能力配置")
-async def get_capabilities(_: AuthContext = Depends(get_auth_context)):
+async def get_capabilities(ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(
         data={
             "media": {
@@ -79,6 +79,7 @@ async def get_capabilities(_: AuthContext = Depends(get_auth_context)):
                 "max_bytes": MAX_REMAKE_BYTES,
                 "max_duration_seconds": int(MAX_REMAKE_DURATION_SECONDS),
             },
+            "analysis_models": [{"id": m.id, "name": m.name or m.model} for m in await available_analysis_models(ctx.team_id)],
             "aspect_ratios": list(project_aspect_ratios()),
             "resolutions": list(project_resolutions()),
             "styles": list_remake_styles(),
@@ -289,10 +290,11 @@ async def stream_project_progress(
     novel = await _get_remake_novel(novel_id, ctx)
 
     async def event_stream():
-        last_version: str | None = None
+        last_payload: str | None = None
         while True:
             snapshot = await remake_progress_service.snapshot(novel)
-            if snapshot["updated_at"] != last_version:
+            payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+            if payload != last_payload:
                 event = (
                     "complete"
                     if snapshot["aggregate_status"] == "completed"
@@ -303,9 +305,9 @@ async def stream_project_progress(
                 yield (
                     f"id: {snapshot['updated_at']}\n"
                     f"event: {event}\n"
-                    f"data: {json.dumps(snapshot, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    f"data: {payload}\n\n"
                 )
-                last_version = snapshot["updated_at"]
+                last_payload = payload
             if snapshot["terminal"] or await request.is_disconnected():
                 break
             yield ": keep-alive\n\n"

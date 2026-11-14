@@ -43,7 +43,7 @@ async def test_platform_quota_rejection_is_not_mistaken_for_a_local_balance_fail
     config = await AiModelConfig.create(name="额度不足的平台", task_type=7, model="nv-1",
         api_protocol="novelvids", base_url="https://platform.example/v1", api_key="nv_test")
     original = httpx.AsyncClient
-    monkeypatch.setattr("services.billing.platform.AsyncClient", lambda **kwargs: original(**kwargs,
+    monkeypatch.setattr("services.billing.platform.AsyncClient", lambda **kwargs: original(**{k:v for k,v in kwargs.items() if k != "transport"},
         transport=httpx.MockTransport(lambda _: httpx.Response(402, json={"error": {"code": "insufficient_quota"}}))))
     call = {}
     token = active_model_call.set((SimpleNamespace(task_id=task.id, id=1), call))
@@ -130,7 +130,7 @@ async def test_media_entrypoints_keep_platform_cost_separate_and_reuse_the_call_
             "settlement": {"status": "settled", "amount": "0.20", "currency": "CNY"}, "pricing": {}})
 
     original = httpx.AsyncClient
-    factory = lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(respond))
+    factory = lambda **kwargs: original(**{k:v for k,v in kwargs.items() if k != "transport"}, transport=httpx.MockTransport(respond))
     monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient", factory)
     monkeypatch.setattr("services.billing.platform.AsyncClient", factory)
     video = None
@@ -240,8 +240,7 @@ async def test_text_call_reconciles_actual_cost_and_frozen_local_charge_once(mon
         return httpx.Response(response.status_code, headers=response.headers, content=response.content)
 
     def client_factory(**kwargs):
-        if "transport" not in kwargs:
-            kwargs["transport"] = httpx.MockTransport(platform_response)
+        kwargs["transport"] = httpx.MockTransport(platform_response)
         return original_client(**kwargs)
 
     monkeypatch.setattr("services.billing.platform.AsyncClient", client_factory)

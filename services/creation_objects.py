@@ -11,6 +11,7 @@ import re
 from tortoise.expressions import F
 from tortoise.query_utils import Prefetch
 from tortoise.transactions import in_transaction
+from tortoise.timezone import localtime
 
 from models.ai_task import AiTask
 from models.asset import Asset
@@ -60,6 +61,10 @@ class CreationObjects:
     async def recovery_version(target) -> str:
         values = {name: getattr(target, name) for name in target._meta.db_fields
                   if name not in {'deleted_at', 'updated_at', 'sequence', 'metadata'}}
+        # Fresh use_tz objects use UTC; database reads use the configured local timezone.
+        # Match the existing persisted-row representation to preserve issued versions.
+        values = {name: localtime(value) if isinstance(value, datetime) and value.tzinfo else value
+                  for name, value in values.items()}
         values['metadata'] = {key: value for key, value in (target.metadata or {}).items() if key != '_removal'}
         if isinstance(target, Scene):
             # Include archived bindings too: restoring must not hide a removed

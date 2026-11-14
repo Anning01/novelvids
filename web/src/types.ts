@@ -284,6 +284,7 @@ export interface PaginationResponse<T> {
 export interface SingleResponse<T> { code: number; message: string; data: T }
 
 export interface RemakeCapabilities {
+  analysis_models: Array<{ id: number; name: string }>
   media: { extensions: string[]; max_bytes: number; max_duration_seconds: number }
   aspect_ratios: string[]
   resolutions: string[]
@@ -307,6 +308,7 @@ export interface RemakeUpload {
   expires_at: string
 }
 export interface RemakeProjectCreate {
+  model_config_id?: number
   name: string
   source_mode: 'single_upload' | 'folder_upload' | 'history'
   aspect_ratio: string
@@ -347,6 +349,10 @@ export interface RemakeProjectCreateResult {
 }
 export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
 export interface RemakeProgressTask {
+  completed_clips?: number
+  total_clips?: number | null
+  retryable_clips?: number
+  awaiting_platform_result?: boolean
   id: string
   status: TaskStatusEnum
   stage: string
