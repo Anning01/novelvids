@@ -15,7 +15,7 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.validation import validate_episode_duration, validate_storyboard_duration
+from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
 from services.storyboard.appearances import existing_scene_layouts, previously_seen_assets
 from services.creation_agent.memory import creation_memory
@@ -103,7 +103,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 
-            validate_episode_duration(storyboard, duration_limit)
             end_time = time.time()
             request_duration = end_time - start_time
 
@@ -122,7 +121,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
                         'submitted_media': [],
                         'duration': shot.duration, 'selected_model_type': optimizer['model_type'],
                         'reference_assets': [entity.model_dump() for entity in entities]}, CompletePrompt,
-                        additional_instructions=optimizer_instructions(optimizer), output_validator=validate_optimized)
+                        additional_instructions=optimizer_instructions(optimizer), output_validator=validate_optimized,
+                        activity_label=localized_message('优化第 {p0}/{p1} 镜视频提示词',
+                                                         p0=shot.sequence, p1=len(storyboard.shots)))
                     await validate_optimized(result)
                     optimized[shot.sequence] = {'model_type': optimizer['model_type'], 'skill': optimizer['skill'], 'prompt': result.prompt}
 
@@ -200,7 +201,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     if before is not None:
                         old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
                         if {str(row.id): await object_version(row) for row in old_scenes} != before:
-                            raise ValueError(localized_message('原分镜已有新修改，请核对后重新生成'))
+                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
                         objects = CreationObjects(chapter.novel_id)
                         snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
                         task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
@@ -219,7 +220,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         await chapter.refresh_from_db(fields=["episode_pacing"])
-        validate_episode_duration(storyboard, (chapter.episode_pacing or {}).get("max_seconds"))
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)

@@ -1,4 +1,4 @@
-import { request } from '@/api'
+import { request, resetGenerationRequest } from '@/api'
 import type { Video, ModelPricing } from '@/types'
 
 export interface ExportProbe { duration: string | number; width: number; height: number; fps: string | number }
@@ -32,7 +32,10 @@ export const exportApi = {
   apply: (id: number) => request<Response<Video>>(`/video/exports/${id}/apply`, { method: 'POST' }),
   prepare: (chapter_id: number) => request<Response<ExportTask>>('/video/exports', { method: 'POST', body: JSON.stringify({ chapter_id }) }),
   quote: (id: number, model: number, resolution = '1080p') => request<Response<ExportQuote>>(`/video/exports/${id}/quote?model_config_id=${model}&resolution=${encodeURIComponent(resolution)}`),
-  enhance: (id: number, model: number, quote: ExportQuote, resolution = '1080p') => request<Response<ExportTask>>(`/video/exports/${id}/enhance`, {
-    method: 'POST', body: JSON.stringify({ model_config_id: model, source_sha256: quote.source_sha256, quote_version: quote.quote_version, resolution }),
-  }),
+  enhance: async (id: number, model: number, quote: ExportQuote, resolution = '1080p', restart = false) => {
+    const url = `/video/exports/${id}/enhance`
+    const body = JSON.stringify({ model_config_id: model, source_sha256: quote.source_sha256, quote_version: quote.quote_version, resolution })
+    if (restart) await resetGenerationRequest(url, body)
+    return request<Response<ExportTask>>(url, { method: 'POST', body })
+  },
 }

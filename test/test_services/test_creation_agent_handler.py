@@ -64,7 +64,7 @@ async def test_repeated_invalid_tool_arguments_report_validation_failure_without
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.failed.value
     from utils.messages import localized_message
-    expected = localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。', _language='en')
+    expected = localized_message('本次自动修复已结束，候选和调用记录已保留，可点击重置并重试。', _language='en')
     assert task.error_message == expected
     assert not await PromptChange.filter(task=task).exists()
     assistant = await AgentMessage.get(task=task, role='assistant')

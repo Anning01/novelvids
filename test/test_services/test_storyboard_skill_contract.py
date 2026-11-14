@@ -475,3 +475,25 @@ def test_blocking_skill_only_requests_maps_for_duration_continuations():
     guide = snapshot.read("blocking_guide")
     assert "blocking_map 留空" in guide
     assert "从第二段起填写 duration_split_part" in guide
+
+
+def test_episode_duration_is_guidance_but_each_video_segment_keeps_its_limit():
+    from prompts.skill_pack import instructions
+    text = instructions(SkillSnapshot.model_validate(snapshot_skills()), 'zh', 'storyboard')
+    assert '不是整集总时长的硬性上限' in text
+    assert '每段仍必须遵守所选视频模型支持的时长范围' in text
+
+
+def test_disabled_blocking_ignores_unused_diagram_payload_before_validation():
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.candidates import StoryboardCandidateValidator
+    from prompts.skill_pack import instructions
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    validator = StoryboardCandidateValidator(StructuredSkillStoryboard, snapshot, 'zh', [4, 30],
+        {'generate_blocking_maps': False})
+    raw = _shot().model_dump(exclude={'prompt'})
+    raw.update(blocking_map={'invalid': 'unused diagram'}, duration_split_part=2)
+    result, checkpoint = validator.merge(validator.draft_type(shots=[raw]))
+    assert result is not None, checkpoint
+    assert result.shots[0].blocking_map is None and result.shots[0].duration_split_part is None
+    assert 'generate_blocking_maps 为 false' in instructions(snapshot, 'zh', 'storyboard')

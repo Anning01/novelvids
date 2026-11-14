@@ -108,7 +108,8 @@ async def read_chapter_cast(execution, messages, *, target_requirements=None) ->
                 return await execution.generate('structured', {'segment': part_segment,
                     'chapter': {**chapter, 'content': text}, 'known_assets': registry,
                     **({'target_requirements': target_requirements} if target_requirements is not None else {})},
-                    ChapterCast, additional_instructions=instructions, output_validator=validate_part)
+                    ChapterCast, additional_instructions=instructions, output_validator=validate_part,
+                    activity_label=localized_message('梳理本章人物、场景与道具'))
             except ModelOutputLimitError:
                 if len(text) < 2:
                     raise
@@ -123,7 +124,7 @@ async def read_chapter_cast(execution, messages, *, target_requirements=None) ->
     await validate(cast)
     await AgentOperation.update_or_create(task_id=execution.params['task_id'], key=f'model:structured:ChapterCast:{segment}',
         defaults={'state': 'completed', 'result': cast.model_dump(mode='json')})
-    await plan_activity(execution, 'chapter-cast', localized_message('已核对本章资产清单'), status='completed',
+    await plan_activity(execution, 'chapter-cast', localized_message('已检查本章资产清单'), status='completed',
         detail=str(len(cast.required_assets())))
     return cast
 

@@ -46,8 +46,6 @@ async def previous_submission(task_type, params, connection=None):
         if row.task_id
         else None
     )
-    if task is None:
-        raise HTTPException(409, localized_message("请求回执待核对，不能重复创建任务"))
     return task
 
 
@@ -92,11 +90,8 @@ async def submit_once(task_type, params, create):
                 if row.task_id
                 else None
             )
-            if task is None:
-                raise HTTPException(
-                    409, localized_message("请求回执待核对，不能重复创建任务")
-                )
-            return task
+            if task is not None:
+                return task
         task = await create(connection)
         row.task_id = task.id
         await row.save(using_db=connection, update_fields=["task_id"])

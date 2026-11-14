@@ -30,7 +30,7 @@ async def test_known_rejection_preserves_error_without_uncertain_receipt(monkeyp
     await executor._fail(task, str(error), error=error, record_usage=False)
     await task.refresh_from_db()
     assert 'Specific supplier rejection' in task.error_message
-    assert ('结果待核对' in task.error_message) is uncertain
+    assert ('本次生成未取得完整结果' in task.error_message) is uncertain
     assert (task.stage == 'needs_review') is uncertain
 
 

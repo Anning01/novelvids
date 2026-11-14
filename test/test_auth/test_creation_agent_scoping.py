@@ -170,7 +170,7 @@ async def test_delete_and_restore_conversation_are_private_to_its_owner(client):
 
 
 @pytest.mark.asyncio
-async def test_uncertain_task_review_cannot_bypass_private_task_access_or_viewer_role(
+async def test_task_retry_cannot_bypass_private_task_access_or_viewer_role(
     client,
 ):
     from models.ai_task import AiTask
@@ -183,13 +183,13 @@ async def test_uncertain_task_review_cannot_bypass_private_task_access_or_viewer
     }
     headers = _auth(await _login(client, teammate.username))
     denied = await client.post(
-        f"/api/task/{task.id}/review", headers=headers, json=body
+        f"/api/task/{task.id}/retry", headers=headers
     )
     assert denied.json()["code"] == 404
     await TeamMember.filter(user=owner, team=team).update(role="viewer")
     headers = _auth(await _login(client, owner.username))
     denied = await client.post(
-        f"/api/task/{task.id}/review", headers=headers, json=body
+        f"/api/task/{task.id}/retry", headers=headers
     )
     assert denied.json()["code"] == 403
 

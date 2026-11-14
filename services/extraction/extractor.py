@@ -148,7 +148,7 @@ class AssetExtractor:
             returned = {(kind, item.name) for field, kind in [('persons', 1), ('scenes', 2), ('items', 3)] for item in getattr(result, field)}
             if returned - set(self.required_assets) or any(item.variant for field in ('persons', 'scenes', 'items') for item in getattr(result, field)):
                 from utils.messages import localized_message
-                raise ValueError(localized_message('定点补漏只允许返回已核对的指定资产，不增加其他对象或衍生形态'))
+                raise ValueError(localized_message('定点补漏只允许返回指定资产，不增加其他对象或衍生形态'))
         returned = {(kind, item.name, item.variant.name) for kind, items in
                     ((1, result.persons), (2, result.scenes), (3, result.items)) for item in items if item.variant}
         missing = [f'{name}/{variant}' for kind, name, variant in self.required_variants if (kind, name, variant) not in returned]

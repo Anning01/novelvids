@@ -115,7 +115,7 @@ class VideoTaskReconciler:
                     external_task_id=f"req-{key}",metadata={**video.metadata,"submission_pending":False})
                 continue
             metadata = {key: value for key, value in video.metadata.items() if key != 'submission_pending'}
-            metadata['error'] = '视频提交结果待核对，请先检查供应商任务记录；系统不会自动重新提交。'
+            metadata['error'] = '视频生成未完成，可以重新生成。'
             metadata['submission_uncertain'] = True
             await Video.filter(id=video.id, status__in=_ACTIVE_STATUSES, external_task_id__isnull=True).update(
                 status=TaskStatusEnum.failed.value, metadata=metadata, updated_at=datetime.now(timezone.utc))

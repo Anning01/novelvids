@@ -415,7 +415,7 @@ it('saves pacing for the selected episode and retains the draft on a save failur
     await dialog.get('form').trigger('submit')
     await flushPromises()
     expect(api.updateChapter).toHaveBeenLastCalledWith(chapter.id, { episode_pacing: pacing })
-    expect(trigger.text()).toContain('快节奏 · 最多 95 秒')
+    expect(trigger.text()).toContain('快节奏 · 约 95 秒')
     expect(api.generateScreenplay).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()

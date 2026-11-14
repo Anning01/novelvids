@@ -64,7 +64,7 @@ def _match_identity(item: ExtractedAsset, assets: list[Asset], batch_names: set[
     if len(candidates) > 1:
         from utils.messages import localized_message
 
-        raise ValueError(localized_message("资产名称匹配到多个对象，请核对别名后重试"))
+        raise ValueError(localized_message("资产名称匹配到多个对象，请修改别名后重试"))
     if not exact and candidates and _identity_key(candidates[0].canonical_name) in batch_names:
         return None
     return candidates[0] if candidates else None
@@ -306,7 +306,7 @@ class AssetUpsertService:
             if variant is None:
                 raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
             if variant.name != incoming.name and await variants.filter(name=incoming.name).exists():
-                raise ValueError(localized_message('形态编号与登记名称指向不同造型，请核对后重试'))
+                raise ValueError(localized_message('形态编号与登记名称不一致，请重新选择形态'))
         objects = CreationObjects(asset.novel_id)
         if variant:
             if variant.id in repair_ids:

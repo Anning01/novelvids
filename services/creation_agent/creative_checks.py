@@ -89,7 +89,7 @@ async def check_candidate(execution, skill, facts, candidate, context, attempt):
         defaults={'state': 'completed', 'result': {'candidate': candidate.model_dump(mode='json'), 'check': report.model_dump(mode='json')}})
     advisory = skill == 'storyboard' and context.step.operation == 'storyboard'
     await plan_activity(execution, f'check:{skill}:{segment}:{attempt}',
-        localized_message('检查发现待完善项') if advisory and not report.passed else localized_message('正在核对创作要求'),
+        localized_message('检查发现待完善项') if advisory and not report.passed else localized_message('正在检查创作要求'),
         status='completed' if report.passed or advisory else 'failed', detail='；'.join(report.issues))
     return report
 
@@ -102,7 +102,7 @@ async def generate_checked(execution, skill, facts, output_type, options, contex
         persisted = await AgentOperation.filter(task_id=execution.params['task_id'], key='persist:storyboard', state='completed').exists()
         validated = await AgentOperation.get_or_none(task_id=execution.params['task_id'], key='coalesced:validated', state='completed')
         if persisted and (validated is None or validated.result.get('revision') != revision):
-            raise CreativeCandidateRejected(localized_message('已有分段结果已保存，请先核对后再生成完整章节'))
+            raise CreativeCandidateRejected(localized_message('已有分段结果已保存，可重新生成本章以补齐内容'))
         segment = facts.get('segment', '') if isinstance(facts, dict) else ''
         facts = {**facts, 'segment': f'{segment}:coalesced:{revision}'} if isinstance(facts, dict) else {
             'original_input': facts, 'segment': f'coalesced:{revision}'}

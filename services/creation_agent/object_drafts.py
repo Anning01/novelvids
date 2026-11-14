@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from models.agent_operation import AgentOperation
 from schemas.creation_objects import CreationChangeSet
 from services.creation_agent.plan_sources import fingerprint
+from utils.messages import localized_message
 
 
 class AssetDesignDraft(BaseModel):
@@ -76,7 +77,8 @@ async def _revise_object(service, execution, target, instructions, tool_call_id)
                 await service.prompt_standards.prepare_asset(render(output), asset_type={
                     'person': 1, 'scene': 2, 'item': 3}[kind], layout=layout)
 
-            output = await execution.generate('structured', facts, AssetDesignDraft, output_validator=validate)
+            output = await execution.generate('structured', facts, AssetDesignDraft, output_validator=validate,
+                activity_label=localized_message('修订资产设定'))
             operation = {'operation': 'update_setting', 'target': target.model_dump(),
                          'fields': {'description': output.description, 'prompt': render(output)}}
         changes = CreationChangeSet.model_validate({'operations': [operation]})

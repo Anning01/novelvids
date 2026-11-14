@@ -38,7 +38,7 @@ const actualFormat = computed(() => props.src?.split(/[?#]/, 1)[0]?.match(/\.([a
 const actualCost = computed(() => {
   if (!records.value.length) return tr(props.costError ? '费用暂未同步' : '待结算')
   if (records.value.some(record => ['pending', 'review'].includes(record.settlement_status || ''))) return tr('待结算')
-  if (records.value.some(record => record.usage.missing_usage || record.usage.accounting_needs_review)) return tr('费用待核对')
+  if (records.value.some(record => record.usage.missing_usage || record.usage.accounting_needs_review)) return tr('费用待结算')
   const totals = new Map<string, number>()
   for (const record of records.value) totals.set(record.currency, (totals.get(record.currency) || 0) + record.cost)
   return [...totals].map(([currency, total]) => money(total, currency)).join(' + ')

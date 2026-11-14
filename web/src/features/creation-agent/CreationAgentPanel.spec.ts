@@ -55,6 +55,48 @@ it('confirms a server-owned creation plan without sending client-authored operat
 })
 
 describe('creation assistant panel', () => {
+  it('follows nested thought growth even when the capped thought box no longer grows', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.currentRun = { task_id: 'stream', conversation_id: 1, status: 2, content: '', error_message: null, changes: [], usage: {}, event_count: 0 }
+    store.messages = [{ id: 2, role: 'assistant', task_id: 'stream', status: 2, content: '', changes: [], usage: {}, created_at: '',
+      activity: [{ id: 'thought', kind: 'thinking', status: 'running', label: '思考过程', detail: '第一段' }] }]
+    await flushPromises()
+    scrollToBottom.mockClear()
+    store.messages[0]!.activity![0]!.detail += '流式追加的新内容'
+    await flushPromises()
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    expect(scrollToBottom).toHaveBeenCalledWith(false)
+    wrapper.unmount()
+  })
+  it.each(['light', 'dark'])('offers real checkpoint resume for a stopped production in %s', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.currentRun = { task_id: 'old-production', conversation_id: 1, status: 5, content: '', error_message: null,
+      changes: [], usage: {}, event_count: 0, recovery: { can_resume_production: true, can_resume: false,
+        reusable_count: 15, pending_count: 0, responses_saved: 10, failure_step: null, error_code: null } }
+    const resume = vi.spyOn(store, 'resume').mockResolvedValue()
+    const send = vi.spyOn(store, 'send')
+    await flushPromises()
+    const button = wrapper.findAll('button').find(item => item.text() === '从断点继续')!
+    expect(button).toBeDefined()
+    expect(wrapper.text()).toContain('复用已完成步骤')
+    expect(wrapper.text()).not.toContain('继续对话')
+    await button.trigger('click')
+    expect(resume).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalled()
+    store.submitting = true
+    store.error = '核对中'
+    await flushPromises()
+    expect(wrapper.findAll('button').find(item => item.text() === '正在恢复…')?.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
   it.each(['light','dark'])('keeps ordinary media progress free of reconnection notices and retains real failure recovery (%s)',async theme=>{
     document.documentElement.dataset.appTheme=theme
     const pinia=createPinia()
@@ -299,17 +341,17 @@ it('shows scoped pending rules without sending a request or changing selection',
   const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
   await flushPromises()
   const send = vi.spyOn(useCreationAgentStore(pinia), 'send')
-  expect(wrapper.text()).toContain('1 个对象有新设定待核对')
-  await wrapper.findAll('button').find(button => button.text().includes('新设定待核对'))!.trigger('click')
+  expect(wrapper.text()).toContain('1 个对象有新设定待应用')
+  await wrapper.findAll('button').find(button => button.text().includes('新设定待应用'))!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('待核对约束')
+  expect(wrapper.text()).toContain('新增创作要求')
   expect(wrapper.text()).toContain('当前场景使用柔和暖光')
   expect(wrapper.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(false)
   expect(send).not.toHaveBeenCalled()
   vi.mocked(agentApi.promptStatus).mockResolvedValue({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [] }] })
   useCreationAgentStore(pinia).changesRevision += 1
   await flushPromises()
-  expect(wrapper.text()).not.toContain('待核对约束')
+  expect(wrapper.text()).not.toContain('新增创作要求')
   wrapper.unmount()
 })
 
@@ -322,7 +364,7 @@ it('does not show status returned for a previous chapter after switching chapter
   await flushPromises()
   resolveOld({ code: 0, message: '', data: [{ kind: 'scene', id: 9, pending_constraints: [{ id: 1, content: '前章旧状态' }] }] })
   await flushPromises()
-  expect(wrapper.text()).not.toContain('新设定待核对')
+  expect(wrapper.text()).not.toContain('新设定待应用')
   wrapper.unmount()
 })
 

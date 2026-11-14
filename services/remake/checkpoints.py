@@ -77,19 +77,9 @@ async def resume_position(task, source):
 
 
 async def partial_retry(task, total):
-    """Keep uncertain clip submissions out of every descendant attempt."""
-    held = set(task.request_params.get('held_shots', []))
-    operations = await AgentOperation.filter(task=task, external=True, state__in=['uncertain', 'running']).values_list('key', flat=True)
-    prefix = 'model:remake:RemakeShot:'
-    for key in operations:
-        index = key.removeprefix(prefix)
-        if not key.startswith(prefix) or not index.isdecimal():
-            return [], 0
-        held.add(int(index))
-    if not held or not total or any(i < 1 or i > total for i in held):
+    """Explicit retry reuses saved clips and retries every unfinished clip."""
+    if not total:
         return [], 0
     saved = await completed_outputs({**task.request_params, 'retry_of_task_id': str(task.id)}, keys_only=True)
-    if 'model:remake:RemakeAssets:1' not in saved:
-        return [], 0
-    remaining = {i for i in range(1, total + 1) if f'{prefix}{i}' not in saved}
-    return sorted(held & remaining), len(remaining - held)
+    remaining = sum(f'model:remake:RemakeShot:{index}' not in saved for index in range(1, total + 1))
+    return [], remaining

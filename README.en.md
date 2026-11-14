@@ -149,21 +149,7 @@ flowchart LR
     F --> G[Episode / video enhancement]
 ```
 
-Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
-
-## Online updates
-
-On a Linux host using systemd and the standard SQLite Docker Compose deployment, run this once in the installation directory. The host needs Git and Python 3. Existing installations must first update their checkout to a release that includes the installer.
-
-```sh
-sudo sh scripts/update/install.sh
-```
-
-The deployment administrator can then click **Upgrade studio** in the top banner. The host builds images from the latest official GitHub Release, backs up SQLite, switches services and checks both versions. A failed health check restores the previous installation. The switch briefly interrupts service. The updater manages `docker-compose.override.yml` and keeps the existing project and media mounts. See `journalctl -u novelvids-update` for host logs.
-
-After the upgrade, each user can save their edits and click **Refresh page**. For other deployment layouts, follow the release instructions.
-
-**Publishing**. Update the version, summary and minimum feature versions in `release.json`. After testing, publish that commit as the latest stable GitHub Release with a matching tag (for example, `v1.1.0`). Keep `update_format: 1` for standard updates. Omit it and publish manual instructions for releases that change database deployment, mounts or Compose topology.
+Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Failed requests can be retried explicitly while completed results are preserved. Regenerating missing results may incur a new charge.
 
 ## Local development
 

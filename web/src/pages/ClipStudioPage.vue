@@ -55,7 +55,7 @@ const recordedTotal = computed(() => {
   const settled = billingRecords.value.filter(record => record.settlement_status !== 'pending' && record.settlement_status !== 'review' && !record.usage.missing_usage && !record.usage.accounting_needs_review)
   for (const record of settled) totals.set(record.currency, (totals.get(record.currency) || 0) + record.cost)
   const total = [...totals].map(([currency, cost]) => money(cost, currency)).join(' + ')
-  return settled.length < billingRecords.value.length ? [total, tr('费用待核对')].filter(Boolean).join(' · ') : total
+  return settled.length < billingRecords.value.length ? [total, tr('费用待结算')].filter(Boolean).join(' · ') : total
 })
 function imageRecords(assetId: number) {
   const taskId = imageHistory.value[assetId]?.[0]?.id

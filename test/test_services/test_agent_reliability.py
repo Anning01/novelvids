@@ -235,9 +235,14 @@ async def test_resume_never_replays_changed_cancelled_or_uncertain_work(blocked_
         await AgentOperation.create(task=task, key='model:unknown', state='uncertain', external=True)
     elif blocked_by == 'repair_exhausted':
         await AgentOperation.create(task=task, key='recovery:repair', state='completed')
-    with pytest.raises(HTTPException):
-        await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
-    assert await AiTask.filter(task_type=7).count() == 1
+    if blocked_by == 'uncertain':
+        resumed = await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
+        assert resumed.id != task.id
+        assert await AgentOperation.filter(task=resumed, key='model:unknown', state='pending').exists()
+    else:
+        with pytest.raises(HTTPException):
+            await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
+        assert await AiTask.filter(task_type=7).count() == 1
 
 
 @pytest.mark.asyncio

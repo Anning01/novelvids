@@ -101,7 +101,11 @@ async def generate_storyboard(
         shots = []
         scene_numbers = []
         layouts = dict(scene_layouts or {})
-        plan_continuations = modern and "blocking_guide" in execution.snapshot.contents
+        # Missing flag belongs to an older frozen task; preserve its replay keys.
+        generate_blocking_maps = execution.params.get('generate_blocking_maps', True)
+        if not generate_blocking_maps:
+            facts['generate_blocking_maps'] = False
+        plan_continuations = generate_blocking_maps and modern and "blocking_guide" in execution.snapshot.contents
         for index, (scene_number, content) in enumerate(sections):
             scene_facts = {**facts, 'chapter': content}
             if layouts:
@@ -113,6 +117,8 @@ async def generate_storyboard(
                 from prompts.storyboard import scene_continuity_instruction
                 requirement = "\n".join(filter(None, (requirement, scene_continuity_instruction(prompt_language))))
             options = {"additional_instructions": requirement} if requirement else {}
+            if scene_number:
+                options['activity_label'] = localized_message('生成场次 {p0} 的分镜', p0=scene_number)
             batch = await execution.generate('storyboard', scene_facts, StructuredSkillStoryboard if modern else SkillStoryboard, **options)
             previous = None
             for part, shot in enumerate(batch.shots, 1):
@@ -122,10 +128,14 @@ async def generate_storyboard(
                     if continuation:
                         shot = shot.model_copy(update={"duration_split_part": part})
                         shot = await place_shot(execution, shot, entities, layouts, previous, content,
-                                                f'blocking:{index}:{part}')
+                                                f'blocking:{index}:{part}', activity_label=localized_message(
+                                                    '场次 {p0} · 补充第 {p1}/{p2} 镜空间定位图',
+                                                    p0=scene_number or index + 1, p1=part, p2=len(batch.shots)))
                     else:
                         shot = shot.model_copy(update={"blocking_map": None, "duration_split_part": None})
                     previous = ending_state(shot)
+                elif not generate_blocking_maps:
+                    shot = shot.model_copy(update={'blocking_map': None, 'duration_split_part': None})
                 shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
                 scene_numbers.append(scene_number)
                 for name in visible_storyboard_assets(shot, entities):

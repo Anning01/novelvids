@@ -171,7 +171,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
             if isinstance(error, RemakeAwaitingResults):
                 from services.creation_agent.operation_receipts import SubmissionUncertain
                 await self._mark_failed(source)
-                raise SubmissionUncertain("剩余片段正在等待结果核对") from error
+                raise SubmissionUncertain("剩余片段未完成，可以重试") from error
             await self._mark_failed(source)
             raise RemakeDecompositionError(
                 usage=getattr(error, "usage", None) or {},

@@ -57,7 +57,7 @@ async def claim_repair(task_id, issues, *, attempts=1):
             state='completed', result={'fingerprint': digest, 'issues': issues})
         if claimed:
             return
-    raise RepairExhausted(localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。'))
+    raise RepairExhausted(localized_message('本次自动修复已结束，候选和调用记录已保留，可点击重置并重试。'))
 
 
 async def failure_checkpoint(task_id, message_id, issues, *, stage='validation'):
@@ -72,6 +72,12 @@ async def recovery_summaries(tasks):
     from fastapi import HTTPException
     from services.creation_agent.run_recovery import resume_source
     results = {str(task.id): None for task in tasks}
+    from services.creation_agent.production_resume import supports_production_resume
+    for task in tasks:
+        if task.status in {4, 5} and supports_production_resume(task):
+            results[str(task.id)] = {'can_resume_production': True, 'can_resume': False,
+                'reusable_count': 0, 'pending_count': 0, 'responses_saved': 0,
+                'failure_step': None, 'error_code': None}
     if not tasks:
         return results
     owners = await AgentMessage.filter(task_id__in=list(results), role='assistant').select_related('conversation').only(
@@ -125,6 +131,7 @@ async def recovery_summaries(tasks):
                 pending += len(payload.get('pending', {}))
         issues = failures[-1].result.get('issues', []) if failures else []
         results[str(task.id)] = {
+            **(results[str(task.id)] or {}),
             'failure_step': failures[-1].result.get('stage') if failures else None,
             'error_code': ('CREATION_OUTPUT_LIMIT' if any(issue.get('code') == 'output_length' for issue in issues) else
                            'CREATION_JSON_INVALID' if any(issue.get('code') == 'json_invalid' for issue in issues)

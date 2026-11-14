@@ -578,7 +578,7 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
 
     await source.refresh_from_db()
     task = await AiTask.get(id=result["task_id"])
-    assert task.request_params.get('held_shots', []) == ([2] if has_uncertain_clip else [])
+    assert task.request_params.get('held_shots', []) == []
     assert task.id != old_task.id
     assert (task.stage,task.progress) == ('generating_storyboards', 71)
     assert task.status == TaskStatusEnum.queued.value

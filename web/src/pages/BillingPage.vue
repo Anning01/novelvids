@@ -210,7 +210,7 @@ function selectView(value: string) {
       </section>
 
       <section class="table-card">
-        <p v-if="summary?.pending_records" class="settlement-note" role="status">{{ tr('{p0} 条调用待结算或核对，已确认成本会自动更新。', { p0: summary.pending_records }) }}</p>
+        <p v-if="summary?.pending_records" class="settlement-note" role="status">{{ tr('{p0} 条调用费用待结算，实际成本会自动更新。', { p0: summary.pending_records }) }}</p>
         <header class="table-card__header">
           <div><h2>{{ tr('调用流水') }}</h2><p>{{ tr('创作助手按会话汇总，展开可查看明细。') }}</p></div>
           <small>{{ selectedProject?.novel_name || tr('全部项目') }}</small>

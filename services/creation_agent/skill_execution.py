@@ -164,6 +164,7 @@ class SkillExecution:
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
         initial_assets: BaseModel | None = None,
         asset_scope: tuple[tuple[int, str], ...] = (),
+        activity_label: str | None = None,
     ):
         from services.creation_agent.handler import configured_model
         from schemas.agent_workflow import RemakeShot
@@ -261,11 +262,8 @@ class SkillExecution:
         from datetime import datetime, timezone
 
         async def report_activity(call):
-            label = {
-                "authorization": "理解生成要求", "story": "分析故事", "assets": "提取本章资产",
-                "image": "准备图片提示词", "storyboard": "生成分镜", "remake": "分析参考视频",
-                "video": "准备视频提示词",
-            }.get(skill, "处理创作要求")
+            from services.creation_agent.skill_stream import skill_activity_label
+            label = activity_label or skill_activity_label(skill, self.language)
             item = {
                 "id": f"model:{child.id}:{call['index']}", "kind": "status", "label": label,
                 "status": "running" if call["status"] == "in_progress" else call["status"],
@@ -281,8 +279,7 @@ class SkillExecution:
 
         from services.creation_agent.skill_stream import SkillRunActivity
 
-        tool_activity = SkillRunActivity(child_message, str(self.message.task_id),
-            public_thinking=self.params.get('agent_runtime') != 'deepagents')
+        tool_activity = SkillRunActivity(child_message, str(self.message.task_id))
 
         recorded = RecordedAgentModel(
             model,
@@ -412,6 +409,10 @@ class SkillExecution:
 
         async def invoke():
             nonlocal request_aspect_ratio, request_rejected
+            # A resumed child may still carry its previous failure. Only a claimed
+            # step becomes running; cached completed steps never change state.
+            child.status = TaskStatusEnum.running.value
+            await child.save(update_fields=['status'])
             if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
                 return storyboard_candidates.result().model_dump(mode='json')
             if asset_checkpoint and not asset_checkpoint['issues']:

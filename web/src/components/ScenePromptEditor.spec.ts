@@ -450,32 +450,3 @@ it('keeps Seedance tokens exact on edit and leaves an unbound longer number unto
   expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([prompt+'继续'])
   wrapper.unmount()
 })
-
-it('renders a numbered model reference with its name and preserves the original token while editing', async () => {
-  const wrapper = mount(ScenePromptEditor, {props:{modelValue:'see <Subject 1>', options:[{
-    id:'subject1', label:'Subject 1 · 家丁', kind:'image', syntax:'<Subject 1>', group:'参考图片',
-    displayOnly:true, previewUrl:'/media/servant.png',
-  }]}})
-  const chip = wrapper.get('[data-mention-id="subject1"]')
-  expect(chip.text()).toBe('Subject 1 · 家丁')
-  expect(chip.get('img').attributes('src')).toBe('/media/servant.png')
-  const editor = wrapper.get('[contenteditable="true"]')
-  editor.element.append(document.createTextNode('!'))
-  await editor.trigger('input')
-  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['see <Subject 1>!'])
-  wrapper.unmount()
-})
-
-it('keeps Seedance tokens exact on edit and leaves an unbound longer number untouched', async () => {
-  const prompt = '@图片10，将 @图片1 中的人定义为<主体1>。'
-  const options: ScenePromptMentionOption[] = ['@图片1','<主体1>'].map(syntax => ({
-    id: syntax, syntax, kind: 'image', label: syntax+' · 苏卫国', group:'参考图片', displayOnly:true, previewUrl:'/media/su.png',
-  }))
-  const wrapper = mount(ScenePromptEditor, {props:{modelValue:prompt,options}})
-  expect(wrapper.findAll('[data-syntax]').map(chip => chip.attributes('data-syntax'))).toEqual(['@图片1','<主体1>'])
-  const editor = wrapper.get('[contenteditable="true"]')
-  editor.element.append(document.createTextNode('继续'))
-  await editor.trigger('input')
-  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([prompt+'继续'])
-  wrapper.unmount()
-})
