@@ -15,3 +15,5 @@ web/**/*.log
 web/**/.DS_Store
 web/.idea
 web/.vscode
+# Never include updater state or database backups in application images
+.novelvids-update

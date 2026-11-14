@@ -61,3 +61,5 @@ prompts/design
 deploy/demo
 deploy/security
 output
+# Never include updater state or database backups in application images
+.novelvids-update

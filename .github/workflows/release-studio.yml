@@ -1,0 +1,114 @@
+name: Build and release studio
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-release-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --frozen --dev
+      - name: Verify release and multi-form contracts
+        env:
+          AUTH_ENABLED: 'false'
+        run: >-
+          uv run pytest --no-cov
+          test/test_services/test_release_artifacts.py
+          test/test_services/test_studio_release.py
+          test/test_services/test_scene_multi_forms.py
+          test/test_services/test_skill_export.py
+          test/test_services/test_local_mcp.py
+          test/test_services/test_remake_sync_contract.py
+          test/test_api/test_asset_reference_batch.py
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck && npm run test && npm run build
+        working-directory: web
+
+  publish:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare next version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.draft == false and .prerelease == false) | [.tag_name, .target_commitish] | @tsv')
+          existing=$(printf '%s\n' "$releases" | awk -v sha="$GITHUB_SHA" '$2 == sha {print $1; exit}')
+          # target_commitish may be normalized by GitHub; the tagged manifest
+          # also records the reviewed source SHA for safe workflow retries.
+          while IFS=$'\t' read -r tag target; do
+            if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && git show-ref --verify --quiet "refs/tags/$tag"; then
+              source=$(git show "$tag:release.json" | python -c 'import json,sys; print(json.load(sys.stdin).get("source_commit", ""))')
+              if [ "$source" = "$GITHUB_SHA" ]; then existing=$tag; break; fi
+            fi
+          done <<< "$releases"
+          if [ -n "$existing" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(printf '%s\n' "$releases" | cut -f1 | sed -nE 's/^v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | sort -V | tail -1)
+          version=$(python scripts/update/prepare_release.py --latest-version "$latest" --output "$RUNNER_TEMP/release")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          mkdir "$RUNNER_TEMP/source"
+          tar -xzf "$RUNNER_TEMP/release/novelvids-source.tar.gz" -C "$RUNNER_TEMP/source"
+      - name: Build both Docker images from the release package
+        if: steps.release.outputs.already_published != 'true'
+        run: |
+          docker build -t novelvids-backend:release -f "$RUNNER_TEMP/source/Dockerfile" "$RUNNER_TEMP/source"
+          docker build -t novelvids-frontend:release -f "$RUNNER_TEMP/source/web/Dockerfile" "$RUNNER_TEMP/source"
+      - name: Publish verified release
+        if: steps.release.outputs.already_published != 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          # Only the generated version manifest changes in this tagged build.
+          # Never push a commit or version change to the protected main branch.
+          if ! git show-ref --verify --quiet "refs/tags/v$VERSION"; then
+            cp "$RUNNER_TEMP/source/release.json" release.json
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add release.json
+            git commit -m "chore(release): v$VERSION"
+            git tag "v$VERSION"
+            git push origin "refs/tags/v$VERSION"
+          else
+            test "$(git show "v$VERSION:release.json" | python -c 'import json,sys; print(json.load(sys.stdin)["source_commit"])')" = "$GITHUB_SHA"
+          fi
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "NovelVids $VERSION" --generate-notes --latest \
+            "$RUNNER_TEMP/release/release.json" "$RUNNER_TEMP/release/novelvids-source.tar.gz"
