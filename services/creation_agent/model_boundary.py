@@ -58,7 +58,7 @@ class RecordedAgentModel(WrapperModel):
                 issues = retry_issues(messages)
                 if issues:
                     last_main = next((call for call in reversed(self.calls) if call.get('phase', 'main') != 'summary'), None)
-                    if last_main and last_main.get('finish_reason') == 'length':
+                    if last_main and last_main.get('finish_reason') == 'length' and self.stage != 'remake':
                         await failure_checkpoint(self.repair_root, self.message.id,
                             [{'code': 'output_length'}], stage=self.stage)
                         raise ModelOutputLimitError(localized_message('模型本次输出达到上限，未能完成要求。请在助手设置提高单次输出上限，或切换模型后重试。'))
