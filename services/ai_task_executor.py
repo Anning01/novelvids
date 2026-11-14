@@ -413,6 +413,9 @@ class AiTaskExecutor:
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
         from models.agent_operation import AgentOperation
+        from services.creation_agent.operation_receipts import SubmissionUncertain
+        if isinstance(error, SubmissionUncertain):
+            task.stage = 'needs_review'
         if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
             task.stage = 'needs_review'
             task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))

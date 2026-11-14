@@ -167,6 +167,11 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                 ) from None
             raise RemakeDecompositionError(message=error.detail or "重制视频拆解失败") from None
         except Exception as error:
+            from services.remake.pipeline import RemakeAwaitingResults
+            if isinstance(error, RemakeAwaitingResults):
+                from services.creation_agent.operation_receipts import SubmissionUncertain
+                await self._mark_failed(source)
+                raise SubmissionUncertain("剩余片段正在等待结果核对") from error
             await self._mark_failed(source)
             raise RemakeDecompositionError(
                 usage=getattr(error, "usage", None) or {},

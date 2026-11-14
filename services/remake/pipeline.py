@@ -34,6 +34,10 @@ class RemakePipelineError(RuntimeError):
     pass
 
 
+class RemakeAwaitingResults(RemakePipelineError):
+    pass
+
+
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
 
@@ -161,7 +165,7 @@ class RemakeDecompositionPipeline:
         )
         if held:
             await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
-            raise RemakePipelineError("剩余片段正在等待结果核对")
+            raise RemakeAwaitingResults("剩余片段正在等待结果核对")
         prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
             strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 
