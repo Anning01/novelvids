@@ -8,6 +8,7 @@ import { catalogApi, type CatalogResource } from '@/features/resource-library/ca
 import { libraryApi } from '@/features/resource-library/api'
 import type { VideoResource } from '@/features/resource-library/types'
 import { readVideoReferenceMedia, referencedVideoMedia } from '@/shared/scenePromptReferences'
+import { readSceneVariantBindings, selectedVariantIds, compactVariantSelection } from '@/shared/sceneAssetSelection'
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import type { VideoReferenceMedia } from '@/types'
 import { notice } from '@/shared/notice'
@@ -290,11 +291,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         nodes.push(sceneNode)
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => {
           const asset = this.assets.find(item => item.id === assetId)!
-          const bindings = scene.metadata?.asset_variant_ids as Record<string, number | null> | undefined
-          const selected = bindings && Object.hasOwn(bindings, String(assetId))
-            ? asset.variants?.find(variant => variant.id === Number(bindings[String(assetId)]))
-            : asset.variants?.filter(variant => variant.chapter_numbers?.includes(this.chapter!.number)).sort((a, b) => b.id - a.id)[0]
-          edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}`, assetNodeKey(assetId, selected?.id), sceneKey, 'asset_reference'))
+          const bindings = readSceneVariantBindings(scene.metadata?.asset_variant_ids)
+          const ids = Object.hasOwn(bindings, assetId) ? selectedVariantIds(bindings[assetId])
+            : [asset.variants?.filter(variant => variant.chapter_numbers?.includes(this.chapter!.number)).sort((a, b) => b.id - a.id)[0]?.id ?? null]
+          ids.forEach((variantId, index) => {
+            edges.push(edge(200000 + scene.id * 1000 + assetId, `asset-${assetId}-${sceneKey}${index ? `-${variantId ?? 'base'}` : ''}`,
+              assetNodeKey(assetId, variantId ?? undefined), sceneKey, 'asset_reference'))
+          })
         })
         const activeVideo = activeVideoForScene(scene, sceneVideos)
         if (activeVideo) {
@@ -858,8 +861,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           if (primary && primary.source !== source) {
             this.checkpoint()
             void this.saveScene(scene.id, { metadata: { ...scene.metadata,
-              asset_variant_ids: { ...(scene.metadata?.asset_variant_ids as Record<string, number | null> || {}), [sourceNode.id]: null } } })
-              .then(() => this.connectMediaNode(primary.source, target))
+              asset_variant_ids: { ...readSceneVariantBindings(scene.metadata?.asset_variant_ids), [sourceNode.id]: compactVariantSelection([
+                ...new Set([...selectedVariantIds(readSceneVariantBindings(scene.metadata?.asset_variant_ids)[sourceNode.id]), null]),
+              ]) } } })
               .catch(error => notice.error(error instanceof Error ? error.message : tr('连接失败')))
             return true
           }
@@ -945,6 +949,17 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const targetNode = this.nodeByKey(target.target)
       const scene = targetNode?.kind === 'shot' ? targetNode.data.scene as Scene | undefined : undefined
       if (!sourceNode || sourceNode.kind !== 'asset' || !scene) return false
+      const storedBindings = readSceneVariantBindings(scene.metadata?.asset_variant_ids)
+      if (Array.isArray(storedBindings[sourceNode.id])) {
+        const remaining = selectedVariantIds(storedBindings[sourceNode.id]).filter(id => id !== (sourceNode.data.variant_id ?? null))
+        if (remaining.length) storedBindings[sourceNode.id] = remaining
+        else delete storedBindings[sourceNode.id]
+        await this.saveScene(scene.id, {
+          asset_ids: remaining.length ? sceneAssetIds(scene) : sceneAssetIds(scene).filter(id => id !== sourceNode.id),
+          metadata: { ...scene.metadata, asset_variant_ids: storedBindings },
+        })
+        return true
+      }
       const bindings = { ...(scene.metadata?.asset_variant_ids as Record<string, number | null> || {}) }
       const alternative = this.edges.find(item => item.key !== edgeKey && item.type === 'asset_reference' && item.target === target.target
         && this.nodeByKey(item.source)?.kind === 'asset' && this.nodeByKey(item.source)?.id === sourceNode.id)

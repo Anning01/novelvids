@@ -73,7 +73,7 @@ work、episode、场、镜头、资产、形态均用持久 ID（字母数字、
 }
 ```
 
-visual 与通用提示词的角色、道具、场景参考栏使用同一份出镜名单。仅声音角色写入 voices；text 只存说出的原话，表演提示保留在原分镜的人声时间轴。voices 的 mode 明确区分 dialogue（开口对白）、offscreen（画外声音）、os（心声、嘴唇不动）、narration（旁白）；时间相对本镜，声音资产须在 assets 登记。参考图片的职责放 media.role，不能据此推断画面出镜。structure 可保留当前已有结构化分镜；drafts 原样保留稿件，不重新渲染覆盖。数组顺序决定首次导入顺序，后续单镜同步不改顺序。
+visual 与通用提示词的角色、道具、场景参考栏使用同一份出镜名单。同一镜头可为同一 asset_id 列出不同 variant_id 的多条 visual 引用，基础形象用 variant_id=null；每个实际出镜的形态分别登记，仅相同 (asset_id, variant_id) 组合去重。例：`[{"asset_id":"boy","variant_id":null},{"asset_id":"boy","variant_id":"boy-child"}]` 表示基础形象与童年形态都在本镜出镜，具体先后变化或同框关系写入分镜提示词。仅声音角色写入 voices；text 只存说出的原话，表演提示保留在原分镜的人声时间轴。voices 的 mode 明确区分 dialogue（开口对白）、offscreen（画外声音）、os（心声、嘴唇不动）、narration（旁白）；时间相对本镜，声音资产须在 assets 登记。参考图片的职责放 media.role，不能据此推断画面出镜。structure 可保留当前已有结构化分镜；drafts 原样保留稿件，不重新渲染覆盖。数组顺序决定首次导入顺序，后续单镜同步不改顺序。
 
 逐镜已有的线稿故事版与空间定位图分别登记在该镜 media，role 使用 storyboard 和 blocking。将每张原图复制到 media/，并保留 structure.blocking_map 和 segments 中的空间及机位数据；仅写入 originals 不会绑定到镜头。
 

@@ -142,20 +142,20 @@ class CreationObjects:
     async def validate_variant_bindings(self, asset_ids: list[int], bindings: dict):
         if not isinstance(bindings, dict):
             raise ValueError(localized_message('形态绑定格式无效'))
-        for raw_asset_id, raw_variant_id in bindings.items():
+        from services.video.asset_resolver import variant_selection_ids
+        for raw_asset_id, selection in bindings.items():
             try:
                 asset_id = int(raw_asset_id)
-                variant_id = int(raw_variant_id) if raw_variant_id is not None else None
+                identifiers = variant_selection_ids(selection)
             except (ValueError, TypeError):
                 raise ValueError(localized_message('形态绑定标识无效')) from None
-            if variant_id is None:
-                await self.active_assets([asset_id])
-                if asset_id not in asset_ids:
-                    raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
-                continue
-            if asset_id not in asset_ids or not await AssetVariant.filter(
-                id=variant_id, asset_id=asset_id, asset__novel_id=self.novel_id, asset__deleted_at__isnull=True).exists():
+            await self.active_assets([asset_id])
+            if asset_id not in asset_ids:
                 raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
+            for variant_id in identifiers:
+                if variant_id is not None and not await AssetVariant.filter(
+                    id=variant_id, asset_id=asset_id, asset__novel_id=self.novel_id, asset__deleted_at__isnull=True).exists():
+                    raise ValueError(localized_message('绑定形态不存在、已移除或不属于出镜设定'))
 
     async def _ordered(self, chapter_id: int) -> list[Scene]:
         await self.chapter(chapter_id)
@@ -235,7 +235,9 @@ class CreationObjects:
         for scene in scenes:
             selected = (scene.metadata or {}).get('asset_variant_ids') or {}
             explicit = selected.get(str(variant.asset_id), selected.get(variant.asset_id))
-            if str(explicit) == str(variant.id) or (explicit is None and scene.chapter.number in (variant.chapter_numbers or [])):
+            from services.video.asset_resolver import variant_selection_ids
+            bound = str(variant.asset_id) in selected or variant.asset_id in selected
+            if (bound and variant.id in variant_selection_ids(explicit)) or (not bound and scene.chapter.number in (variant.chapter_numbers or [])):
                 result.append(scene)
         return result
 

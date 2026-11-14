@@ -3,6 +3,17 @@ import type { VideoReferenceMedia } from '@/types'
 import { buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from './scenePromptReferences'
 
 describe('scenePromptReferences', () => {
+  it('keeps images for multiple forms of one character in mention order', () => {
+    const assets = [
+      { assetId: 1, variantId: null, label: '苏玄', mentionNames: ['苏玄'], imageUrls: ['/base.png'] },
+      { assetId: 1, variantId: 11, label: '苏玄 · 少年', mentionNames: ['苏玄', '苏玄#少年'], imageUrls: ['/young.png'] },
+      { assetId: 1, variantId: 12, label: '苏玄 · 婴儿', mentionNames: ['苏玄', '苏玄#婴儿'], imageUrls: ['/baby.png'] },
+    ]
+    expect(buildVideoInputImageReferences('@{苏玄#婴儿} 与 @{苏玄#少年}', assets, []).map(ref => ref.url)).toEqual(['/baby.png', '/young.png'])
+    expect(buildVideoInputImageReferences('@{苏玄}', assets, []).map(ref => ref.url)).toEqual(['/base.png', '/young.png', '/baby.png'])
+    expect(buildVideoInputImageReferences('@{苏玄#婴儿}', assets, [], Infinity, true).map(ref => ref.url)).toEqual(['/baby.png', '/base.png', '/young.png'])
+    expect(buildVideoInputImageReferences('@{苏玄#少年}', [assets[0]!, assets[2]!], [])).toEqual([])
+  })
   it('caps asset images in mention order and reserves explicit uploads', () => {
     const assets = Array.from({ length: 10 }, (_, index) => ({ assetId: index,
       label: `角色${index}`, mentionNames: [`角色${index}`], imageUrls: [`/media/${index}.png`] }))

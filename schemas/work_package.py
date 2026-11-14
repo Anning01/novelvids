@@ -107,7 +107,7 @@ class Shot(Identity):
                 raise ValueError("每镜每类制作图只登记一张")
         if any(v.end <= v.start or v.end > self.duration for v in self.voices):
             raise ValueError('人声时间轴超出镜头时长')
-        if len({r.asset_id for r in self.visual}) != len(self.visual):
+        if len({(r.asset_id, r.variant_id) for r in self.visual}) != len(self.visual):
             raise ValueError('出镜资产重复')
         return self
 

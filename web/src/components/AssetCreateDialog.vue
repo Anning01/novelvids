@@ -707,7 +707,7 @@ async function generateAndTrack(assetId: number, variantId?: number, references:
 
   try {
     const submitted = (await requestAssetGeneration(assetId, variantId, references)).data
-    emit('generation-started', { asset_id: assetId, task_id: submitted.id, status: submitted.status })
+    emit('generation-started', { asset_id: assetId, variant_id: variantId, task_id: submitted.id, status: submitted.status })
     if (controller.signal.aborted) return
     generationTask.value = submitted
     saving.value = false

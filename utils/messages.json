@@ -29,6 +29,8 @@
   "请等待当前任务完成后再切换模型": "Wait for the current task to finish before switching models.",
   "已有改编任务正在运行，请等待完成后再切换模型": "Wait for the current adaptation to finish before switching models.",
   "已有分析任务正在运行，请等待完成后再切换分析模型": "Wait for the current analysis to finish before switching models.",
+  "请至少选择一个资产或形态": "Select at least one base image or variant",
+  "形态必须属于出镜设定": "Variants must belong to an on-screen setting",
   "API 平台账户可用额度不足，请前往 API 平台检查余额和限额": "The API platform account has insufficient available credit. Check its balance and limits on the API platform.",
   "请先设置工作台的平台地址": "Configure the studio platform URL first.",
   "请先填写平台 API Key": "Enter your platform API key first.",

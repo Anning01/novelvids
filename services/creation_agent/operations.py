@@ -126,9 +126,10 @@ class CreationOperations:
             for value in variant_refs:
                 variant_id = await self.ref(value, 'variant')
                 variant = await self.objects.get('variant', variant_id)
-                if variant.asset_id not in asset_ids or str(variant.asset_id) in bindings:
-                    raise ValueError(localized_message('形态必须属于出镜设定，且同一设定只能选择一个形态'))
-                bindings[str(variant.asset_id)] = variant.id
+                if variant.asset_id not in asset_ids:
+                    raise ValueError(localized_message('形态必须属于出镜设定'))
+                from services.video.asset_resolver import add_variant_binding
+                add_variant_binding(bindings, variant.asset_id, variant.id)
         return {'asset_ids': asset_ids, 'variant_bindings': bindings}
 
     async def scene_prompt(self, scene: Scene, *, prompt=None, structure=None, visual=None, previous=None):

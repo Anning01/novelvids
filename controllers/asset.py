@@ -727,39 +727,53 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
     async def reference_batch(self, payload, *, team_id=None, user_id=None):
         from uuid import uuid4, uuid5
         from schemas.asset import AssetPatch
+        from schemas.asset_variant import AssetVariantPatch
         from services.creation_agent.submissions import submission, previous_submission
 
         envelope = submission.get() or {}
         batch_id = UUID(envelope['submission_id']) if envelope else uuid4()
-        tasks, skipped = [], []
+        tasks, skipped, skipped_variants = [], [], []
         identifiers = list(dict.fromkeys(payload.asset_ids))
+        variant_ids = list(dict.fromkeys(payload.variant_ids))
         # Commit the complete queue together; disconnects never discard an
         # unsubmitted tail, and admission errors leave no partial paid batch.
         async with creation_write(payload.novel_id) as connection:
-            assets = {asset.id: asset for asset in await Asset.filter(novel_id=payload.novel_id, id__in=identifiers)}
-            if len(assets) != len(identifiers):
+            variants = {variant.id: variant for variant in await AssetVariant.filter(
+                asset__novel_id=payload.novel_id, id__in=variant_ids)}
+            asset_ids = set(identifiers) | {variant.asset_id for variant in variants.values()}
+            assets = {asset.id: asset for asset in await Asset.filter(novel_id=payload.novel_id, id__in=asset_ids)}
+            if len(assets) != len(asset_ids) or len(variants) != len(variant_ids):
                 raise HTTPException(404, localized_message('当前项目内不存在该目标'))
-            active = {item['asset_id'] for item in await self.active_generations(payload.novel_id)}
-            for identifier in identifiers:
-                token = submission.set({**envelope, 'submission_id': str(uuid5(batch_id, f'asset:{identifier}')),
+            active = {(item['asset_id'], item['variant_id']) for item in await self.active_generations(payload.novel_id)}
+            targets = [(assets[identifier], None) for identifier in identifiers]
+            targets.extend((assets[variants[identifier].asset_id], variants[identifier]) for identifier in variant_ids)
+            settings = {'model_config_id': payload.model_config_id, 'clarity': payload.clarity,
+                'resolution': payload.clarity, 'aspect_ratio': payload.aspect_ratio,
+                'output_format': payload.output_format, 'generation_count': 1}
+            for asset, variant in targets:
+                target = variant or asset
+                target_key = f'variant:{variant.id}' if variant else f'asset:{asset.id}'
+                token = submission.set({**envelope, 'submission_id': str(uuid5(batch_id, target_key)),
                     'submission_hash': envelope.get('submission_hash', str(batch_id))})
                 try:
                     previous = await previous_submission(2, {'team_id': team_id, 'user_id': user_id}, connection)
                     if previous:
                         tasks.append(previous)
                         continue
-                    asset = assets[identifier]
-                    if asset.main_image or identifier in active:
-                        skipped.append(identifier)
+                    if (variant.images if variant else asset.main_image) or (asset.id, variant.id if variant else None) in active:
+                        (skipped_variants if variant else skipped).append(target.id)
                         continue
-                    await self.patch(identifier, AssetPatch(metadata={**(asset.metadata or {}),
-                        'model_config_id': payload.model_config_id, 'clarity': payload.clarity,
-                        'resolution': payload.clarity, 'aspect_ratio': payload.aspect_ratio,
-                        'output_format': payload.output_format, 'generation_count': 1}))
-                    tasks.append(await self.reference(identifier, team_id=team_id, user_id=user_id))
+                    metadata = {**(target.metadata or {}), **settings}
+                    if variant:
+                        await self.patch_variant(asset.id, variant.id, AssetVariantPatch(metadata=metadata))
+                        task = await self.reference(asset.id, variant_id=variant.id, team_id=team_id, user_id=user_id)
+                    else:
+                        await self.patch(asset.id, AssetPatch(metadata=metadata))
+                        task = await self.reference(asset.id, team_id=team_id, user_id=user_id)
+                    tasks.append(task)
                 finally:
                     submission.reset(token)
-        return {'tasks': tasks, 'skipped_asset_ids': skipped}
+        return {'tasks': tasks, 'skipped_asset_ids': skipped, 'skipped_variant_ids': skipped_variants}
 
     async def reference(
         self,
@@ -908,6 +922,7 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             result.append(
                 {
                     "asset_id": int(asset_id),
+                    "variant_id": params.get("variant_id"),
                     "task_id": str(task.id),
                     "status": task.status,
                 }

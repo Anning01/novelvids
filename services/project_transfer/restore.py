@@ -57,7 +57,7 @@ class LocalIds:
             if key in {"model_config_id", "video_model_config_id"}:
                 continue
             if key == "asset_variant_ids" and isinstance(item, dict):
-                output[key] = {str(self.get(Asset, k)): self.get(AssetVariant, v) for k, v in item.items()}
+                output[key] = {str(self.get(Asset, k)): [self.get(AssetVariant, identifier) for identifier in v] if isinstance(v, list) else self.get(AssetVariant, v) for k, v in item.items()}
             elif key == "voice_asset_ids" and isinstance(item, dict):
                 output[key] = {stable_id: self.get(Asset, asset_id) for stable_id, asset_id in item.items()}
             elif key in {"asset_ids", "voice_asset_ids"} and isinstance(item, list) and all(type(v) is int for v in item):

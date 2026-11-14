@@ -141,16 +141,24 @@ class AssetReferenceCreate(BaseModel):
 
 class AssetReferenceBatchCreate(BaseModel):
     novel_id: PositiveInt
-    asset_ids: list[PositiveInt] = Field(min_length=1)
+    asset_ids: list[PositiveInt] = Field(default_factory=list)
+    variant_ids: list[PositiveInt] = Field(default_factory=list)
     model_config_id: PositiveInt
     clarity: str = Field(min_length=1)
     aspect_ratio: str = Field(min_length=1)
     output_format: str = Field(min_length=1)
 
+    @model_validator(mode='after')
+    def require_targets(self):
+        if not self.asset_ids and not self.variant_ids:
+            raise ValueError(localized_message('请至少选择一个资产或形态'))
+        return self
+
 
 class AssetReferenceBatchOut(BaseModel):
     tasks: list[AiTaskOut]
     skipped_asset_ids: list[int]
+    skipped_variant_ids: list[int] = Field(default_factory=list)
 
 
 class AssetGenerationRecordOut(BaseModel):
