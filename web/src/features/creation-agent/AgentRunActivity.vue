@@ -15,7 +15,22 @@ const props = defineProps<{
   operationLabel?: string
 }>()
 const active = computed(() => [1, 2, 6].includes(props.status))
+const emit = defineEmits<{ 'stream-update': [] }>()
+const detailBodies = ref<HTMLParagraphElement[]>([])
 const expanded = ref(active.value)
+let scrollFrame: number | undefined
+watch([() => props.steps?.map(step => [step.id, step.detail, step.status]), detailBodies, expanded], () => {
+  if (!expanded.value || scrollFrame !== undefined) return
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = undefined
+    if (!expanded.value) return
+    const latest = [...(props.steps || [])].reverse().find(step => step.detail)
+    const body = detailBodies.value.find(element => element.dataset.stepId === latest?.id)
+    if (body) body.scrollTop = body.scrollHeight
+    if (active.value) emit('stream-update')
+  })
+}, { flush: 'post' })
+onBeforeUnmount(() => { if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame) })
 watch(active, running => { expanded.value = running })
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -65,7 +80,7 @@ function stepState(step: AgentActivityStep): string {
         <div class="agent-run-activity__body">
           <details v-if="step.detail" :open="step.status === 'running' && active" class="agent-run-activity__detail">
             <summary><span>{{ step.tool_name ? creationAgentToolOperationLabel(step.tool_name) : tr(step.label) }}</span><span class="agent-run-activity__step-state">{{ stepState(step) }}</span></summary>
-            <p>{{ step.detail }}</p>
+            <p ref="detailBodies" :data-step-id="step.id">{{ step.detail }}</p>
           </details>
           <div v-else class="agent-run-activity__step-heading"><span>{{ step.tool_name ? creationAgentToolOperationLabel(step.tool_name) : tr(step.label) }}</span><span class="agent-run-activity__step-state">{{ stepState(step) }}</span></div>
           <span v-if="step.started_at && step.finished_at" class="agent-run-activity__step-time">{{ duration(step.started_at, step.finished_at) }}</span>

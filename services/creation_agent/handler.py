@@ -27,7 +27,7 @@ from services.ai_task_executor import BaseTaskHandler
 from services.creation_agent.model_boundary import RecordedAgentModel
 from services.creation_agent.model_usage import UsagePreservingChatModel
 from services.creation_agent.runtime import CreationAgentDeps, stream_creation_agent
-from services.creation_agent.sessions import agent_configuration, agent_models
+from services.creation_agent.sessions import agent_models
 from services.creation_agent.tools import PromptEditService
 from services.creation_agent.changes import CreationChanges
 from services.creation_agent.context import chapter_context
@@ -112,8 +112,6 @@ class CreationAgentTaskHandler(BaseTaskHandler):
 
         async def before_request():
             ctx = await authorize_run(request_params)
-            if not (await agent_configuration()).enabled:
-                raise ValueError(localized_message('创作助手已停用'))
             if not await AiTask.filter(id=task_id, status=TaskStatusEnum.running.value).exists():
                 raise ValueError(localized_message('运行已停止，不能继续请求模型或写入'))
             chosen = next((config for config in await agent_models(ctx) if config.id == request_params["model_config_id"]), None)

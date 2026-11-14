@@ -1,9 +1,10 @@
 import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 
 import { tr } from '@/i18n'
-import type { ProjectOverview } from './types'
+import type { ModelPricing, ProjectOverview } from './types'
 import type { BillingStatement, BillingStatementFilters, BillingStatementParties } from './types'
-import { downloadFile } from '@/shared/downloadFile'
+import { diagnosticScope, recordRequestFailure, diagnosticReport, type DiagnosticEntry } from '@/shared/diagnostics'
+import { downloadFile, saveBlob } from '@/shared/downloadFile'
 import type { AiModelConfig, AiTask, AllEnums, Asset, AssetActiveGeneration, AssetGenerationRecord, AssetMergeResult, AssetReferencePromptPreview, AssetVariant, AudioReference, AuthMe, AuthStatus, BillingProject, BillingProjectDetail, BillingRecord, BillingSummary, Chapter, DigitalHuman, GeneralConfig, GenerationCapabilities, ImageGenerationModel, InviteItem, MemberItem, Novel, NovelMeta, PaginationResponse, RechargeOrder, RechargeOrderDetail, RechargeOrderItem, RemakeCapabilities, RemakeHistoryEpisode, RemakeHistoryProject, RemakeProgressSnapshot, RemakeProjectCreate, RemakeProjectCreateResult, RemakeUpload, Scene, SingleResponse, StoryboardStrategy, TeamItem, TeamRole, UploadPolicy, UploadResult, UserItem, UserStats, Video, VideoGenerationModel, VideoGenerationOptions, VideoMergeResult, VideoReferenceMedia, VisualStyleItem, WorkbenchBootstrap, WorkbenchCapabilities } from './types'
 
 // API 基地址：默认同源相对路径；分离部署时打包传入 VITE_API_BASE（后端根地址，不含 /api）
@@ -71,6 +72,28 @@ export function retryableStatusError(error: unknown) {
   return error instanceof TypeError || error instanceof SyntaxError || error instanceof DOMException && error.name === 'TimeoutError'
 }
 
+function currentDiagnosticScope() {
+  const scope = JSON.stringify([getAuthToken(),getActiveTeamId()])
+  diagnosticScope(scope)
+  return scope
+}
+
+export async function exportDiagnostics() {
+  const scope = currentDiagnosticScope()
+  let tasks: DiagnosticEntry[] = []
+  let available = true
+  try {
+    tasks = (await request<SingleResponse<DiagnosticEntry[]>>('/diagnostics/recent')).data
+  } catch {
+    available = false
+  }
+  if (scope !== currentDiagnosticScope()) throw new Error(tr('登录状态已变化，请重新导出'))
+  const report = diagnosticReport(scope, tasks, available)
+  saveBlob(new Blob([JSON.stringify(report,null,2)], {type:'application/json'}),
+    `novelvids-diagnostics-${report.exported_at.replace(/[:.]/g,'-')}.json`)
+  return available
+}
+
 export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = options?.body instanceof FormData
     ? authHeaders()
@@ -78,13 +101,23 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
   const generation = isGenerationRequest(url)
     ? await generationRequest(JSON.stringify([getAuthToken(), getActiveTeamId()]), url, options?.body) : null
   if (generation) headers['X-Creation-Request-Id'] = generation.id
-  const response = await fetch(BASE + url, { headers, ...options })
+  const scope = currentDiagnosticScope()
+  const method = options?.method || 'GET'
+  let response: Response
+  try {
+    response = await fetch(BASE + url, { headers, ...options })
+  } catch (error) {
+    if (!options?.signal?.aborted) recordRequestFailure(scope, url, method, 0, 0)
+    throw error
+  }
   const payload = await response.json().catch((error: unknown) => {
     if (!(error instanceof SyntaxError)) throw error
     const code = response.ok ? 502 : response.status
+    recordRequestFailure(scope, url, method, response.status, code)
     throw new ApiRequestError(tr('服务暂不可用，请稍后重试'), code, response.status)
   })
   if (!response.ok || payload.code !== 0) {
+    recordRequestFailure(scope, url, method, response.status, Number(payload.code) || response.status)
     if (payload.code === 401 && getAuthToken()) {
       clearAuthToken()
       redirectToLogin()
@@ -107,6 +140,8 @@ export function uploadWithProgress(
   headers: Record<string, string>,
   onProgress?: (percent: number) => void,
 ): Promise<{ status: number; text: string }> {
+  const scope = currentDiagnosticScope()
+  const modulePath = url.startsWith(BASE + '/') ? url.slice(BASE.length) : '/external-upload'
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
@@ -117,9 +152,15 @@ export function uploadWithProgress(
       }
     }
     xhr.upload.onload = () => onProgress?.(100)
-    xhr.onerror = () => reject(new Error(tr('视频上传失败，请检查网络后重试')))
+    xhr.onerror = () => {
+      recordRequestFailure(scope, modulePath, 'POST', 0, 0)
+      reject(new Error(tr('视频上传失败，请检查网络后重试')))
+    }
     xhr.onabort = () => reject(new Error(tr('视频上传已取消')))
-    xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText })
+    xhr.onload = () => {
+      if (xhr.status >= 400) recordRequestFailure(scope, modulePath, 'POST', xhr.status, xhr.status)
+      resolve({ status: xhr.status, text: xhr.responseText })
+    }
     xhr.send(body)
   })
 }
@@ -230,7 +271,16 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     const uploaded = await uploadWithProgress(`${BASE}/remake/uploads`, form, authHeaders(), onProgress)
-    const payload = JSON.parse(uploaded.text || '{}')
+    let payload: { code: number; message?: string; detail?: string; data?: RemakeUpload } | null
+    try {
+      payload = JSON.parse(uploaded.text)
+    } catch {
+      payload = null
+    }
+    if (!payload || typeof payload.code !== 'number') {
+      const message = uploaded.status === 413 ? tr('视频超过上传服务的大小限制') : tr('服务暂不可用，请稍后重试')
+      throw new ApiRequestError(message, uploaded.status || 502, uploaded.status)
+    }
     if (uploaded.status < 200 || uploaded.status >= 300 || payload.code !== 0) {
       if (payload.code === 401) {
         clearAuthToken()
@@ -297,17 +347,19 @@ export const api = {
   deleteNovel: (id: number) => request<SingleResponse<null>>(`/novel/${id}`, { method: 'DELETE' }),
   splitNovel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}/split`, { method: 'POST' }),
   generateNovelCover: (id: number, modelConfigId: number) => request<SingleResponse<AiTask>>(`/novel/${id}/cover${qs({ model_config_id: modelConfigId })}`, { method: 'POST' }),
-  analyzeNovel: (id: number, coverModelConfigId?: number) => request<SingleResponse<AiTask>>(`/novel/${id}/analyze${qs({ cover_model_config_id: coverModelConfigId })}`, { method: 'POST' }),
+  analyzeNovel: (id: number, coverModelConfigId?: number, assistantModelConfigId?: number) => request<SingleResponse<AiTask>>(`/novel/${id}/analyze${qs({ cover_model_config_id: coverModelConfigId, assistant_model_config_id: assistantModelConfigId })}`, { method: 'POST' }),
   novelAnalysis: (id: number) => request<SingleResponse<AiTask | null>>(`/novel/${id}/analysis`),
   chapters: (novelId: number) => requestAllPages<Chapter>(
     (page, pageSize) => `/chapter${qs({ novel_id: novelId, page, page_size: pageSize, sort: 'number' })}`,
   ),
   chapter: (id: number) => request<SingleResponse<Chapter>>(`/chapter/${id}`),
-  generateScreenplay: (id: number, expectedScreenplay?: string) => request<SingleResponse<AiTask>>(`/chapter/${id}/screenplay`, { method: 'POST', body: expectedScreenplay ? JSON.stringify({ expected_screenplay: expectedScreenplay }) : undefined }),
+  generateScreenplay: (id: number, expectedScreenplay?: string, assistantModelConfigId?: number) => request<SingleResponse<AiTask>>(`/chapter/${id}/screenplay`, {
+    method: 'POST', body: JSON.stringify({ expected_screenplay: expectedScreenplay, assistant_model_config_id: assistantModelConfigId }),
+  }),
   createChapter: (data: Partial<Chapter>) => request<SingleResponse<Chapter>>('/chapter', { method: 'POST', body: JSON.stringify(data) }),
   updateChapter: (id: number, data: Partial<Chapter>) => request<SingleResponse<Chapter>>(`/chapter/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteChapter: (id: number) => request<SingleResponse<null>>(`/chapter/${id}`, { method: 'DELETE' }),
-  extract: (chapterId: number, conversationId?: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST', ...(conversationId ? { body: JSON.stringify({ conversation_id: conversationId }) } : {}) }),
+  extract: (chapterId: number, conversationId?: number, assistantModelConfigId?: number) => request<SingleResponse<AiTask>>(`/chapter/extract/${chapterId}`, { method: 'POST', body: JSON.stringify({ conversation_id: conversationId, assistant_model_config_id: assistantModelConfigId }) }),
   latestExtraction: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/chapter/extract/${chapterId}/latest`),
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
@@ -332,7 +384,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ variant_id: variantId, reference_images: referenceImages }),
   }),
-  generateAssetBatch: (payload: { novel_id: number; asset_ids: number[]; model_config_id: number; clarity: string; aspect_ratio: string; output_format: string }) => request<SingleResponse<{ tasks: AiTask[]; skipped_asset_ids: number[] }>>('/asset/reference-batch', { method: 'POST', body: JSON.stringify(payload) }),
+  generateAssetBatch: (payload: { novel_id: number; asset_ids: number[]; variant_ids?: number[]; model_config_id: number; clarity: string; aspect_ratio: string; output_format: string }) => request<SingleResponse<{ tasks: AiTask[]; skipped_asset_ids: number[]; skipped_variant_ids?: number[] }>>('/asset/reference-batch', { method: 'POST', body: JSON.stringify(payload) }),
   activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
   scenes: (chapterId: number, page = 1) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
@@ -341,7 +393,8 @@ export const api = {
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
   generateStoryboardSheet: (sceneId: number, modelConfigId: number) => request<SingleResponse<AiTask>>(`/scene/${sceneId}/storyboard-sheet${qs({ model_config_id: modelConfigId })}`, {method: 'POST'}),
-  generateScenes: (chapterId: number, replaceExisting = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
+  generateChapterSheets: (chapterId: number, modelConfigId: number) => request<SingleResponse<string[]>>(`/scene/chapter/${chapterId}/storyboard-sheets${qs({model_config_id: modelConfigId})}`, {method: 'POST'}),
+  generateScenes: (chapterId: number, replaceExisting = false, assistantModelConfigId?: number, sheetModelConfigId?: number, generateBlockingMaps = false) => request<SingleResponse<AiTask>>('/scene/generate/', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, generate_blocking_maps: generateBlockingMaps, sheet_model_config_id: sheetModelConfigId, assistant_model_config_id: assistantModelConfigId, ...(replaceExisting ? { replace_existing: true } : {}) }) }),
   storyboardStrategies: () => request<SingleResponse<StoryboardStrategy[]>>('/scene/strategies'),
   videos: (sceneId?: number) => request<PaginationResponse<Video>>(`/video${qs({ page: 1, page_size: 100, sort: '-id', scene_id: sceneId })}`),
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
@@ -423,10 +476,11 @@ export const api = {
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   workbenchBootstrap: (novelId: number, chapterId: number, signal?: AbortSignal) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`, signal ? { signal } : undefined),
   configs: () => request<PaginationResponse<AiModelConfig>>('/config?page=1&page_size=100'),
-  studioPlatform: () => request<SingleResponse<{ connected: boolean }>>('/config/studio-platform'),
+  studioPlatform: () => request<SingleResponse<{ connected: boolean; key_management_url?: string }>>('/config/studio-platform'),
   studioPlatformAccount: () => request<SingleResponse<{ balance: string; currency: string; recharge_url: string }>>('/config/studio-platform/account'),
-  connectStudioPlatform: (key: string) => request<SingleResponse<{ synced: number }>>('/config/studio-platform', { method: 'PUT', body: JSON.stringify({ api_key: key }) }),
-  syncStudioPlatform: () => request<SingleResponse<{ synced: number }>>('/config/studio-platform/sync', { method: 'POST' }),
+  connectStudioPlatform: (key: string) => request<SingleResponse<{ synced: number; unsupported?: Record<string, string> }>>('/config/studio-platform', { method: 'PUT', body: JSON.stringify({ api_key: key }) }),
+  platformImageTariff: (id: number) => request<SingleResponse<ModelPricing>>(`/config/studio-platform/image-tariff/${id}`),
+  syncStudioPlatform: () => request<SingleResponse<{ synced: number; unsupported?: Record<string, string> }>>('/config/studio-platform/sync', { method: 'POST' }),
   imageGenerationModels: () => request<SingleResponse<ImageGenerationModel[]>>('/config/image-generation/models'),
   videoGenerationModels: () => request<SingleResponse<VideoGenerationModel[]>>('/config/video-generation/models'),
   generationCapabilities: () => request<SingleResponse<GenerationCapabilities>>('/config/generation/capabilities'),

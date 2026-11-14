@@ -84,8 +84,14 @@ def test_env() -> dict:
 @pytest.fixture(scope="session", autouse=True)
 async def initialize_db():
     """Initialize DB for the test session."""
-    # Use in-memory SQLite
-    db_url = "sqlite://:memory:"
+    # Default to memory; PostgreSQL acceptance must explicitly select a fresh local test database.
+    db_url = os.environ.get('NOVELVIDS_TEST_POSTGRES_URL', 'sqlite://:memory:')
+    if db_url != 'sqlite://:memory:':
+        from urllib.parse import urlsplit
+        target = urlsplit(db_url)
+        if (target.scheme not in {'postgres', 'postgresql'} or target.hostname != '127.0.0.1'
+                or not target.path.startswith('/novelvids_mcp_test_')):
+            raise ValueError('PostgreSQL tests require an isolated local novelvids_mcp_test_* database')
 
     # Initialize Tortoise
     # We need to discover models. Based on models/__init__.py logic or explicit list.
@@ -103,6 +109,12 @@ async def initialize_db():
         modules={"models": model_modules},
         timezone="Asia/Shanghai"
     )
+    if db_url != 'sqlite://:memory:':
+        tables = await Tortoise.get_connection('default').execute_query_dict(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        if tables:
+            await Tortoise.close_connections()
+            raise ValueError('PostgreSQL test database must be empty')
     await Tortoise.generate_schemas()
 
     yield
@@ -113,6 +125,9 @@ async def initialize_db():
 async def clear_db():
     """Clear data between tests but keep schema."""
     from models.studio_call import StudioCall
+    from models.work_sync import WorkSyncObject, WorkSyncRequest
+    await WorkSyncRequest.all().delete()
+    await WorkSyncObject.all().delete()
     from models.config import StudioPlatformConnection
     await StudioCall.all().delete()
     await StudioPlatformConnection.all().delete()

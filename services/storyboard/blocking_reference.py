@@ -20,11 +20,7 @@ BLOCKING_ID = "novelvids:blocking-map"
 
 def has_drawable_plan(params):
     plan = (params or {}).get("blocking_map")
-    return isinstance(plan, dict) and bool(plan) and (
-        params.get("duration_split_part") is not None
-        or bool(plan.get("layout"))
-        or len(params.get("segments") or []) > 1
-    )
+    return isinstance(plan, dict) and bool(plan.get("cameras")) and bool(plan.get("assets"))
 
 
 def blocking_source(scene_id, metadata, params):

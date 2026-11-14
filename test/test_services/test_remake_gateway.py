@@ -431,3 +431,64 @@ async def test_skill_video_still_checks_size_before_model_call(tmp_path, monkeyp
     finally:
         current_execution.reset(token)
     execution.generate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_studio_remake_sends_media_link_with_sampling_rate(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_execution import current_execution, _audit_messages
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from services.creation_agent.model_usage import UsagePreservingChatModel
+    from schemas.agent_workflow import RemakeAssets
+
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"test video")
+    url = "https://bucket.oss-cn-beijing.aliyuncs.com/studio-temporary/v1/test.mp4?signature=test"
+    upload = AsyncMock(return_value=url)
+    monkeypatch.setattr("services.oss.studio_client.studio_client", lambda *args, **kwargs: SimpleNamespace(resolve=upload))
+    config = _config(api_protocol="novelvids", model="nv-9", api_key="nv_test")
+    client = _Client([_completion({'characters': [], 'scenes': [], 'objects': []})])
+    gateway = RemakeVideoAnalysisGateway(config, client=client)
+    execution = SimpleNamespace(params={'team_id': 1}, generate=AsyncMock(return_value=RemakeAssets(characters=[], scenes=[], objects=[])))
+    args = dict(index=1, path=video, prompt='', schema_name='global_key_assets', response_schema={})
+    token = current_execution.set(execution)
+    try:
+        await gateway.analyze_one(**args)
+    finally:
+        current_execution.reset(token)
+    item = execution.generate.call_args.kwargs['media'][0]
+    expected = {'type':'video_url', 'video_url':{'url':url,'fps':1.0}}
+    assert await UsagePreservingChatModel._map_video_url_item(None, item) == expected
+    assert 'signature=test' not in str(_audit_messages([ModelRequest(parts=[UserPromptPart([item])])]))
+    await gateway.analyze_one(**args)
+    assert client.endpoint.requests[0]['messages'][0]['content'][1] == expected
+
+
+@pytest.mark.asyncio
+async def test_retry_charges_only_missing_indices_and_preserves_sequence(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    paths = [tmp_path / f'scene-{i:03}.mp4' for i in range(1, 6)]
+    async def analyze(**kwargs):
+        return {'shot_index':kwargs['index'], 'value':'new'}
+    call = AsyncMock(side_effect=analyze)
+    monkeypatch.setattr(gateway, 'analyze_one', call)
+    progress = AsyncMock()
+    result = await gateway.analyze_many(paths, prompt='', schema_name='shots', response_schema={},
+        completed_results={1:{'value':'saved'},3:{'value':'saved'},5:{'value':'saved'}}, on_completed=progress)
+    assert sorted(args.kwargs['index'] for args in call.await_args_list) == [2, 4]
+    assert [s['shot_index'] for s in result] == [1, 2, 3, 4, 5]
+    assert [s['value'] for s in result] == ['saved','new','saved','new','saved']
+    assert progress.await_args_list[0].args == (3,5)
+
+
+@pytest.mark.asyncio
+async def test_partial_retry_skips_saved_and_uncertain_without_renumbering(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    gateway = RemakeVideoAnalysisGateway(_config(), client=_Client([]))
+    analyze = AsyncMock(return_value={'shot_index': 3})
+    monkeypatch.setattr(gateway, 'analyze_one', analyze)
+    results = await gateway.analyze_many([tmp_path / f'{i}.mp4' for i in (1, 2, 3)],
+        prompt='', schema_name='shots', response_schema={}, completed_results={1:{}}, held_shots=frozenset({2}))
+    assert [item['shot_index'] for item in results] == [1, 3]
+    assert analyze.await_count == 1 and analyze.await_args.kwargs['index'] == 3

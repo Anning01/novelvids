@@ -26,12 +26,11 @@ async function loadAccount() {
 }
 
 watch(() => props.accountRevision, () => {
-  const refresh = account.value !== null || accountLoading.value
   ++accountRequest
   account.value = null
   accountError.value = ''
   accountLoading.value = false
-  if (refresh) void loadAccount()
+  void loadAccount()
 })
 
 function refreshAccountOnFocus() {
@@ -39,6 +38,7 @@ function refreshAccountOnFocus() {
 }
 onMounted(() => {
   window.addEventListener('focus', refreshAccountOnFocus)
+  void loadAccount()
 })
 onUnmounted(() => {
   ++accountRequest
@@ -50,7 +50,8 @@ onUnmounted(() => {
   <section class="platform-account-settings">
     <div class="platform-account">
       <strong>{{ tr('API 平台账户') }}</strong>
-      <AppButton type="button" variant="ghost" size="sm" :loading="accountLoading" @click="loadAccount">{{ tr(account ? '刷新余额' : '查看平台余额') }}</AppButton>
+      <span v-if="accountLoading && !account" role="status">{{ tr('加载中…') }}</span>
+      <AppButton v-if="account || accountError" type="button" variant="ghost" size="sm" :loading="accountLoading" @click="loadAccount">{{ tr(accountError ? '重试' : '刷新余额') }}</AppButton>
       <template v-if="account"><span>{{ account.balance }} {{ account.currency }}</span><a :href="account.recharge_url" target="_blank" rel="noopener noreferrer">{{ tr('前往平台充值') }}</a></template>
       <p v-if="accountError" role="alert">{{ accountError }}</p>
     </div>

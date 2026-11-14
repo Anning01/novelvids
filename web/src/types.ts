@@ -3,6 +3,8 @@ export enum TaskStatusEnum { PENDING = 1, PROCESSING = 2, COMPLETED = 3, FAILED 
 export interface AutoEnhancement { config_version?: string | null; model_config_id: number; resolution: '720p' | '1080p' | '2k' | '4k' }
 export interface VideoDefaults { model_config_id: number; resolution: string; aspect_ratio: string; return_last_frame: boolean; auto_enhancement: AutoEnhancement | null }
 
+export type ProjectVideoDefaults = Omit<VideoDefaults, 'model_config_id'> & { model_config_id?: number | null }
+
 export interface WorkbenchCapabilities {
   upload_media: boolean
   generate_asset: boolean
@@ -31,7 +33,7 @@ export interface NovelMeta {
   episodes_managed?: boolean
   shot_duration_max?: number; audiovisual_guidance?: string | null
   storyboard_enabled?: boolean
-  video_generation_defaults?: VideoDefaults | null
+  video_generation_defaults?: ProjectVideoDefaults | null
   id: number
   name: string
   author?: string
@@ -56,7 +58,7 @@ export interface NovelMeta {
 }
 export interface StoryboardStrategy { key: string; name: string; description: string; is_default: boolean }
 export interface Novel {
-  episodes_managed?: boolean; shot_duration_max?: number; audiovisual_guidance?: string | null; storyboard_enabled?: boolean; video_generation_defaults?: VideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
+  episodes_managed?: boolean; shot_duration_max?: number; audiovisual_guidance?: string | null; storyboard_enabled?: boolean; video_generation_defaults?: ProjectVideoDefaults | null; id: number; name: string; author?: string; style_key?: string | null; workflow_kind?: 'script' | 'remake'; aspect_ratio?: string | null; resolution?: string | null; custom_style_prompt?: string | null; video_model_config_id?: number | null; narrator_audio_reference_id?: number | null; description?: string; cover?: string; cover_thumbnail?: string | null; cover_preview?: string | null; total_chapters?: number; content?: string; tags?: string[] | null; story_outline?: string | null; project_type?: string | null; project_setting?: string | null; storyboard_strategy?: string | null; storyboard_setting?: string | null; created_at: string; updated_at: string }
 export interface ProjectProduction {
   chapter_count: number
   storyboard_chapter_count: number
@@ -94,7 +96,7 @@ export interface AssetVariant { id: number; asset_id: number; name: string; desc
 export interface AssetVariantDraft { id: number | null; name: string; description: string; chapter_numbers: number[]; is_new: boolean }
 export interface Asset { id: number; novel_id: number; asset_type: AssetTypeEnum; canonical_name: string; aliases?: string[]; description?: string; base_traits?: string; main_image?: string; main_image_thumbnail?: string | null; main_image_preview?: string | null; angle_image_1?: string; angle_image_1_thumbnail?: string | null; angle_image_1_preview?: string | null; angle_image_2?: string; angle_image_2_thumbnail?: string | null; angle_image_2_preview?: string | null; image_source?: number; metadata?: Record<string, unknown>; is_global?: boolean; source_chapters?: number[]; last_updated_chapter?: number; variants?: AssetVariant[]; created_at: string; updated_at: string }
 export interface AssetGenerationRecord { id: string; status: TaskStatusEnum; is_current?: boolean; images: string[]; image_thumbnails?: Array<string | null>; image_previews?: Array<string | null>; error_message?: string; model?: string; clarity?: string; aspect_ratio?: string; output_format?: string; created_at: string; finished_at?: string }
-export interface AssetActiveGeneration { asset_id: number; task_id: string; status: TaskStatusEnum }
+export interface AssetActiveGeneration { asset_id: number; variant_id?: number | null; task_id: string; status: TaskStatusEnum }
 export interface AssetReferencePromptPreview { prompt: string; prompt_language: 'zh' | 'en' }
 export interface AssetMergeResult { asset: Asset; removed_asset_id: number; data_source_asset_id: number; image_source_asset_id?: number; summary: string[] }
 export interface Scene { blocking_reference?: (VideoReferenceMedia & {rules: Record<string, {line: string; headings: string[]}>}) | null; storyboard_binding_rules?: Record<string, {line: string; headings: string[]}> | null; id: number; chapter_id?: number; sequence: number; description?: string; prompt?: string; prompt_params?: Record<string, unknown>; metadata?: Record<string, unknown>; duration?: number; status?: TaskStatusEnum; asset_ids?: number[]; assets?: Asset[]; created_at: string; updated_at: string }
@@ -155,8 +157,8 @@ export interface AiTask {
   updated_at?: string
 }
 export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
-export type ImageModelType = 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
-export interface ImageGenerationCapabilities { clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
+export type ImageModelType = 'seedream_5_5' | 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
+export interface ImageGenerationCapabilities { sizes?: Record<string, string[]>; clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
 export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
 export interface VideoGenerationOptions {
@@ -239,7 +241,7 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
-  billing_unit?: 'token' | 'second' | 'minute'
+  billing_unit?: 'pixel_tier' | 'token' | 'second' | 'minute'
   tiers?: Array<{ short_side_max: number; fps_max: number; price: number }>
   discount?: number
   discount_description?: string
@@ -282,6 +284,7 @@ export interface PaginationResponse<T> {
 export interface SingleResponse<T> { code: number; message: string; data: T }
 
 export interface RemakeCapabilities {
+  analysis_models: Array<{ id: number; name: string }>
   media: { extensions: string[]; max_bytes: number; max_duration_seconds: number }
   aspect_ratios: string[]
   resolutions: string[]
@@ -305,6 +308,7 @@ export interface RemakeUpload {
   expires_at: string
 }
 export interface RemakeProjectCreate {
+  model_config_id?: number
   name: string
   source_mode: 'single_upload' | 'folder_upload' | 'history'
   aspect_ratio: string
@@ -345,6 +349,10 @@ export interface RemakeProjectCreateResult {
 }
 export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
 export interface RemakeProgressTask {
+  completed_clips?: number
+  total_clips?: number | null
+  retryable_clips?: number
+  awaiting_platform_result?: boolean
   id: string
   status: TaskStatusEnum
   stage: string

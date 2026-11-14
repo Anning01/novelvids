@@ -47,3 +47,10 @@ describe('modelPricing', () => {
     expect(estimateVideoCost(pricing, '2K', 5)).toBe(4)
   })
 })
+
+it('quotes single-image pixel tiers and charges reference images per request', () => {
+  const pricing: ModelPricing = { type: 'image', currency: 'CNY', billing_unit: 'pixel_tier',
+    prices: { low: 0.13, high_capped: 0.23 }, input_image: { first_free: 0, price_per_image: 0.05 } }
+  expect(estimateImageCost(pricing, '2K', 1, 2, 2610000)).toBeCloseTo(0.23)
+  expect(estimateImageCost(pricing, '2K', 1, 2, 2611000)).toBeCloseTo(0.33)
+})

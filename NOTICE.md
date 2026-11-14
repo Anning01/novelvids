@@ -39,3 +39,7 @@ Screenshots and video links illustrate application workflows. They do not grant 
 This change applies MIT to the current project code and documentation. The license for an earlier release can be read at its corresponding tag or commit. The maintainer has confirmed authorization to include historical contributions in this change.
 
 本次将当前项目代码和文档改为 MIT；历史版本的许可可在对应标签或提交中查阅。维护者已确认本次变更包含历史贡献的再授权权限。
+
+## Bundled video prompt optimizers
+
+The Docker runtime includes the supplied text of the Seedance (`sd2-pe`, `sd25-pe`), MiniMax H3 (`h3-prompt-writing`), and Wan (`wan3-pe`) prompt optimizers under `prompts/skills/video-optimizers/`. Their original notices and applicable third-party terms remain in effect. See the [model and source registry](prompts/skills/novelvids-video/references/video_prompt_models.json).

@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "blocking_map_per_shot": false,
   "sections": [
     "【禁止项】",
     "【风格定调】",

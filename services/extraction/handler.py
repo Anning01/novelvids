@@ -185,7 +185,7 @@ class ExtractionTaskHandler(BaseTaskHandler):
             )
             if isinstance(error, (HTTPException, AssetExtractionGatewayError, AssetExtractionValidationError)):
                 raise error from None
-            raise AssetExtractionGatewayError() from None
+            raise AssetExtractionGatewayError.from_exception(error) from None
         logger.info(
             "Extraction model call: novel_id=%s chapter_id=%s "
             "roles=%s call_status=succeeded",

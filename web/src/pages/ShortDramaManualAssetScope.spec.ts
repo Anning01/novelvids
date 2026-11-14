@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { agentApi } from '@/features/creation-agent/api'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
@@ -29,6 +30,7 @@ vi.mock('@/api', () => ({
     asset: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
+    extract: vi.fn(),
     updateAsset: vi.fn(),
     generateAsset: vi.fn(),
     generateAssetBatch: vi.fn(),
@@ -52,6 +54,7 @@ const chapter = {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data:{models:[{id:22,name:'Asset text',model:'b'}]}} as never)
   delete routeQuery.asset
   delete routeQuery.variant
   vi.mocked(api.novelMeta).mockResolvedValue({
@@ -320,6 +323,29 @@ it('shows loading for every queued asset and hides title and description before 
   assertVisibleAssetIsLoading()
 })
 
+it('submits missing variants even when the base image is complete', async () => {
+  const asset: Asset = {
+    id: 31, novel_id: 9, asset_type: AssetTypeEnum.PERSON, canonical_name: '宫平', main_image: '/base.png',
+    created_at: '', updated_at: '', source_chapters: [1], variants: [
+      { id: 311, asset_id: 31, name: '少年', images: [], created_at: '', updated_at: '' },
+      { id: 312, asset_id: 31, name: '成年', images: ['/adult.png'], created_at: '', updated_at: '' },
+    ],
+  }
+  vi.mocked(api.assets).mockResolvedValue({ code: 0, message: '', data: {
+    items: [asset], pagination: { total: 1, page: 1, page_size: 100, pages: 1 },
+  } })
+  const wrapper = await mountInCurrentChapterScope()
+  wrapper.findComponent(AssetBatchGenerateDialog).vm.$emit('generate', {
+    assetIds: [31], variantIds: [311, 312], modelConfigId: 2, concurrency: 1,
+    clarity: '1.5K', ratio: '16:9', outputFormat: 'png', generationCount: 1,
+  })
+  await flushPromises()
+  expect(api.generateAssetBatch).toHaveBeenCalledExactlyOnceWith({
+    novel_id: 9, asset_ids: [], variant_ids: [311], model_config_id: 2,
+    clarity: '1.5K', aspect_ratio: '16:9', output_format: 'png',
+  })
+})
+
 it('opens the exact asset and variant from an assistant result link outside the loaded page', async () => {
   routeQuery.asset = '901'
   routeQuery.variant = '807'
@@ -488,4 +514,17 @@ it('submits the entire selection before unmount and does not depend on page work
   complete({ code: 0, message: '', data: { tasks: [], skipped_asset_ids: [] } })
   await flushPromises()
   expect(api.generateAsset).not.toHaveBeenCalled()
+})
+
+it('submits extraction with its own selected model', async () => {
+  vi.mocked(api.latestExtraction).mockResolvedValue({data:null} as never)
+  vi.mocked(api.extract).mockRejectedValue(new Error('test submission'))
+  const wrapper = await mountInCurrentChapterScope()
+  await wrapper.get('[aria-label="选择资产提取模型"]').trigger('click')
+  document.querySelector<HTMLElement>('[role="option"] [title="Asset text"]')!.click()
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '提取本章资产')!.trigger('click')
+  await flushPromises()
+  expect(api.extract).toHaveBeenCalledWith(chapter.id, undefined, 22)
+  wrapper.unmount()
 })

@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
+import { agentApi } from '@/features/creation-agent/api'
 import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
 import type { EpisodePacing } from '@/types'
 import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
@@ -195,7 +196,7 @@ async function saveEpisodePacing(id: number, pacing: EpisodePacing) {
 }
 
 async function generateScreenplay(id: number, existingTask = sessionStorage.getItem(taskKey(id))) {
-  if (generatingScripts.value[id] || (!existingTask && (!canEdit.value || editing.value))) return
+  if (generatingScripts.value[id] || (!existingTask && (!canEdit.value || editing.value || !analysisModelId.value))) return
   const previous = chapterDetails.value[id]?.screenplay
   if (!existingTask && previous && !await appConfirm({
     title: tr('重新生成本集剧本'),
@@ -204,7 +205,7 @@ async function generateScreenplay(id: number, existingTask = sessionStorage.getI
   })) return
   generatingScripts.value[id] = true
   try {
-    const taskId = existingTask || (previous ? await api.generateScreenplay(id, previous) : await api.generateScreenplay(id)).data.id
+    const taskId = existingTask || (await api.generateScreenplay(id, previous || undefined, Number(analysisModelId.value))).data.id
     sessionStorage.setItem(taskKey(id), taskId)
     const task = await pollUntilTerminal(async signal => (await api.task(taskId, signal)).data, {
       signal: scriptRequests.signal, intervalMs: 1200,
@@ -401,6 +402,22 @@ async function pollAnalysis(taskId: string) {
   }
 }
 
+const analysisModelId = ref('')
+const analysisModels = ref<{ value: string; label: string }[]>([])
+const loadingAnalysisModels = ref(true)
+const analysisModelsError = ref('')
+async function loadAnalysisModels() {
+  loadingAnalysisModels.value = true
+  analysisModelsError.value = ''
+  try {
+    const { data } = await agentApi.capabilities(projectId.value)
+    analysisModels.value = data.models.map(model => ({ value: String(model.id), label: model.name || model.model }))
+  } catch (error) {
+    analysisModelsError.value = (error as Error).message
+  } finally {
+    loadingAnalysisModels.value = false
+  }
+}
 const coverModelId = ref('')
 const generatingCover = ref(false)
 const coverError = ref('')
@@ -428,11 +445,11 @@ async function generateCover() {
 }
 
 async function startAnalysis() {
-  if (!canEdit.value || startingAnalysis.value || analysisRunning.value || generatingCover.value) return
+  if (!canEdit.value || !analysisModelId.value || startingAnalysis.value || analysisRunning.value || generatingCover.value) return
   startingAnalysis.value = true
   analysisError.value = ''
   try {
-    const response = await api.analyzeNovel(projectId.value)
+    const response = await api.analyzeNovel(projectId.value, undefined, Number(analysisModelId.value))
     analysisTask.value = response.data
     notice.success(tr('AI 已开始提取类型、大纲和关键人物'))
     await pollAnalysis(response.data.id)
@@ -457,10 +474,6 @@ async function loadAnalysis() {
     analysisError.value = error instanceof Error ? error.message : tr('无法读取分析进度')
     notice.error((error as Error).message)
   }
-}
-
-async function regenerateAnalysis() {
-  await startAnalysis()
 }
 
 function ensureChapterDraft(chapter: Chapter) {
@@ -721,6 +734,7 @@ function observeEpisodeSentinel() {
 onMounted(async () => {
   observeEpisodeSentinel()
   void loadDisplayOptions()
+  if (canEdit.value) void loadAnalysisModels()
   const [, projectReady] = await Promise.all([
     loadStoryboardStrategies(),
     loadProject(),
@@ -804,7 +818,9 @@ onBeforeUnmount(() => {
               </AppButton>
               <small v-if="coverError" class="cover-generation-error" role="alert">{{ coverError }}</small>
             </div>
-            <AppButton v-if="canEdit && hasAnalysisContent" class="secondary-action" variant="secondary" size="sm" type="button" :disabled="analysisRunning || startingAnalysis || generatingCover" @click="regenerateAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+            <div v-if="canEdit && hasAnalysisContent" class="cover-generation-actions">
+              <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="!analysisModelId || analysisRunning || startingAnalysis || generatingCover" @click="startAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+            </div>
             <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration || adapting" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
@@ -819,7 +835,14 @@ onBeforeUnmount(() => {
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
         </div>
-        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="generatingCover" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
+        <template v-if="canEdit && !selectedEpisode">
+              <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
+                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('无可用模型') }, ...analysisModels]"
+                :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
+              <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
+              <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
+        </template>
+        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="!analysisModelId || generatingCover" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
         <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
 
@@ -924,10 +947,17 @@ onBeforeUnmount(() => {
               :pacing="selectedEpisode.episode_pacing" :episode="episodeDisplayLabel(selectedEpisode)"
               :disabled="editing || selectedEpisodeLoading || generatingScripts[selectedEpisode.id]"
               :save="(pacing) => saveEpisodePacing(selectedEpisode!.id, pacing)" />
+            <div v-if="canEdit" class="episode-adaptation-controls">
+              <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
+                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('无可用模型') }, ...analysisModels]"
+                :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
+              <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
+              <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
             <AppButton v-if="canEdit && selectedEpisode.content?.trim()" class="generate-screenplay" variant="primary" size="sm"
-              :disabled="editing" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
+              :disabled="editing || !analysisModelId" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
               {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : selectedEpisode.screenplay ? tr('重新生成本集剧本') : tr('生成本集剧本') }}
             </AppButton>
+            </div>
           </div>
           <div class="episode-document">
           <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
@@ -964,6 +994,7 @@ onBeforeUnmount(() => {
 
 .episode-empty-state { padding: 20px; border: 1px dashed var(--app-border); border-radius: 12px; color: var(--app-text-secondary); }
 .episode-empty-state p { margin: 0 0 12px; line-height: 1.7; }
+.episode-adaptation-controls { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; flex-wrap: wrap; }
 .episode-doc-tools { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
 .episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
 .episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
@@ -999,12 +1030,12 @@ onBeforeUnmount(() => {
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }
 .secondary-action.compact { min-height: 34px; }
-.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 16px; margin-top: 22px; padding: 20px; border-radius: 16px; background: #fff; box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
-.analysis-progress-card > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 14px; color: #5b5cf6; background: #f0f0ff; }
+.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 16px; margin-top: 22px; padding: 20px; border-radius: 16px; background: var(--app-surface); box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
+.analysis-progress-card > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 14px; color: var(--app-accent); background: var(--app-accent-soft); }
 .analysis-progress-card h2 { margin: 0 0 6px; font-size: 15px; }
-.analysis-progress-card p { margin: 0; color: #858a99; font-size: 11px; line-height: 1.7; }
+.analysis-progress-card p { margin: 0; color: var(--app-text-secondary); font-size: 11px; line-height: 1.7; }
 .analysis-progress-card > button { min-height: 36px; padding: 0 15px; border: 0; border-radius: 9px; color: #fff; background: #5b5cf6; cursor: pointer; font-size: 11px; font-weight: 650; }
-.analysis-progress-card.is-failed > span { color: #bb5b68; background: #fff0f2; }
+.analysis-progress-card.is-failed > span { color: var(--creation-danger); background: color-mix(in srgb, var(--creation-danger) 10%, var(--app-surface)); }
 .analysis-section { padding-top: 20px; }
 .analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .analysis-section > header > div:not(.episode-actions) { display: grid; gap: 4px; }
@@ -1082,7 +1113,7 @@ onBeforeUnmount(() => {
 .profile-card small { color: #969baa; font-size: 9px; }
 .profile-card strong { font-size: 13px; }
 .profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
-.narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid #dedff0; border-radius: 9px; color: #5b5cf6; background: #f8f8ff; cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: #999af3; }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: #969baa; font-size: 8px; }.narrator-voice-button strong { color: #4f5464; font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: #6567e9; font-size: 9px; }
+.narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid var(--app-border); border-radius: 9px; color: var(--app-accent); background: var(--app-surface-muted); cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: var(--app-accent); }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: var(--app-text-secondary); font-size: 8px; }.narrator-voice-button strong { color: var(--app-text); font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--app-accent); font-size: 9px; }
 .analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
 .analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
 .tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }

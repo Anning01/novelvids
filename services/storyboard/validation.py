@@ -53,12 +53,12 @@ def validate_skill_storyboard_timing(shot: SoraScenePromptConfig) -> None:
         raise ValueError(localized_message("分镜中的对白、旁白或内心独白时间重叠"))
 
 
-def validate_blocking_map(shot, snapshot, entities=()):
-    if "blocking_guide" not in snapshot.contents or shot.duration_split_part is None:
+def validate_blocking_map(shot, snapshot, entities=(), *, required=False):
+    if not required and ("blocking_guide" not in snapshot.contents or (shot.duration_split_part is None and shot.blocking_map is None)):
         return
     plan = shot.blocking_map
     if plan is None or len(plan.cameras) != max(1, len(shot.segments)):
-        raise ValueError(localized_message("因时长拆分的续段需要空间定位图，标明承接站位及本段机位"))
+        raise ValueError(localized_message("本镜需要空间定位图，标明人物站位及各画面的机位"))
     visible = visible_storyboard_assets(shot, [entity for entity in entities if entity.asset_type != "场景"])
     missing = set(visible) - {asset.asset_name or asset.name for asset in plan.assets}
     if missing:
@@ -66,7 +66,7 @@ def validate_blocking_map(shot, snapshot, entities=()):
 
 
 def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
-                             entities: Sequence[SceneEntity], strategy_key: str, *, scene_layouts: dict | None = None):
+                             entities: Sequence[SceneEntity], strategy_key: str, *, scene_layouts: dict | None = None, optional_blocking=False):
     from schemas.agent_workflow import SkillStoryboard, SkillShot
     from prompts.storyboard_strategies import StoryboardStrategyPrompt
 
@@ -77,8 +77,11 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
     layouts = dict(scene_layouts or {})
     location_ids = {layout["name"]: key for key, layout in layouts.items()}
     for shot in storyboard.shots:
-        if "blocking_guide" in snapshot.contents and shot.duration_split_part is None and shot.blocking_map:
-            shot = shot.model_copy(update={"blocking_map": None})
+        if optional_blocking and shot.blocking_map:
+            try:
+                validate_blocking_map(shot, snapshot, entities, required=True)
+            except ValueError:
+                shot = shot.model_copy(update={"blocking_map": None})
         if shot.blocking_map and shot.blocking_map.layout:
             layout = shot.blocking_map.layout.model_dump()
             same_location = location_ids.setdefault(layout["name"], layout["id"])
@@ -89,13 +92,13 @@ def prepare_skill_storyboard(storyboard, snapshot: SkillSnapshot, language: str,
         prompt = format_storyboard_prompt(normalized, language, entities=entities, strategy=strategy,
                                          localize_strategy=False)
         prepared = SkillShot.model_validate({**normalized.model_dump(), "prompt": prompt})
-        validate_skill_storyboard_shot(prepared, snapshot, language, entities)
+        validate_skill_storyboard_shot(prepared, snapshot, language, entities, optional_blocking=optional_blocking)
         shots.append(prepared)
     return SkillStoryboard(shots=shots)
 
 
 def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillSnapshot, language: str,
-                                   entities: Sequence[SceneEntity] = ()) -> None:
+                                   entities: Sequence[SceneEntity] = (), *, optional_blocking=False) -> None:
     if "storyboard_contract" not in snapshot.contents:
         return
     contract = json.loads(snapshot.read("storyboard_contract"))
@@ -107,7 +110,8 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     prompt = shot.prompt or ""
     from services.storyboard.entities import shot_variant_bindings
     shot_variant_bindings(shot, entities)
-    validate_blocking_map(shot, snapshot, entities)
+    if not optional_blocking or shot.blocking_map:
+        validate_blocking_map(shot, snapshot, entities)
     position = 0
     for section in contract["sections"]:
         label = prompt_label(section, language)
@@ -126,28 +130,3 @@ def validate_skill_storyboard_shot(shot: SoraScenePromptConfig, snapshot: SkillS
     if f"@{{镜头时长:{duration:g}s}}" not in prompt:
         raise ValueError(localized_message("分镜提示词缺少镜头时长标记"))
     validate_skill_storyboard_timing(shot)
-
-
-def episode_duration_limit(screenplay: str, pacing: dict | None) -> int | None:
-    if pacing and pacing.get("max_seconds") is not None:
-        return pacing["max_seconds"]
-    match = re.search(
-        r"^\s*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:本集时长上限[：:]|Episode duration limit:)"
-        r"(?:\*\*)?[ \t]*([1-9][0-9]{0,8})[ \t]*(?:秒|s)(?:\*\*)?[ \t]*$",
-        "\n".join([line for line in screenplay.splitlines() if line.strip()][:6]),
-        re.MULTILINE | re.IGNORECASE,
-    )
-    return int(match[1]) if match else None
-
-
-def validate_episode_duration(storyboard, limit: int | None) -> None:
-    if limit is None:
-        return
-    from decimal import Decimal
-
-    total = sum(Decimal(shot.duration.removesuffix("s")) for shot in storyboard.shots)
-    if total > limit:
-        raise ValueError(localized_message(
-            "分镜总时长 {p0} 秒，超过本集上限 {p1} 秒。请调整剧本节奏或时长上限。",
-            p0=f"{total:f}", p1=limit,
-        ))

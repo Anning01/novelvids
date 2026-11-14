@@ -24,8 +24,6 @@ async def require_agent(team_id=None, model_id=None):
     from config import settings
 
     limits = await agent_configuration()
-    if not limits.enabled:
-        raise HTTPException(409, localized_message("创作助手尚未启用"))
     models = await resolve_scope_configs(
         AiTaskTypeEnum.creation_agent.value,
         team_id if settings.AUTH_ENABLED else None,
@@ -166,8 +164,10 @@ class SkillExecution:
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
         initial_assets: BaseModel | None = None,
         asset_scope: tuple[tuple[int, str], ...] = (),
+        activity_label: str | None = None,
     ):
         from services.creation_agent.handler import configured_model
+        from schemas.agent_workflow import RemakeShot
 
         chosen, limits = await require_agent(
             self.params.get("team_id"), self.params["assistant_model_config_id"]
@@ -262,11 +262,8 @@ class SkillExecution:
         from datetime import datetime, timezone
 
         async def report_activity(call):
-            label = {
-                "authorization": "理解生成要求", "story": "分析故事", "assets": "提取本章资产",
-                "image": "准备图片提示词", "storyboard": "生成分镜", "remake": "分析参考视频",
-                "video": "准备视频提示词",
-            }.get(skill, "处理创作要求")
+            from services.creation_agent.skill_stream import skill_activity_label
+            label = activity_label or skill_activity_label(skill, self.language)
             item = {
                 "id": f"model:{child.id}:{call['index']}", "kind": "status", "label": label,
                 "status": "running" if call["status"] == "in_progress" else call["status"],
@@ -282,8 +279,7 @@ class SkillExecution:
 
         from services.creation_agent.skill_stream import SkillRunActivity
 
-        tool_activity = SkillRunActivity(child_message, str(self.message.task_id),
-            public_thinking=self.params.get('agent_runtime') != 'deepagents')
+        tool_activity = SkillRunActivity(child_message, str(self.message.task_id))
 
         recorded = RecordedAgentModel(
             model,
@@ -294,7 +290,10 @@ class SkillExecution:
             total_tokens_limit=limits.total_tokens_limit,
             limits=limits,
             on_activity=report_activity,
-            repair_root=await self.repair_root(), stage=skill,
+            # Each detected clip is a separate model step with its own durable retry allowance.
+            repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
+            stage=skill,
+            repair_attempts=2 if skill == "remake" else 1,
         )
         request_aspect_ratio = "16:9"
         from services.storyboard.candidates import StoryboardCandidateValidator
@@ -346,15 +345,6 @@ class SkillExecution:
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
-            if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'professional_video_prompt_material':
-                from services.remake.storyboards import prepare_remake_prompt
-                from pydantic_ai import ModelRetry
-                context = facts['assets']
-                try:
-                    prepare_remake_prompt(output.model_dump(), context['assets'], ctx.deps, self.language,
-                        strategy_key=context['storyboard_strategy'], duration_seconds=context['duration_seconds'])
-                except ValueError as error:
-                    raise ModelRetry(str(error)) from None
             if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
                 from services.remake.asset_validation import render_remake_assets
                 from pydantic_ai import ModelRetry
@@ -419,6 +409,10 @@ class SkillExecution:
 
         async def invoke():
             nonlocal request_aspect_ratio, request_rejected
+            # A resumed child may still carry its previous failure. Only a claimed
+            # step becomes running; cached completed steps never change state.
+            child.status = TaskStatusEnum.running.value
+            await child.save(update_fields=['status'])
             if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
                 return storyboard_candidates.result().model_dump(mode='json')
             if asset_checkpoint and not asset_checkpoint['issues']:
@@ -573,6 +567,7 @@ def _audit_messages(messages):
     import hashlib
     from pydantic_ai.messages import (
         BinaryContent,
+        VideoUrl,
         ModelRequest,
         ModelMessagesTypeAdapter,
         UserPromptPart,
@@ -587,6 +582,7 @@ def _audit_messages(messages):
                     content = [
                         f"[{item.media_type}; bytes={len(item.data)}; sha256={hashlib.sha256(item.data).hexdigest()}]"
                         if isinstance(item, BinaryContent)
+                        else f"[{item.media_type}; temporary video]" if isinstance(item, VideoUrl)
                         else item
                         for item in part.content
                     ]

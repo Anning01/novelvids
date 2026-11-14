@@ -58,7 +58,7 @@ async def test_selected_skill_stream_is_visible_in_snapshot_before_completion(ca
     async def respond(messages, info):
         nonlocal calls
         calls += 1
-        assert 'name: novelvids-screenplay' in info.instructions
+        assert params['skill_snapshot']['contents']['story'].strip() in info.instructions
         if calls == 1:
             yield {0: DeltaToolCall(name='read_skill', tool_call_id='skill-selection',
                                    json_args=json.dumps({'name': 'novelvids-screenplay'}))}
@@ -73,9 +73,15 @@ async def test_selected_skill_stream_is_visible_in_snapshot_before_completion(ca
     model = FunctionModel(stream_function=respond)
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
-        work = asyncio.create_task(execution.generate('screenplay', {'source': 'synthetic'}, Output))
+        # Story reading exposes read_skill; screenplay already receives its full rules.
+        work = asyncio.create_task(execution.generate('story', {'source': 'synthetic'}, Output))
         try:
-            await asyncio.wait_for(reached.wait(), 5)
+            try:
+                await asyncio.wait_for(reached.wait(), 5)
+            except TimeoutError:
+                if work.done():
+                    work.result()
+                raise
             assert not work.done()
             snapshot = await creation_agent_controller.snapshot(parent.id, AuthContext())
             tool = next(item for item in snapshot.activity if item.tool_name == 'read_skill')
@@ -144,7 +150,89 @@ async def test_only_sdk_public_thinking_content_becomes_summary():
                                event_stream_handler=sink)
     assert result.output == 'Ordinary output is not a thinking summary.'
     events = [call.args[0] for call in sink.publish_event.await_args_list]
-    assert [event['type'] for event in events] == [
-        'THINKING_TEXT_MESSAGE_START', 'THINKING_TEXT_MESSAGE_CONTENT', 'THINKING_TEXT_MESSAGE_END']
-    assert events[1]['delta'] == 'Public model summary.'
+    assert all(event['type'] == 'CUSTOM' for event in events)
+    assert [event['value']['status'] for event in events] == ['running', 'running', 'completed']
+    assert {event['value']['id'] for event in events} == {f'model:child:thinking:{sink.run_id}:1'}
+    assert events[1]['value']['detail_delta'] == 'Public model summary.'
     assert 'private-signature' not in str(events) and 'Ordinary output' not in str(events)
+
+
+def test_resumed_skill_thinking_has_distinct_identity_from_previous_failure():
+    message = AsyncMock(task_id='child', conversation_id=1)
+    assert SkillRunActivity(message, 'owner').run_id != SkillRunActivity(message, 'owner').run_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('cancel', [False, True])
+@pytest.mark.parametrize('runtime', ['pydantic_ai', 'deepagents'])
+async def test_named_model_step_streams_before_completion_and_survives_snapshot(cancel, runtime):
+    from services.creation_agent.skill_stream import skill_event_sink
+    from pydantic_ai.models.function import DeltaThinkingPart
+    conversation, request, _ = await session_fixture(runtime=runtime)
+    params = await prepare_workflow({'novel_id': conversation.novel_id, 'prompt_language': 'zh'})
+    production = await AiTask.create(task_type=3, status=2, request_params=params)
+    message = await conversation_for_task(production)
+    execution = SkillExecution({**params, 'task_id': str(production.id)}, message, AsyncMock())
+    reached, release = asyncio.Event(), asyncio.Event()
+    forwarded = AsyncMock()
+    label = '场次 1-1 · 补充第 3/15 镜空间定位图'
+
+    class Output(BaseModel):
+        result: str
+
+    async def respond(messages, info):
+        yield {0: DeltaThinkingPart(content='核对本镜人物站位。')}
+        reached.set()
+        await release.wait()
+        yield {1: DeltaToolCall(name=info.output_tools[0].name, tool_call_id='final', json_args='{"result":"ok"}')}
+
+    model = FunctionModel(stream_function=respond)
+    model.client = AsyncMock()
+    from uuid import uuid5
+    child = await AiTask.create(id=uuid5(production.id, 'model:structured:Output:blocking:0:3'),
+        task_type=7, status=4, request_params={**params, 'parent_task_id': str(production.id)})
+    token = skill_event_sink.set(forwarded)
+    try:
+        with patch('services.creation_agent.handler.configured_model', return_value=model):
+            work = asyncio.create_task(execution.generate('structured', {'segment': 'blocking:0:3'}, Output,
+                                                        activity_label=label))
+            try:
+                await asyncio.wait_for(reached.wait(), 5)
+                await child.refresh_from_db()
+                assert child.status == 2
+                snapshot = await creation_agent_controller.snapshot(production.id, AuthContext())
+                step = next(item for item in snapshot.activity if item.label == label)
+                assert step.status == 'running' and not work.done()
+                assert any(call.args[0]['value']['label'] == label for call in forwarded.await_args_list)
+                thinking = next(item for item in snapshot.activity if item.kind == 'thinking')
+                assert thinking.status == 'running'
+                assert thinking.detail == '核对本镜人物站位。'
+                assert any(call.args[0]['value']['id'] == thinking.id and
+                           (call.args[0]['value'].get('detail') or call.args[0]['value'].get('detail_delta')) == thinking.detail for call in forwarded.await_args_list)
+                if cancel:
+                    work.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await work
+                else:
+                    release.set()
+                    assert (await work).result == 'ok'
+            finally:
+                if not work.done():
+                    work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+        snapshot = await creation_agent_controller.snapshot(production.id, AuthContext())
+        step = next(item for item in snapshot.activity if item.label == label)
+        assert step.status == ('failed' if cancel else 'completed')
+        assert step.finished_at
+    finally:
+        skill_event_sink.reset(token)
+
+
+@pytest.mark.parametrize('skill,label', [
+    ('screenplay', '编写本集剧本'), ('planning_request', '梳理创作需求'),
+    ('creation_planning', '制定创作方案'), ('source_reading', '阅读原文素材'),
+    ('creative_check', '核对生成内容与创作要求'),
+])
+def test_production_phase_has_specific_activity_name(skill, label):
+    from services.creation_agent.skill_stream import skill_activity_label
+    assert skill_activity_label(skill, 'zh') == label

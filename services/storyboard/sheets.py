@@ -95,7 +95,6 @@ async def execute_sheet(params):
     from services.reference.handler import _persist_generated_image
     from services.image_inputs import resolve_reference_images
     from models.asset import Asset
-    from models.asset_variant import AssetVariant
     execution = current_execution.get()
     if execution:
         await execution.before_request()
@@ -105,16 +104,19 @@ async def execute_sheet(params):
     if not scene.chapter.novel.storyboard_enabled or scene_fingerprint(scene) != params['scene_fingerprint']:
         raise ValueError(localized_message('分镜或故事版设置已修改，请重新生成'))
     config = await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image, params['model_config_id'], team_id=params.get('team_id'))
-    variants = {row.asset_id: row for row in await AssetVariant.filter(id__in=list((scene.metadata or {}).get('asset_variant_ids', {}).values()))}
+    from services.video.asset_resolver import normalize_selected_variant_ids, select_asset_variants
+    selected = normalize_selected_variant_ids((scene.metadata or {}).get('asset_variant_ids'))
     references, identities = [], []
-    for asset in await Asset.filter(scenes__id=scene.id):
-        variant = variants.get(asset.id)
-        images = variant.images if variant else []
-        identities.append({'name': asset.canonical_name, 'variant': variant.name if variant else None,
-            'visual_description': variant.base_traits if variant else asset.base_traits})
-        image = next((item.get('url') if isinstance(item, dict) else item for item in images if item), None) or asset.main_image
-        if image:
-            references.append(image)
+    for asset in await Asset.filter(scenes__id=scene.id).prefetch_related('variants'):
+        for variant in select_asset_variants(asset, scene.chapter.number, selected):
+            images = variant.images if variant else []
+            identities.append({'name': asset.canonical_name, 'variant': variant.name if variant else None,
+                'visual_description': variant.base_traits if variant else asset.base_traits})
+            image = next((item.get('url') if isinstance(item, dict) else item for item in images if item), None)
+            if not variant:
+                image = image or asset.main_image
+            if image:
+                references.append(image)
     references = resolve_reference_images(references)
     selection = validate_selection(config.image_model_type, clarity=params['clarity'], aspect_ratio=params['aspect_ratio'], output_format='png', generation_count=1)
     images = await generate_for_sora_consistency({'base_traits': params['sheet']['image_prompt'] + '\n\n' + json.dumps({'reference_assets': identities}, ensure_ascii=False)},
@@ -135,3 +137,27 @@ async def execute_sheet(params):
             await current.save(update_fields=['metadata', 'updated_at'])
             result['saved'] = True
     return result
+
+
+async def enqueue_chapter_sheets(chapter_id, scene_ids, model_id, team_id, user_id, *, batch_id):
+    """Publish the complete sheet queue in one transaction with stable per-shot receipts."""
+    from models.chapter import Chapter
+    from services.creation_agent.submissions import submission
+    chapter = await Chapter.get(id=chapter_id)
+    tasks = []
+    async with project_write(chapter.novel_id):
+        scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
+        selected = set(scene_ids) if scene_ids is not None else None
+        for scene in scenes:
+            if selected is not None and scene.id not in selected:
+                continue
+            sheet = (scene.metadata or {}).get("storyboard_sheet") or {}
+            if sheet.get("image_url") and sheet.get("status") == "completed" and sheet.get("scene_fingerprint") == scene_fingerprint(scene):
+                continue
+            token = submission.set({"submission_id": str(batch_id), "submission_hash": f"{batch_id}:{scene.id}:{model_id}"})
+            try:
+                task = await submit_sheet(scene.id, model_config_id=model_id, team_id=team_id, user_id=user_id)
+            finally:
+                submission.reset(token)
+            tasks.append(str(task.id))
+    return tasks

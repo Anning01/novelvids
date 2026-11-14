@@ -22,6 +22,21 @@
         ],
         "title": "Identity",
         "type": "object"
+      },
+      "RemakeSourceFile": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "RemakeSourceFile",
+        "type": "object"
       }
     },
     "additionalProperties": false,
@@ -134,6 +149,26 @@
         },
         "title": "Originals",
         "type": "array"
+      },
+      "workflow_kind": {
+        "default": "script",
+        "enum": [
+          "script",
+          "remake"
+        ],
+        "title": "Workflow Kind",
+        "type": "string"
+      },
+      "remake_source": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RemakeSourceFile"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       }
     },
     "required": [
@@ -417,6 +452,17 @@
             },
             "title": "Media",
             "type": "array"
+          },
+          "source_range": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SourceRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
         "required": [
@@ -427,6 +473,27 @@
           "duration"
         ],
         "title": "Shot",
+        "type": "object"
+      },
+      "SourceRange": {
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "minimum": 0,
+            "title": "Start",
+            "type": "number"
+          },
+          "end": {
+            "exclusiveMinimum": 0,
+            "title": "End",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SourceRange",
         "type": "object"
       },
       "VisualReference": {

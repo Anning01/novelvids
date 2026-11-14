@@ -10,6 +10,7 @@ import { computed, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
 import { notice } from '@/shared/notice'
 import AppConfirmDialog from '@/components/AppConfirmDialog.vue'
+import StudioReleaseBanner from '@/components/StudioReleaseBanner.vue'
 import AppNotice from '@/components/AppNotice.vue'
 import AppThemeToggle from '@/components/AppThemeToggle.vue'
 import AppSidebarPreferences from '@/components/AppSidebarPreferences.vue'
@@ -101,6 +102,8 @@ function handleTeamSwitch(teamId: string) {
 </script>
 <template>
   <ElConfigProvider :locale="elementLocale">
+  <div class="studio-frame">
+  <StudioReleaseBanner v-if="!platform" />
   <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
       <RouterLink to="/" class="app-brand" :aria-label="tr('猫影首页')">
@@ -113,6 +116,7 @@ function handleTeamSwitch(teamId: string) {
       <AppSelect
         v-if="auth.enabled === true && auth.isLoggedIn && auth.activeMemberships.length"
         class="app-team-selector"
+        menu-width="trigger"
         density="compact"
         :model-value="String(auth.activeTeamId ?? '')"
         :options="teamOptions"
@@ -178,10 +182,13 @@ function handleTeamSwitch(teamId: string) {
     <AppConfirmDialog :dark="confirmDialogDark" />
     <TransitionGroup name="notice" tag="div" class="notice-stack" aria-live="polite"><AppNotice v-for="item in notice.state.notices" :key="item.id" :item="item" /></TransitionGroup>
   </div>
+  </div>
   </ElConfigProvider>
 </template>
 
 <style scoped>
+.studio-frame { display:flex; height:100%; flex-direction:column }
+.studio-frame > .app-shell { flex:1; min-height:0 }
 .app-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .app-team-selector {
   flex: 0 0 auto;

@@ -16,5 +16,7 @@
 - [按阶段提取资产与镜头](references/remake_templates.json)
 - [人物语速与表演](../novelvids-storyboard/references/speech_pacing.md)
 - [全片视听约定](../novelvids-storyboard/references/video_presentation.md)
-- [内部切镜的空间定位图](../novelvids-storyboard/references/blocking.md)
+- [拆段接戏的空间定位图](../novelvids-storyboard/references/blocking.md)
 - [定位线稿绘制工具](../scripts/draw_blocking.py)
+- [重制作品包交付与用户明确要求时的 MCP 同步](../references/work_package.md)
+- [作品文件与 MCP 工具的 JSON Schema](../references/work_package.schema.json)

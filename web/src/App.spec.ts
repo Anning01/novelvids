@@ -102,7 +102,10 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     const trigger = wrapper.get('button[aria-label="切换团队"]')
     expect(trigger.text()).toBe('乙队')
     expect(wrapper.find('select').exists()).toBe(false)
+    wrapper.get('.app-team-selector').element.getBoundingClientRect = () => new DOMRect(10, 50, 172, 34)
     await trigger.trigger('click')
+    const menu = document.querySelector<HTMLElement>('[role="listbox"][aria-label="切换团队"]')!
+    expect(menu.style.width).toBe('172px')
     const options = Array.from(document.querySelectorAll('[role="listbox"][aria-label="切换团队"] [role="option"]'))
     expect(options.map(option => option.textContent?.trim())).toEqual(['甲队', '乙队'])
     expect(options[1]?.getAttribute('aria-selected')).toBe('true')

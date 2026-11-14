@@ -378,3 +378,35 @@ async def test_gateway_falls_back_to_plain_http_error_when_body_not_json(monkeyp
             model="image-model",
             prompt="cover",
         )
+
+
+@pytest.mark.parametrize("receipt_header", [None, "X-Novelvids-Request-Id", "X-Cat-Request-Id"])
+async def test_only_retries_cat_capacity_rejections_before_admission(monkeypatch, receipt_header):
+    from unittest.mock import AsyncMock
+    attempts = []
+
+    async def respond(request):
+        attempts.append(request.headers["Idempotency-Key"])
+        if len(attempts) == 1:
+            headers = {"Retry-After": "2"}
+            if receipt_header:
+                headers[receipt_header] = "a-platform-receipt"
+            return httpx.Response(429, headers=headers, json={"error": {
+                "type": "rate_limit_error", "code": "rate_limit_exceeded", "message": "模型并发已满，请稍后重试"}})
+        return httpx.Response(200, json={"data": [{"url": "https://example.invalid/result.png"}]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: real(**kwargs, transport=httpx.MockTransport(respond)))
+    pause = AsyncMock()
+    monkeypatch.setattr('asyncio.sleep', pause)
+    call = generate_images(base_url="https://example.invalid/v1", api_key="test", model="nv-26",
+                           prompt="test", api_protocol="novelvids")
+    if receipt_header:
+        with pytest.raises(ImageGenerationError):
+            await call
+        assert len(attempts) == 1
+        pause.assert_not_awaited()
+    else:
+        assert (await call)[0].url.endswith("result.png")
+        assert len(attempts) == 2 and len(set(attempts)) == 1
+        pause.assert_awaited_once_with(2)

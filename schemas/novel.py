@@ -3,7 +3,7 @@ from typing import Literal, Optional
 from schemas._base import BaseResponse
 from services.cover_derivatives import cover_derivative_reference
 from services.oss import normalize_media_url, resolve_media_url
-from schemas.video_defaults import VideoDefaults
+from schemas.video_defaults import ProjectVideoDefaults, VideoDefaults
 from prompts.project_settings import audiovisual_guidance
 
 
@@ -31,7 +31,7 @@ class NovelProperties(BaseModel):
     storyboard_enabled: bool = False
     shot_duration_max: int = Field(15, ge=1, le=30)
     total_chapters: Optional[int] = Field(None, description="总章节数")
-    video_generation_defaults: VideoDefaults | None = None
+    video_generation_defaults: ProjectVideoDefaults | None = None
     video_model_config_id: Optional[int] = Field(
         None,
         description="分镜页面默认视频模型配置 ID",
@@ -86,6 +86,7 @@ class NovelCreate(NovelFullProperties):
         "script",
         description="通用项目创建入口只创建剧本工作流；重制项目使用专用接口",
     )
+    video_generation_defaults: VideoDefaults | None = None
     source_kind: Literal["novel", "screenplay"] = Field("novel", description="导入内容类型")
     # OSS 直传后由服务端经内网读取并解析正文，避免书稿正文经浏览器中转。
     # 提供 source_key 时无需再传 content（服务端解析后覆盖）。
@@ -100,6 +101,7 @@ class NovelUpdate(NovelCreate):
 
 class NovelPatch(NovelFullProperties):
     """局部更新：全字段可选"""
+    video_generation_defaults: VideoDefaults | None = None
     pass
 
 

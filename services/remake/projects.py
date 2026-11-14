@@ -32,6 +32,14 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum, WorkflowStatus
 logger = logging.getLogger(__name__)
 
 
+async def available_analysis_models(team_id):
+    from services.model_resolution import resolve_scope_configs
+    return await resolve_scope_configs(
+        AiTaskTypeEnum.remake_decomposition.value, team_id=team_id,
+        capability_filter=lambda model: model.supports_json_output or model.supports_tool_calls,
+    )
+
+
 class RemakeProjectService:
     """幂等创建项目、章节、不可变来源和拆解任务的事务编排器。"""
 
@@ -53,6 +61,8 @@ class RemakeProjectService:
     @staticmethod
     def _payload_hash(payload: RemakeProjectCreate) -> str:
         normalized = payload.model_dump(mode="json", exclude={"idempotency_key"})
+        if payload.model_config_id is None:
+            normalized.pop("model_config_id", None)  # Preserve hashes for existing creation requests.
         encoded = json.dumps(
             normalized,
             ensure_ascii=False,
@@ -126,6 +136,10 @@ class RemakeProjectService:
             detail = getattr(error, "detail", localized_message('项目配置无效'))
             raise RemakeError(422, "REMAKE_PROJECT_CONFIG_INVALID", str(detail)) from error
 
+        if payload.model_config_id is not None:
+            models = await available_analysis_models(team_id)
+            if not any(model.id == payload.model_config_id for model in models):
+                raise RemakeError(422, "REMAKE_MODEL_UNAVAILABLE", localized_message("请选择当前团队可用的视频拆解模型"))
         await self.balance_checker(team_id, user_id)
         prepared, warnings = await self._prepare_sources(
             payload,
@@ -212,6 +226,7 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
+                            **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
                             "remake_source_id": source.id,
@@ -405,8 +420,7 @@ class RemakeProjectService:
                     id=source.analysis_task_id
                 ).using_db(connection)
             if (
-                source.media_status != "failed"
-                or previous is None
+                previous is None
                 or previous.status != TaskStatusEnum.failed.value
             ):
                 raise RemakeError(
@@ -418,19 +432,26 @@ class RemakeProjectService:
             from services.creation_agent.skill_execution import current_execution
             parent = current_execution.get()
             origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
+            from services.remake.checkpoints import partial_retry, resume_position
+            stage, progress, _, total = await resume_position(previous, source)
+            held, retryable = await partial_retry(previous, total)
+            if previous_params.get('held_shots') and not retryable:
+                raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '剩余片段正在等待结果核对')
             if previous_params.get('workflow_version'):
                 from models.agent_operation import AgentOperation
-                if await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True).exists():
+                unresolved = await AgentOperation.filter(task_id=previous.id, state__in=['running', 'uncertain'], external=True)
+                from services.remake.receipt_check import rejected_inline_upload
+                if unresolved and not (held and retryable) and not await rejected_inline_upload(previous, unresolved):
                     raise RemakeError(409, 'REMAKE_SUBMISSION_UNCERTAIN', '请先核对未完成的外部请求')
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
             task = await AiTask.create(
                 using_db=connection,
                 task_type=AiTaskTypeEnum.remake_decomposition.value,
                 status=TaskStatusEnum.queued.value,
-                stage="queued",
-                progress=0,
+                stage=stage,
+                progress=progress,
                 request_params={
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,
@@ -439,6 +460,7 @@ class RemakeProjectService:
                     "attempt": attempt,
                     "prompt_language": previous_params.get("prompt_language", "zh"),
                     "retry_of_task_id": str(previous.id),
+                    **({"held_shots": held} if held else {}),
                     **origin,
                 },
             )

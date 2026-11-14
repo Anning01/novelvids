@@ -2,6 +2,7 @@ import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
+import { agentApi } from '@/features/creation-agent/api'
 import ImageModelSelect from '@/components/ImageModelSelect.vue'
 import AppButton from '@/components/AppButton.vue'
 import { AssetTypeEnum, TaskStatusEnum, type Novel } from '@/types'
@@ -60,9 +61,14 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()
+  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({code: 0, message: '', data: {
+    enabled: true, can_write: true, max_targets: 32, models: [
+      { id: 11, name: '豆包', model: 'doubao' }, { id: 12, name: 'DeepSeek', model: 'deepseek' },
+    ],
+  }})
   vi.mocked(api.imageGenerationModels).mockResolvedValue({code: 0, message: '', data: []})
   vi.mocked(api.remakeCapabilities).mockResolvedValue({code: 0, message: '', data: {
-    media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
+    analysis_models: [], media: {extensions: [], max_bytes: 0, max_duration_seconds: 0}, source_modes: {single_upload: true, folder_upload: true, history: true},
     aspect_ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '1080P'],
     styles: [{key: 'auto', label: 'AI 识别风格'}, {key: 'xianxia-3d', label: '3D仙侠'}],
   }})
@@ -221,8 +227,14 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   } })
   await flushPromises()
   expect(wrapper.text()).toContain('外部请求结果待核对')
-  await wrapper.findAll('button').find(button => button.text() === '重新分析')!.trigger('click')
-  expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9)
+  const analyze = wrapper.findAll('button').find(button => button.text() === '重新分析')!
+  expect(analyze.attributes('disabled')).toBeDefined()
+  await wrapper.get('button[aria-label="剧情分析模型"]').trigger('click')
+  const option = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(item => item.textContent?.trim() === 'DeepSeek')!
+  option.click()
+  await flushPromises()
+  await analyze.trigger('click')
+  expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9, undefined, 12)
   expect(wrapper.get('.secondary-action').attributes('disabled')).toBeDefined()
   admit({ code: 0, message: '', data: { id: 'new-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '' } })
   await flushPromises()
@@ -359,9 +371,15 @@ it('opens the original and generates only when the user clicks, preserving both 
   expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('原文')
   expect(api.analyzeNovel).not.toHaveBeenCalled()
   expect(api.generateScreenplay).not.toHaveBeenCalled()
-  await wrapper.get('.episode-doc-tools .generate-screenplay').trigger('click')
+  expect(wrapper.find('.analysis-hero-actions [aria-label="剧情分析模型"]').exists()).toBe(false)
+  const adapt = wrapper.get('.episode-adaptation-controls .generate-screenplay')
+  expect(adapt.attributes('disabled')).toBeDefined()
+  await wrapper.get('.episode-adaptation-controls button[aria-label="剧情分析模型"]').trigger('click')
+  document.querySelector<HTMLElement>('[role="listbox"] [title="DeepSeek"]')!.click()
   await flushPromises()
-  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id)
+  await adapt.trigger('click')
+  await flushPromises()
+  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id, undefined, 12)
   expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('导演剧本')
   expect(wrapper.get('.scene-heading').text()).toBe('1-1　徐家村泥路　外　黄昏')
   await wrapper.get('.episode-doc-tabs button').trigger('click')
@@ -397,7 +415,7 @@ it('saves pacing for the selected episode and retains the draft on a save failur
     await dialog.get('form').trigger('submit')
     await flushPromises()
     expect(api.updateChapter).toHaveBeenLastCalledWith(chapter.id, { episode_pacing: pacing })
-    expect(trigger.text()).toContain('快节奏 · 最多 95 秒')
+    expect(trigger.text()).toContain('快节奏 · 约 95 秒')
     expect(api.generateScreenplay).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
@@ -504,6 +522,9 @@ it('offers regeneration on the original tab and keeps the existing screenplay wh
     await wrapper.get('.episode-doc-tabs button').trigger('click')
     const button = wrapper.get('.episode-doc-tools .generate-screenplay')
     expect(button.text()).toBe('重新生成本集剧本')
+    await wrapper.get('.episode-adaptation-controls button[aria-label="剧情分析模型"]').trigger('click')
+    document.querySelector<HTMLElement>('[role="listbox"] [title="DeepSeek"]')!.click()
+    await flushPromises()
     await button.trigger('click')
     expect(appConfirmState.open).toBe(true)
     resolveAppConfirm(false)

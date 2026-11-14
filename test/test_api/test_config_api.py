@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from models.config import AiModelConfig
+from services.image_generation.capabilities import capabilities_for as image_capabilities_for
 from services.video.capabilities import capabilities_for
 from utils.enums import AiTaskTypeEnum
 
@@ -160,6 +161,7 @@ async def test_api_lists_only_active_supported_image_models_with_capabilities(cl
         "concurrency": 3,
         "pricing": None,
         "capabilities": {
+            "sizes": {key: list(sizes) for key, sizes in image_capabilities_for("seedream_5_pro").sizes.items()},
             "clarities": ["1K", "1.5K", "2K"],
             "aspect_ratios": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"],
             "output_formats": ["png", "jpeg"],

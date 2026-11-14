@@ -546,7 +546,7 @@ def format_storyboard_prompt(
     layout = []
     if blocking and blocking.layout:
         layout.extend(f"C{i} · {camera.framing} · {camera.beat}".rstrip(" ·") for i, camera in enumerate(blocking.cameras, 1))
-    elif blocking and (getattr(shot, "duration_split_part", None) is not None or len(segments) > 1):
+    elif blocking:
         layout.append(f"{prompt_label('空间定位图（左上 0,0；右下 100,100）', language)} · {blocking.orientation}")
         for asset in blocking.assets:
             end = f" → ({asset.end.x},{asset.end.y})" if asset.end else ""
@@ -598,3 +598,14 @@ def format_storyboard_prompt(
     for placeholder, voice in protected_voices:
         prompt = prompt.replace(placeholder, voice)
     return prompt
+
+
+def scene_continuity_instruction(language: str) -> str:
+    if language == "en":
+        return ("For this request, the numbered screenplay scene is the continuity group. Establish positions "
+                "in words in its first segment and leave blocking_map empty. For each subsequent segment, "
+                "describe the preceding segment's final positions as the starting positions. Supply its own "
+                "blocking diagram or leave the diagram to the separate placement step. Restart at each scene heading.")
+    return ("本次按导演稿场号接戏。每个场号的第一段用文字建立位置，blocking_map 留空；从第二段起，"
+            "以上一段结束时的人物位置、朝向、动作和道具归属为本段起点。续段定位图可在独立的空间调度步骤补全。"
+            "换场号后从第一段重新开始。")

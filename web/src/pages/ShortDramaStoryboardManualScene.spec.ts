@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
+import { agentApi } from '@/features/creation-agent/api'
 import { api } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -59,6 +60,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     sessionStorage.clear()
+    vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data: {models: [{id: 33, name: 'Storyboard text', model: 'c'}]}} as never)
     vi.mocked(api.novelMeta).mockResolvedValue({
       code: 0, message: 'ok',
       data: { id: 9, name: '新项目', author: '人工创建', description: '人工模式 · 9:16 · 720p · 写实通用', total_chapters: 0, content_length: 0, created_at: '', updated_at: '' },
@@ -117,11 +119,55 @@ describe('人工模式无章节时创建第一个分镜', () => {
     vi.mocked(api.task).mockResolvedValue({ data: { id: 'existing-task', status: 4, error_message: '分镜生成失败' } } as never)
     const wrapper = await mountAgentWithTask()
     vi.mocked(api.novelAnalysis).mockResolvedValue({ data: { status: 4, error_message: '项目分析失败' } } as never)
+    await wrapper.get('[aria-label="选择分镜模型"]').trigger('click')
+    document.querySelector<HTMLElement>('[role="option"] [title="Storyboard text"]')!.click()
+    await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === '重试')!.trigger('click')
     await flushPromises()
     expect(api.generateScenes).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('项目分析失败')
     expect(wrapper.findAll('button').some(button => button.text() === '返回剧本')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('sends the chosen text model and blocking-map switch (%s)', async blocking => {
+    vi.mocked(api.novelMeta).mockResolvedValue({data:{id:9,name:'测试',author:'Agent 创建'}} as never)
+    vi.mocked(api.chapters).mockResolvedValue({data:{items:[chapter],pagination:{page:1,pages:1}}} as never)
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({data:{chapter,assets:[],scenes:[],videos:{}}} as never)
+    vi.mocked(api.generateScenes).mockRejectedValue(new Error('test submission'))
+    const wrapper = await mountPage()
+    await flushPromises()
+    await wrapper.get('[aria-label="选择分镜模型"]').trigger('click')
+    document.querySelector<HTMLElement>('[role="option"] [title="Storyboard text"]')!.click()
+    await flushPromises()
+    const toggle = wrapper.findAll('label').find(label => label.text() === '生成空间定位图')!.get('input')
+    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    await toggle.setValue(blocking)
+    await wrapper.findAll('button').find(button => button.text() === '生成全部分镜')!.trigger('click')
+    await flushPromises()
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, undefined, blocking)
+    wrapper.unmount()
+  })
+
+  it('inherits the project sheet switch and submits both selected models in one click', async () => {
+    vi.mocked(api.novelMeta).mockResolvedValue({data:{id:9,name:'测试',author:'Agent 创建',storyboard_enabled:true}} as never)
+    vi.mocked(api.chapters).mockResolvedValue({data:{items:[chapter],pagination:{page:1,pages:1}}} as never)
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({data:{chapter,assets:[],scenes:[],videos:{}}} as never)
+    vi.mocked(api.imageGenerationModels).mockResolvedValue({data:[{config_id:42,name:'Sheet image'}]} as never)
+    vi.mocked(api.generateScenes).mockRejectedValue(new Error('test submission'))
+    const wrapper = await mountPage()
+    await flushPromises()
+    expect((wrapper.findAll('label').find(label => label.text() === '同时生成故事版')!.get('input').element as HTMLInputElement).checked).toBe(true)
+    const button = wrapper.findAll('button').find(b => b.text() === '生成全部分镜')!
+    for (const [label, model] of [['选择分镜模型','Storyboard text'], ['线稿生图模型','Sheet image']]) {
+      expect(button.attributes('disabled')).toBeDefined()
+      await wrapper.get(`button[aria-label="${label}"]`).trigger('click')
+      document.querySelector<HTMLElement>(`[role="option"] [title="${model}"]`)!.click()
+      await flushPromises()
+    }
+    await button.trigger('click')
+    await flushPromises()
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, 42, false)
     wrapper.unmount()
   })
 

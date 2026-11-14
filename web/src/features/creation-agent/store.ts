@@ -14,6 +14,15 @@ const activeStatuses = new Set([1, 2, 6])
 export const isAgentRunning = (status: number) => activeStatuses.has(status)
 
 export const useCreationAgentStore = defineStore('creation-agent', () => {
+  const snapshotRequests = new Map<string, ReturnType<typeof agentApi.snapshot>>()
+  function snapshot(taskId: string) {
+    const key = `${epoch}:${taskId}`
+    const pending = snapshotRequests.get(key)
+    if (pending) return pending
+    const request = agentApi.snapshot(taskId).finally(() => snapshotRequests.delete(key))
+    snapshotRequests.set(key, request)
+    return request
+  }
   const projectId = ref(0)
   const conversations = ref<AgentConversation[]>([])
   const deletedConversations = ref<AgentConversation[]>([])
@@ -127,7 +136,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
           statusText.value = creationAgentToolProgressLabel(event.toolCallName)
         },
         async onToolCallResultEvent() {
-          const result = await agentApi.snapshot(taskId)
+          const result = await snapshot(taskId)
           if (revision === epoch && subscription === handle) applySnapshot(result.data)
         },
       })
@@ -138,7 +147,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         streamConnected.value = false
         subscription = null
         try {
-          const response = await agentApi.snapshot(taskId)
+          const response = await snapshot(taskId)
           if (revision === epoch) applySnapshot(response.data)
         } catch { if (revision === epoch) error.value = tr('连接中断，请重新连接核对实际结果') }
       }
@@ -170,7 +179,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       const latestTaskId = conversations.value.find(item => item.id === id)?.active_task_id
         ?? [...messages.value].reverse().find(message => message.role === 'assistant')?.task_id
       if (latestTaskId) {
-        const response = await agentApi.snapshot(latestTaskId)
+        const response = await snapshot(latestTaskId)
         if (revision !== epoch) return
         applySnapshot(response.data)
         if (isAgentRunning(response.data.status)) void follow(latestTaskId)
@@ -332,7 +341,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
       && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))]
     await Promise.allSettled(runs.map(async taskId => {
-      const response = await agentApi.snapshot(taskId)
+      const response = await snapshot(taskId)
       if (revision !== epoch) return
       if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }
       const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
@@ -350,6 +359,22 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     applySnapshot(response.data)
   }
 
+  async function resume() {
+    if (!currentRun.value || submitting.value || busy.value) return
+    const revision = epoch
+    const taskId = currentRun.value.task_id
+    submitting.value = true
+    try {
+      const response = await agentApi.resume(taskId)
+      if (revision !== epoch) return
+      disconnect()
+      applySnapshot(response.data)
+      if (isAgentRunning(response.data.status)) void follow(taskId)
+    } catch (caught) {
+      if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('续跑失败，请稍后核对')
+    } finally { submitting.value = false }
+  }
+
   async function undo(changeId: number) {
     const response = await agentApi.undo(changeId)
     reportChanges([response.data])
@@ -357,6 +382,6 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
     streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
-    open, history, send, stop, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
+    open, history, send, stop, resume, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
     deleteConversation, restoreConversation, loadDeletedConversations, refreshConversations }
 })

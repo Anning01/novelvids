@@ -61,7 +61,9 @@ const menuStyle = computed(() => {
     top: `${menuPosition.value.top}px`,
     left: `${menuPosition.value.left}px`,
   }
-  if (props.menuWidth && props.menuWidth !== 'auto') {
+  if (props.menuWidth === 'trigger') {
+    style.width = `${menuPosition.value.width}px`
+  } else if (props.menuWidth && props.menuWidth !== 'auto') {
     style.width = typeof props.menuWidth === 'number' ? `${props.menuWidth}px` : props.menuWidth
   } else {
     style.width = 'max-content'

@@ -24,6 +24,7 @@ vi.mock('@/api', () => ({
 }))
 
 const capabilities = {
+  analysis_models: [{id: 11, name: '视频分析 A'}, {id: 22, name: '视频分析 B'}],
   media: { extensions: ['mp4', 'mov'], max_bytes: 500 * 1024 * 1024, max_duration_seconds: 1200 },
   aspect_ratios: ['9:16', '16:9'],
   resolutions: ['720p', '1080p'],
@@ -78,7 +79,7 @@ describe('RemakeWorkshopPage', () => {
 
     expect(wrapper.findComponent(CreationEntryShell).exists()).toBe(true)
     expect(wrapper.findComponent(CreationConfigBar).exists()).toBe(true)
-    expect(wrapper.findAllComponents(AppSelect)).toHaveLength(3)
+    expect(wrapper.findAllComponents(AppSelect)).toHaveLength(4)
     expect(wrapper.get('.creation-entry-heading').text()).toContain('重制精品短剧')
     expect(api.remakeCapabilities).toHaveBeenCalledOnce()
     expect(wrapper.get('[data-source-mode="single_upload"]').attributes('aria-pressed')).toBe('true')
@@ -86,6 +87,27 @@ describe('RemakeWorkshopPage', () => {
     expect(wrapper.get('[data-source-mode="history"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('单视频不超过 500 MB，时长不超过 20 分钟')
     expect(wrapper.text()).toContain('AI 识别风格')
+  })
+
+  it('accepts one dropped video and validates invalid and multiple files before upload', async () => {
+    const wrapper = mount(RemakeWorkshopPage)
+    await flushPromises()
+    const zone = wrapper.get('.upload-zone')
+    const video = new File(['video'], 'demo.mov', {type:'video/quicktime'})
+    const transfer = {types:['Files'], files:[video], dropEffect:'none'}
+    await zone.trigger('dragenter', {dataTransfer:transfer})
+    expect(zone.text()).toContain('松开即可上传视频')
+    expect(transfer.dropEffect).toBe('copy')
+    await zone.trigger('drop', {dataTransfer:{files:[video,video]}})
+    expect(wrapper.get('[role="alert"]').text()).toContain('一次只能拖入一个视频')
+    await zone.trigger('drop', {dataTransfer:{files:[new File(['text'], 'bad.txt')]}})
+    expect(wrapper.get('[role="alert"]').text()).toContain('仅支持 MP4 或 MOV')
+    expect(api.uploadRemakeVideo).not.toHaveBeenCalled()
+    await zone.trigger('drop', {dataTransfer:transfer})
+    await flushPromises()
+    expect(api.uploadRemakeVideo).toHaveBeenCalledExactlyOnceWith(video)
+    expect(wrapper.find('.uploaded-file').exists()).toBe(true)
+    expect(api.createRemakeProject).not.toHaveBeenCalled()
   })
 
   it('rejects an unsupported local file before making a request', async () => {
@@ -112,6 +134,10 @@ describe('RemakeWorkshopPage', () => {
 
     await input.trigger('change')
     await flushPromises()
+    await wrapper.get('[aria-label="视频拆解模型"]').trigger('click')
+    await flushPromises()
+    // Select through the shared component so the submitted id remains numeric.
+    wrapper.findAllComponents({name: 'AppSelect'}).find(item => item.props('ariaLabel') === '视频拆解模型')!.vm.$emit('update:modelValue', '22')
     await wrapper.get('input[name="projectName"]').setValue('新重制项目')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -119,6 +145,7 @@ describe('RemakeWorkshopPage', () => {
     expect(api.uploadRemakeVideo).toHaveBeenCalledWith(file)
     expect(api.createRemakeProject).toHaveBeenCalledWith(expect.objectContaining({
       name: '新重制项目',
+      model_config_id: 22,
       source_mode: 'single_upload',
       aspect_ratio: '9:16',
       resolution: '720p',

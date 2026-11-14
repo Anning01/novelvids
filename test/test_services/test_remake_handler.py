@@ -304,3 +304,28 @@ async def test_handler_checks_agent_model_capabilities_before_processing_media(t
         assert not pipeline.calls
     await source.refresh_from_db()
     assert source.media_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_pending_results_preserve_review_reason_and_source_status(tmp_path):
+    from unittest.mock import AsyncMock
+    from services.remake.pipeline import RemakeAwaitingResults
+    from services.creation_agent.operation_receipts import SubmissionUncertain
+    from services.ai_task_executor import ai_task_executor
+    novel, chapter, source, task = await _records(tmp_path)
+    persistence = _Persistence()
+    handler = RemakeDecompositionTaskHandler(
+        model_resolver=AsyncMock(return_value=SimpleNamespace(id=12, model="vision-model")),
+        materializer=_Materializer(tmp_path / "source.mp4"),
+        pipeline=_Pipeline(error=RemakeAwaitingResults("剩余片段正在等待结果核对")),
+        persistence=persistence,
+    )
+    with pytest.raises(SubmissionUncertain) as raised:
+        await handler.execute({"ai_task_id":str(task.id),"novel_id":novel.id,
+            "chapter_id":chapter.id,"remake_source_id":source.id,"team_id":None,"held_shots":[2]})
+    await source.refresh_from_db()
+    assert source.media_status == "failed" and not persistence.calls
+    await ai_task_executor._fail(task, str(raised.value), error=raised.value, record_usage=False)
+    await task.refresh_from_db()
+    assert task.stage == "needs_review"
+    assert "等待结果核对" in task.error_message

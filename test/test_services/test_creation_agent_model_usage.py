@@ -44,7 +44,7 @@ async def test_configured_model_preserves_reasoning_usage_totals(monkeypatch, tm
 
     monkeypatch.setattr(handler, 'AsyncOpenAI', lambda **kwargs: AsyncOpenAI(
         **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
-    model = handler.configured_model(SimpleNamespace(base_url='https://example.invalid', api_key='synthetic',
+    model = handler.configured_model(SimpleNamespace(api_protocol='openai_compatible', base_url='https://example.invalid', api_key='synthetic',
                                                     model='reasoning-model', thinking='disabled'), AgentConfiguration())
     ledger = EvaluationSpendLedger(tmp_path / 'spend.jsonl', {
         'type': 'text', 'currency': 'CNY', 'input_price_per_1m': 9, 'output_price_per_1m': 27})
@@ -86,7 +86,7 @@ async def test_structured_agent_uses_auto_tool_choice_compatible_with_reasoning_
             }]},'finish_reason':'tool_calls'}]})
 
     monkeypatch.setattr(handler,'AsyncOpenAI',lambda **kwargs: AsyncOpenAI(**kwargs,http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
-    model=handler.configured_model(SimpleNamespace(base_url='https://example.invalid',api_key='synthetic',model='test',thinking=thinking),AgentConfiguration())
+    model=handler.configured_model(SimpleNamespace(api_protocol='openai_compatible', base_url='https://example.invalid',api_key='synthetic',model='test',thinking=thinking),AgentConfiguration())
     try:
         await model.request([ModelRequest(parts=[UserPromptPart('Read the chapter')])],{'max_tokens':100},
             ModelRequestParameters(output_mode='tool',output_tools=[ToolDefinition(name='final_result',kind='output',parameters_json_schema={

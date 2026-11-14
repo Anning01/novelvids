@@ -2,8 +2,9 @@
 
 from typing import Literal
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from schemas.scene import SoraScenePromptConfig
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic.json_schema import SkipJsonSchema
+from schemas.scene import BlockingMap, SceneLayout, SoraScenePromptConfig
 from schemas.video import VideoGenerationOptions
 from schemas.video_export import ExportEnhanceIn
 
@@ -80,10 +81,51 @@ class RemakeReference(BaseModel):
     asset_type: Literal["character", "scene", "object"]
 
 
+REMAKE_TIMELINE_ROUNDING_SECONDS = .005
+
+
+class RemakeLayout(SceneLayout):
+    # In the model-facing schema the direction is stated once, on the shot.
+    orientation: SkipJsonSchema[str] = ""
+
+
+class RemakeBlockingMap(BlockingMap):
+    layout: RemakeLayout | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def inherit_shot_orientation(cls, value):
+        if isinstance(value, dict) and isinstance(layout := value.get("layout"), dict):
+            return {**value, "layout": {**layout, "orientation": value.get("orientation")}}
+        return value
+
+
 class RemakeShot(StructuredSkillShot):
+    blocking_map: RemakeBlockingMap | None = None
     model_config = ConfigDict(extra="forbid")
     asset_refs: list[RemakeReference] = Field(max_length=30)
-    confidence: float = Field(ge=0, le=1)
+    confidence: float | None = Field(None, ge=0, le=1)
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value):
+        from math import isfinite
+        seconds = float(value.strip().lower().removesuffix("s"))
+        if not isfinite(seconds) or seconds <= 0:
+            raise ValueError("duration must be a positive number")
+        return f"{seconds:g}s"
+
+    @model_validator(mode="after")
+    def validate_segment_duration(self):
+        return self
+
+    @field_validator("blocking_map", mode="wrap")
+    @classmethod
+    def keep_drawable_map(cls, value, handler):
+        try:
+            return handler(value)
+        except ValidationError:
+            return None
 
 
 class RequestedProduction(BaseModel):

@@ -107,9 +107,10 @@ async def test_regenerate_requires_the_confirmed_script_and_protects_later_edits
 
 
 @pytest.mark.asyncio
-async def test_smart_pacing_requires_a_budget_without_retrying(configured_creation_agent, monkeypatch):
+@pytest.mark.parametrize("pacing", [None, {"preset": "smart", "max_seconds": None}])
+async def test_smart_pacing_saves_script_without_duration_header(configured_creation_agent, monkeypatch, pacing):
     novel = await Novel.create(name="自动估时")
-    chapter = await Chapter.create(novel=novel, number=1, name="救人", content="小说", screenplay="原导演稿")
+    chapter = await Chapter.create(novel=novel, number=1, name="救人", content="小说", screenplay="原导演稿", episode_pacing=pacing)
     generate = AsyncMock(return_value=EpisodeScript(screenplay="没有时长的新导演稿"))
     monkeypatch.setattr(SkillExecution, "generate", generate)
     task = await submit_screenplay(chapter.id, AuthContext(), "原导演稿")
@@ -117,9 +118,9 @@ async def test_smart_pacing_requires_a_budget_without_retrying(configured_creati
     await task.refresh_from_db()
     await chapter.refresh_from_db()
     generate.assert_awaited_once()
-    assert generate.await_args.args[1]["episode_pacing"] == {"preset": "smart"}
-    assert task.status == 4 and "missing the episode duration limit" in task.error_message
-    assert chapter.screenplay == "原导演稿"
+    assert generate.await_args.args[1]["episode_pacing"] == (pacing or {"preset": "smart"})
+    assert task.status == 3, task.error_message
+    assert chapter.screenplay == "没有时长的新导演稿"
 
 
 @pytest.mark.asyncio
@@ -151,4 +152,23 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
     assert task.status == 4
     assert len(requests) == 1 and not requests[0].get("tools")
     messages = str(requests[0]["messages"])
-    assert "episode_pacing" in messages and "Episode duration limit:" in messages
+    assert "episode_pacing" in messages and "本集按剧情自然展开" in messages
+    assert "Target episode duration:" in messages
+    assert "不是硬性上限" in messages
+
+
+@pytest.mark.asyncio
+async def test_adaptation_runs_with_selected_model_and_rejects_switch_while_running(configured_creation_agent):
+    from fastapi import HTTPException
+    from models.config import AiModelConfig
+
+    novel = await Novel.create(name="选择改编模型")
+    chapter = await Chapter.create(novel=novel, number=1, name="本集", content="原文")
+    other = await AiModelConfig.create(name="另一模型", model="other", task_type=7,
+        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, is_active=True)
+    selected = configured_creation_agent.id
+    task = await submit_screenplay(chapter.id, AuthContext(), assistant_model_config_id=selected)
+    assert task.request_params["assistant_model_config_id"] == selected
+    with pytest.raises(HTTPException) as conflict:
+        await submit_screenplay(chapter.id, AuthContext(), assistant_model_config_id=other.id)
+    assert conflict.value.status_code == 409

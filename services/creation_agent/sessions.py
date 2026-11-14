@@ -123,8 +123,6 @@ class AgentSessions:
             request = recovery[2].model_copy(update={'request_id': request.request_id,
                 'resume_from_task_id': request.resume_from_task_id})
         configuration = await agent_configuration()
-        if not configuration.enabled:
-            raise HTTPException(403, localized_message('创作助手尚未启用'))
         if len(request.targets) > configuration.max_targets:
             raise HTTPException(422, localized_message('选中目标超过本次运行上限'))
         await self.validate_scope(conversation.novel_id, request)

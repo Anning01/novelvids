@@ -36,7 +36,7 @@ import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@
 import { api, mediaUrl, persistedMediaRef } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { notice } from '@/shared/notice'
-import { estimateImageCost } from '@/shared/modelPricing'
+import { estimateAssetImageCost } from '@/shared/modelPricing'
 import { resolveCharacterFormMetadata } from '@/shared/characterMetadata'
 import { imageDerivativeUrl } from '@/shared/mediaDerivatives'
 import { fallbackImage } from '@/shared/mediaFallback'
@@ -292,10 +292,8 @@ const historyStatus = (status: TaskStatusEnum) => ({
 
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
-const estimatedCost = computed(() => estimateImageCost(
-  selectedModel.value?.pricing,
-  imageParameters.value.clarity,
-  imageParameters.value.generationCount,
+const estimatedCost = computed(() => estimateAssetImageCost(
+  selectedModel.value, imageParameters.value, referenceImagePreviews.value.length,
 ))
 const filteredLibraryItems = computed(() => availableLibraryItems.value.filter(item => {
   if (libraryScope.value !== 'all' && item.source !== libraryScope.value) return false
@@ -709,7 +707,7 @@ async function generateAndTrack(assetId: number, variantId?: number, references:
 
   try {
     const submitted = (await requestAssetGeneration(assetId, variantId, references)).data
-    emit('generation-started', { asset_id: assetId, task_id: submitted.id, status: submitted.status })
+    emit('generation-started', { asset_id: assetId, variant_id: variantId, task_id: submitted.id, status: submitted.status })
     if (controller.signal.aborted) return
     generationTask.value = submitted
     saving.value = false

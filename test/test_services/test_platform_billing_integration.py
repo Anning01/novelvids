@@ -43,7 +43,7 @@ async def test_platform_quota_rejection_is_not_mistaken_for_a_local_balance_fail
     config = await AiModelConfig.create(name="额度不足的平台", task_type=7, model="nv-1",
         api_protocol="novelvids", base_url="https://platform.example/v1", api_key="nv_test")
     original = httpx.AsyncClient
-    monkeypatch.setattr("services.billing.platform.AsyncClient", lambda **kwargs: original(**kwargs,
+    monkeypatch.setattr("services.billing.platform.AsyncClient", lambda **kwargs: original(**{k:v for k,v in kwargs.items() if k != "transport"},
         transport=httpx.MockTransport(lambda _: httpx.Response(402, json={"error": {"code": "insufficient_quota"}}))))
     call = {}
     token = active_model_call.set((SimpleNamespace(task_id=task.id, id=1), call))
@@ -124,13 +124,13 @@ async def test_media_entrypoints_keep_platform_cost_separate_and_reuse_the_call_
             assert request.headers.get("Idempotency-Key")
             assert "x-team-id" not in request.headers
             result = {"data": [{"url": "https://cdn.example/image.png"}]} if kind == "image" else {"id": "video-job", "status": "queued"}
-            return httpx.Response(200, json=result, headers={"X-Request-Id": str(request_id)})
+            return httpx.Response(200, json=result, headers={"X-Cat-Request-Id": str(request_id), "X-Novelvids-Request-Id": str(uuid4()), "X-Request-Id":"supplier-trace"})
         return httpx.Response(200, json={"id": str(request_id), "model": "nv-101", "status": "completed",
             "usage": {"image_count": 1, "clarity": "1K"} if kind == "image" else {"seconds": 6, "resolution": "720p"},
             "settlement": {"status": "settled", "amount": "0.20", "currency": "CNY"}, "pricing": {}})
 
     original = httpx.AsyncClient
-    factory = lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(respond))
+    factory = lambda **kwargs: original(**{k:v for k,v in kwargs.items() if k != "transport"}, transport=httpx.MockTransport(respond))
     monkeypatch.setattr("services.image_generation.gateway.httpx.AsyncClient", factory)
     monkeypatch.setattr("services.billing.platform.AsyncClient", factory)
     video = None
@@ -233,13 +233,14 @@ async def test_text_call_reconciles_actual_cost_and_frozen_local_charge_once(mon
 
     async def platform_response(request):
         assert "x-team-id" not in request.headers
+        if request.url.path.endswith("/chat/completions") and json.loads(request.content).get("stream"):
+            assert json.loads(request.content)["stream_options"]["include_usage"] is True
         response = await httpx.ASGITransport(app=app).handle_async_request(request)
         await response.aread()
         return httpx.Response(response.status_code, headers=response.headers, content=response.content)
 
     def client_factory(**kwargs):
-        if "transport" not in kwargs:
-            kwargs["transport"] = httpx.MockTransport(platform_response)
+        kwargs["transport"] = httpx.MockTransport(platform_response)
         return original_client(**kwargs)
 
     monkeypatch.setattr("services.billing.platform.AsyncClient", client_factory)
@@ -258,12 +259,12 @@ async def test_text_call_reconciles_actual_cost_and_frozen_local_charge_once(mon
     ledger = await ModelUsageRecord.get(id=row.usage_record_id)
     assert ledger.cost == 0 and ledger.platform_cost is None and ledger.settlement_status == "pending"
     assert row.local_pricing == local_model.pricing
-    assert row.platform_request_id is not None
+    assert row.platform_request_id is None  # Legacy platform only sent an unlabelled trace.
     # Each side uses its own price at the time the call was made.
     await AiModelConfig.filter(id=local_model.id).update(pricing={"type": "text", "input_price_per_1m": 100})
     await AiModelConfig.filter(id=cloud_model.id).update(pricing={"type": "text", "input_price_per_1m": 50, "output_price_per_1m": 50})
-    # Lose the received request ID to exercise recovery from the original idempotency key.
-    await StudioCall.filter(id=row.id).update(platform_request_id=None, next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+    # Resolve the legacy unlabelled response from the original idempotency key.
+    await StudioCall.filter(id=row.id).update(next_check_at=datetime.now(timezone.utc) - timedelta(seconds=1))
     await reconcile_platform_calls()
     await row.refresh_from_db()
     await ledger.refresh_from_db()
@@ -321,3 +322,33 @@ asyncio.run(main())
     with sqlite3.connect(db) as connection:
         assert connection.execute("SELECT prompt_language FROM general_configs").fetchone() == ("zh",)
         assert connection.execute("SELECT cost,platform_cost,local_charge,settlement_status FROM model_usage_records").fetchone() == (2.5, None, None, "legacy")
+
+
+@pytest.mark.asyncio
+async def test_pixel_receipt_reviews_incomplete_usage_then_settles_frozen_price_once(monkeypatch):
+    from services.billing.platform import begin_platform_call
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "studio")
+    team = await Team.create(name="像素分档", balance=1)
+    user = await User.create(username="pixel-owner")
+    await TeamMember.create(team=team, user=user, role="creator")
+    tariff = {"type": "image", "billing_unit": "pixel_tier", "prices": {"low": .13, "high_capped": .23},
+              "input_image": {"first_free": 0, "price_per_image": .05}}
+    config = await AiModelConfig.create(name="5.5", task_type=2, model="nv-55", api_protocol="novelvids",
+        api_key="nv_test", base_url="https://platform.example/v1", pricing=tariff, image_model_type="seedream_5_5")
+    task = await AiTask.create(task_type=2, request_params={"team_id": team.id, "user_id": user.id})
+    call = await begin_platform_call(config, task_id=task.id, billing_type="image")
+    call.platform_request_id = uuid4()
+    await call.save(update_fields=["platform_request_id"])
+    await AiModelConfig.filter(id=config.id).update(pricing={**tariff, "discount": 0.5})
+    receipt = PlatformReceiptOut(id=call.platform_request_id, model=config.model, status="completed",
+        usage={"image_count": 1, "input_image_count": 2}, settlement={"status": "settled", "amount": ".2"}, pricing={})
+    await settle_platform_call(call.id, receipt)
+    ledger = await ModelUsageRecord.get(id=call.usage_record_id)
+    assert ledger.settlement_status == "review" and not await BalanceTransaction.filter(usage_record_id=ledger.id).exists()
+    receipt.usage["output_tier_counts"] = {"high_capped": 1}
+    await settle_platform_call(call.id, receipt)
+    await settle_platform_call(call.id, receipt)
+    await ledger.refresh_from_db()
+    assert ledger.platform_cost == Decimal(".2") and ledger.local_charge == Decimal(".33")
+    assert await BalanceTransaction.filter(usage_record_id=ledger.id).count() == 1

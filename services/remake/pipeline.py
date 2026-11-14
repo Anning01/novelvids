@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from utils.messages import localized_message
 
+from contextlib import nullcontext
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -15,6 +16,7 @@ from prompts.remake import ASSET_SCHEMA, render_remake_prompt
 from prompts.skill_pack import SkillSnapshot, snapshot_skills
 from schemas.agent_workflow import RemakeShot
 from services.language import task_language
+from services.remake.checkpoints import completed_outputs, read_scene_manifest, write_scene_manifest
 from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisGateway
 from services.remake.media_prepare import prepare_video_for_model_input, probe_media_duration
 from services.remake.remote_media import RemoteMediaSession, media_session
@@ -29,6 +31,10 @@ from services.storyboard.strategies import storyboard_strategy_factory
 
 
 class RemakePipelineError(RuntimeError):
+    pass
+
+
+class RemakeAwaitingResults(RemakePipelineError):
     pass
 
 
@@ -68,57 +74,69 @@ class RemakeDecompositionPipeline:
         progress: ProgressCallback | None = None,
         storyboard_strategy: str | None = None,
         aspect_ratio: str = '16:9',
+        scene_cache: Path | None = None,
     ) -> RemakePipelineResult:
-        async with media_session() as remote:
+        cached = read_scene_manifest(scene_cache) if scene_cache else None
+        async with (nullcontext(None) if cached else media_session()) as remote:
             return await self._run(source_path=source_path, model_config=model_config, work_dir=work_dir,
                                    progress=progress, storyboard_strategy=storyboard_strategy,
-                                   aspect_ratio=aspect_ratio, remote=remote)
+                                   aspect_ratio=aspect_ratio, remote=remote, scene_cache=scene_cache, cached=cached)
 
     async def _run(
         self, *, source_path: Path, model_config: Any, work_dir: Path,
         progress: ProgressCallback | None, storyboard_strategy: str | None,
-        aspect_ratio: str, remote: RemoteMediaSession | None,
+        aspect_ratio: str, remote: RemoteMediaSession | None, scene_cache: Path | None, cached,
     ) -> RemakePipelineResult:
         pipeline_started_at = self.clock()
         if not source_path.is_file():
             raise RemakePipelineError(localized_message('来源视频不存在'))
         work_dir.mkdir(parents=True, exist_ok=True)
         await _report(progress, 10, "preparing")
-        if remote:
-            model_source_path = await remote.prepare(source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES)
-        else:
-            model_source_path = await asyncio.to_thread(
-                self.prepare_video, source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES,
-            )
-
         gateway = self.gateway_factory(model_config)
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         snapshot = execution.snapshot if execution else SkillSnapshot.model_validate(snapshot_skills())
         language = execution.language if execution else task_language.get() or 'zh'
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
+        saved = await completed_outputs({**execution.params, 'retry_of_task_id': execution.params.get('task_id') or execution.params.get('retry_of_task_id'), 'model_config_id':model_config.id}) if execution else {}
+        raw_assets = saved.get('model:remake:RemakeAssets:1')
+        if cached is None or raw_assets is None:
+            if remote:
+                model_source_path = await remote.prepare(source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES)
+            else:
+                model_source_path = await asyncio.to_thread(
+                    self.prepare_video, source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES,
+                )
+
         await _report(progress, 20, "extracting_assets")
-        raw_assets = await gateway.analyze_one(
-            index=1,
-            path=model_source_path,
-            prompt="" if execution else render_remake_prompt("assets", task_language.get() or "zh"),
-            schema_name="global_key_assets",
-            response_schema=ASSET_SCHEMA,
-            include_segment_metadata=False,
-        )
+        if raw_assets is None:
+            raw_assets = await gateway.analyze_one(
+                index=1,
+                path=model_source_path,
+                prompt="" if execution else render_remake_prompt("assets", task_language.get() or "zh"),
+                schema_name="global_key_assets",
+                response_schema=ASSET_SCHEMA,
+                include_segment_metadata=False,
+            )
         if not execution:
             raw_assets = render_remake_assets(raw_assets, snapshot, language, aspect_ratio)
         assets = normalize_global_assets(raw_assets, language)
 
         await _report(progress, 42, "detecting_scenes")
-        if remote:
-            scene_paths, durations = await remote.split(work_dir / "scenes")
+        directory = scene_cache or work_dir / "scenes"
+        if cached:
+            scene_paths, durations = cached
+        elif remote:
+            scene_paths, durations = await remote.split(directory)
         else:
-            scene_paths = await asyncio.to_thread(self.scene_detector.split, model_source_path, work_dir / "scenes")
+            scene_paths = await asyncio.to_thread(self.scene_detector.split, model_source_path, directory)
             if not scene_paths:
                 raise RemakePipelineError(localized_message('来源视频没有可分析的镜头'))
             # Each probe starts a process; do not multiply native buffers by shot count.
             durations = [await asyncio.to_thread(self.probe_duration, path) for path in scene_paths]
+
+        if scene_cache and not cached:
+            write_scene_manifest(scene_cache, scene_paths, durations)
 
         catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         await _report(progress, 55, "generating_storyboards")
@@ -131,6 +149,9 @@ class RemakeDecompositionPipeline:
                 "generating_storyboards",
             )
 
+        completed = {i: saved[f'model:remake:RemakeShot:{i}'] for i in range(1, len(scene_paths) + 1)
+                     if f'model:remake:RemakeShot:{i}' in saved}
+        held = frozenset(execution.params.get("held_shots", [])) - completed.keys() if execution else set()
         raw_prompts = await gateway.analyze_many(
             scene_paths,
             prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
@@ -139,7 +160,12 @@ class RemakeDecompositionPipeline:
             context_builder=lambda index: {'assets': catalog, 'duration_seconds': durations[index - 1],
                                           'storyboard_strategy': strategy},
             on_completed=report_scene_progress,
+            **({"held_shots": held} if held else {}),
+            **({"completed_results": completed} if completed else {}),
         )
+        if held:
+            await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
+            raise RemakeAwaitingResults("剩余片段正在等待结果核对")
         prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
             strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 
@@ -148,8 +174,8 @@ class RemakeDecompositionPipeline:
         metadata = {
             "pipeline": "global_assets_professional_prompts_v4",
             "segment_count": len(scene_paths),
-            "asset_call_count": 1,
-            "prompt_call_count": len(scene_paths),
+            "asset_call_count": int("model:remake:RemakeAssets:1" not in saved),
+            "prompt_call_count": len(scene_paths) - len(completed),
             "asset_count": sum(
                 len(assets[key]) for key in ("characters", "scenes", "objects")
             ),

@@ -28,6 +28,7 @@ type UploadState = 'empty' | 'uploading' | 'ready' | 'failed'
 type SourceMode = 'single_upload' | 'folder_upload' | 'history'
 
 const router = useRouter()
+const analysisModelId = ref<number | null>(null)
 const capabilities = ref<RemakeCapabilities | null>(null)
 const loadingCapabilities = ref(true)
 const capabilityError = ref('')
@@ -39,6 +40,7 @@ const customStylePrompt = ref('')
 const selectedFile = ref<File | null>(null)
 const stagedUpload = ref<RemakeUpload | null>(null)
 const uploadState = ref<UploadState>('empty')
+const dragDepth = ref(0)
 const errorMessage = ref('')
 const creating = ref(false)
 const projectCommitted = ref(false)
@@ -81,6 +83,7 @@ const sourceReady = computed(() => {
 })
 const canSubmit = computed(() => (
   Boolean(capabilities.value)
+  && analysisModelId.value !== null
   && sourceReady.value
   && Boolean(projectName.value.trim())
   && Boolean(aspectRatio.value)
@@ -139,6 +142,7 @@ async function loadCapabilities() {
   try {
     const response = await api.remakeCapabilities()
     capabilities.value = response.data
+    analysisModelId.value = response.data.analysis_models[0]?.id ?? null
     setDefaults(response.data)
   } catch (error) {
     capabilityError.value = (error as Error).message || tr('重制能力加载失败')
@@ -174,6 +178,7 @@ async function releaseFolderUploads() {
 }
 
 async function uploadFile(file: File) {
+  if (uploadState.value === 'uploading') return
   errorMessage.value = ''
   const validationError = validateFile(file)
   if (validationError) {
@@ -181,10 +186,10 @@ async function uploadFile(file: File) {
     uploadState.value = 'failed'
     return
   }
+  uploadState.value = 'uploading'
   await releaseCurrentUpload()
   selectedFile.value = file
   if (!projectName.value.trim()) projectName.value = file.name.replace(/\.[^.]+$/, '')
-  uploadState.value = 'uploading'
   try {
     stagedUpload.value = await api.uploadRemakeVideo(file)
     uploadState.value = 'ready'
@@ -192,6 +197,25 @@ async function uploadFile(file: File) {
     uploadState.value = 'failed'
     errorMessage.value = (error as Error).message || tr('视频上传失败')
   }
+}
+
+function dragVideo(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  const busy = uploadState.value === 'uploading'
+  event.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+  if (!busy && event.type === 'dragenter') dragDepth.value++
+}
+
+function dropVideo(event: DragEvent) {
+  dragDepth.value = 0
+  const files = event.dataTransfer?.files
+  if (!files?.length || uploadState.value === 'uploading') return
+  if (files.length > 1) {
+    errorMessage.value = tr('单视频模式一次只能拖入一个视频')
+    return
+  }
+  void uploadFile(files[0]!)
 }
 
 function handleFileChange(event: Event) {
@@ -223,6 +247,7 @@ async function loadHistoryProjects() {
 
 async function selectSourceMode(mode: SourceMode) {
   if (!capabilities.value?.source_modes[mode]) return
+  dragDepth.value = 0
   const previous = sourceMode.value
   if (previous === 'folder_upload' && mode !== previous) {
     await releaseFolderUploads()
@@ -331,6 +356,7 @@ async function createProject() {
     const response = await api.createRemakeProject({
       name: projectName.value.trim(),
       source_mode: sourceMode.value,
+      model_config_id: analysisModelId.value ?? undefined,
       aspect_ratio: aspectRatio.value,
       resolution: resolution.value,
       style_key: ['auto', 'custom'].includes(styleKey.value) ? null : styleKey.value,
@@ -370,9 +396,11 @@ onBeforeUnmount(() => {
 
     <form v-else-if="capabilities" class="remake-form" @submit.prevent="createProject">
       <Transition name="source-panel" mode="out-in">
-        <label v-if="sourceMode === 'single_upload' && uploadState !== 'ready'" key="single-upload" class="source-stage upload-zone" :class="{ 'is-uploading': uploadState === 'uploading' }">
+        <label v-if="sourceMode === 'single_upload' && uploadState !== 'ready'" key="single-upload" class="source-stage upload-zone"
+          :class="{ 'is-uploading': uploadState === 'uploading', 'is-dragging': dragDepth > 0 }"
+          @dragenter="dragVideo" @dragover="dragVideo" @dragleave="dragDepth = Math.max(0, dragDepth - 1)" @drop.prevent="dropVideo">
           <span class="source-stage-icon"><UploadCloud :size="27" /></span>
-          <strong>{{ uploadState === 'uploading' ? tr('正在上传并校验视频…') : tr('选择 MP4 / MOV 视频') }}</strong>
+          <strong>{{ uploadState === 'uploading' ? tr('正在上传并校验视频…') : dragDepth ? tr('松开即可上传视频') : tr('拖入 MP4 / MOV 视频，或点击选择') }}</strong>
           <span>{{ tr('单视频不超过 500 MB，时长不超过 20 分钟') }}</span>
           <input type="file" accept="video/mp4,video/quicktime,.mp4,.mov" :disabled="uploadState === 'uploading'" @change="handleFileChange" />
         </label>
@@ -459,6 +487,18 @@ onBeforeUnmount(() => {
             <History :size="15" />{{ tr('历史项目') }} </AppButton>
         </template>
 
+        <AppSelect
+          class="analysis-model-select"
+          :model-value="analysisModelId === null ? '' : String(analysisModelId)"
+          :ariaLabel="tr('视频拆解模型')"
+          :menu-label="tr('视频拆解模型')"
+          menu-width="trigger"
+          :disabled="creating || !capabilities.analysis_models.length"
+          :options="capabilities.analysis_models.length ? capabilities.analysis_models.map(model => ({value: String(model.id), label: model.name})) : [{value: '', label: tr('暂无可用的视频拆解模型')}]"
+          @update:model-value="analysisModelId = $event ? Number($event) : null"
+        >
+          <template #leading><Sparkles :size="15" /></template>
+        </AppSelect>
         <AppSelect v-model="aspectRatio" class="format-select" :ariaLabel="tr('画面比例')" :options="capabilities.aspect_ratios">
           <template #leading><Film :size="15" /></template>
         </AppSelect>
@@ -504,7 +544,8 @@ onBeforeUnmount(() => {
 .state-card--error { flex-direction: column; color: var(--creation-danger); }
 .source-stage { min-height: 220px; padding: 26px; border: 1px dashed var(--app-border-strong); border-radius: 16px; background: var(--app-surface); box-sizing: border-box; }
 .upload-zone { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 9px; color: var(--app-accent); cursor: pointer; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
-.upload-zone:hover, .upload-zone.is-uploading { border-color: var(--app-accent); background: var(--app-accent-soft); box-shadow: var(--app-shadow); }
+.upload-zone:focus-within, .upload-zone.is-dragging { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.upload-zone:hover, .upload-zone.is-dragging, .upload-zone.is-uploading { border-color: var(--app-accent); background: var(--app-accent-soft); box-shadow: var(--app-shadow); }
 .upload-zone strong { color: var(--app-text); font-size: 14px; font-weight: 600; }.upload-zone > span:not(.source-stage-icon) { color: var(--app-text-secondary); font-size: 11px; }.upload-zone input, .folder-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .source-stage-icon { display: grid; width: 50px; height: 50px; margin-bottom: 3px; place-items: center; border: 1px solid var(--app-border); border-radius: 14px; color: var(--app-accent); background: var(--app-surface); box-shadow: var(--app-shadow); }
 .source-stage-icon.is-ready { color: var(--creation-success); background: color-mix(in srgb, var(--creation-success) 10%, var(--app-surface)); }
@@ -525,6 +566,7 @@ onBeforeUnmount(() => {
 .folder-status { color: var(--app-text-secondary); }.folder-status.is-ready { color: var(--creation-success); }.folder-status.is-failed, .folder-status.is-invalid { color: var(--creation-danger); }.folder-status.is-ignored { color: var(--app-text-muted); }.folder-issue { max-width: 240px; color: var(--creation-danger); overflow: hidden; text-overflow: ellipsis; }
 .gap-warning { display: flex; padding: 12px 13px; align-items: flex-start; gap: 9px; border: 1px solid color-mix(in srgb, var(--creation-warning) 28%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--creation-warning) 7%, var(--app-surface)); cursor: pointer; }.gap-warning input { margin-top: 2px; }.gap-warning span { display: grid; gap: 3px; }.gap-warning strong { color: var(--creation-warning); font-size: 11px; }.gap-warning small { color: var(--app-text-muted); font-size: 10px; }
 .form-error { margin: 11px 0 0; color: var(--creation-danger); font-size: 12px; }
+.analysis-model-select { width: 210px; max-width: 100%; }
 .format-select { width: 110px; }.style-select { width: 136px; }
 .select-thumbnail { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }.custom-style-icon { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); }
 .project-name-field { display: flex; min-height: 44px; align-items: center; gap: 12px; margin-top: 10px; padding: 0 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); box-shadow: var(--app-shadow); }.project-name-field span { flex: 0 0 auto; color: var(--app-text-secondary); font-size: 11px; font-weight: 650; }.project-name-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; }.project-name-field input::placeholder { color: var(--app-text-muted); }
@@ -533,6 +575,6 @@ onBeforeUnmount(() => {
 .source-panel-enter-active, .source-panel-leave-active { transition: opacity .16s ease, transform .16s ease; }.source-panel-enter-from, .source-panel-leave-to { opacity: 0; transform: translateY(5px); }
 .spin { animation: spin .9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 880px) { .format-select { width: 118px; }.style-select { width: 150px; } }
-@media (max-width: 620px) { .source-stage { min-height: 190px; padding: 18px 14px; }.history-selector { grid-template-columns: 1fr; }.format-select { width: calc(50% - 4px); }.style-select { width: 100%; }.folder-table td:nth-child(2) { max-width: 150px; }.project-name-field { align-items: flex-start; flex-direction: column; gap: 4px; padding: 10px 12px; }.project-name-field input { width: 100%; } }
+@media (max-width: 620px) { .analysis-model-select { width: 100%; } .source-stage { min-height: 190px; padding: 18px 14px; }.history-selector { grid-template-columns: 1fr; }.format-select { width: calc(50% - 4px); }.style-select { width: 100%; }.folder-table td:nth-child(2) { max-width: 150px; }.project-name-field { align-items: flex-start; flex-direction: column; gap: 4px; padding: 10px 12px; }.project-name-field input { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 </style>

@@ -35,7 +35,7 @@ async def test_remake_json_mode_repairs_model_validation_errors_without_losing_a
 
     def respond(request):
         seen.append(json.loads(request.content))
-        value = invalid if len(seen)==1 else valid
+        value = invalid if len(seen) % 2 else valid
         return completion_stream_response({'id':'completion','created':1,'model':'vision','object':'chat.completion',
             'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(value)},'finish_reason':'stop'}],
             'usage':{'prompt_tokens':200,'completion_tokens':20,'total_tokens':220}})
@@ -43,13 +43,17 @@ async def test_remake_json_mode_repairs_model_validation_errors_without_losing_a
     monkeypatch.setattr('services.creation_agent.handler.AsyncOpenAI',lambda **kwargs: AsyncOpenAI(
         **kwargs,http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
     execution = SkillExecution({**workflow,'task_id':str(task.id)},assistant,AsyncMock())
-    output = await execution.generate('remake',{'segment':1,'output_kind':'professional_video_prompt_material',
-        'assets':{'assets':[{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
-                  'duration_seconds':4.2,'storyboard_strategy':'cinematic'}},RemakeShot,model_config=config)
-    assert output.duration=='4.2s' and len(seen)==2
+    for index in (1, 5):
+        output = await execution.generate('remake',{'segment':index,'output_kind':'professional_video_prompt_material',
+            'assets':{'assets':[{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
+                      'duration_seconds':4.2,'storyboard_strategy':'cinematic'}},RemakeShot,model_config=config)
+        assert output.duration == '4.2s'
+    assert len(seen) == 4
     assert all(request['response_format']=={'type':'json_object'} and not request.get('tools') for request in seen)
-    child = await AgentMessage.filter(conversation_id=assistant.conversation_id).exclude(task_id=task.id).get()
-    assert any(part['part_kind']=='retry-prompt' for message in child.native_messages for part in message['parts'])
+    children = await AgentMessage.filter(conversation_id=assistant.conversation_id).exclude(task_id=task.id)
+    assert len(children) == 2
+    for child in children:
+        assert any(part['part_kind']=='retry-prompt' for message in child.native_messages for part in message['parts'])
 
 
 def test_skill_snapshot_is_immutable_and_rejects_unknown_paths():
@@ -1563,3 +1567,35 @@ async def test_old_cover_failure_exposes_verified_story_without_changing_externa
     await cover.refresh_from_db()
     assert 'analysis_completed' not in task.response_data
     assert task.status == 4 and task.stage == 'needs_review' and cover.state == 'uncertain'
+
+
+@pytest.mark.asyncio
+async def test_reference_batch_obeys_each_model_capacity_without_blocking_other_models():
+    from services.ai_task_executor import AiTaskExecutor
+    from schemas.creation_agent import AgentConfiguration
+    executor = AiTaskExecutor()
+    slow, other = [await AiModelConfig.create(task_type=2, name=name, model=name, concurrency=limit,
+        base_url='https://example.invalid', api_key='test') for name, limit in [('serial', 1), ('pair', 2)]]
+    tasks = [await AiTask.create(task_type=2, status=1, request_params={
+        'workflow_version': 'agent-skills-v1', 'model_config_id': model.id}) for model in [slow, slow, slow, other, other]]
+    active, peak = {}, {}
+    all_slots_full = asyncio.Event()
+    release = asyncio.Event()
+    async def work(task):
+        mid = task.request_params['model_config_id']
+        active[mid] = active.get(mid, 0) + 1
+        peak[mid] = max(peak.get(mid, 0), active[mid])
+        if active == {slow.id: 1, other.id: 2}:
+            all_slots_full.set()
+        await release.wait()
+        active[mid] -= 1
+    executor._run_once = work
+    with patch('services.creation_agent.sessions.agent_configuration',
+               new=AsyncMock(return_value=AgentConfiguration(production_concurrency=4))):
+        runs = [asyncio.create_task(executor.run(task)) for task in tasks]
+        try:
+            await asyncio.wait_for(all_slots_full.wait(), 3)
+        finally:
+            release.set()
+            await asyncio.gather(*runs)
+    assert peak == {slow.id: 1, other.id: 2}

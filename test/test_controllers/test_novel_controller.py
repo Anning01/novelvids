@@ -231,6 +231,23 @@ async def test_analyze_novel_submits_one_safe_task(configured_creation_agent):
 
 
 @pytest.mark.asyncio
+async def test_analysis_uses_explicit_team_model_and_rejects_conflicting_run(configured_creation_agent):
+    novel = await Novel.create(name="模型选择", content="书稿")
+    other = await AiModelConfig.create(name="Another assistant", model="another", task_type=7,
+        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, is_active=True)
+    selected = configured_creation_agent.id
+    task = await novel_controller.analyze(novel.id, assistant_model_config_id=selected)
+    assert task.request_params["assistant_model_config_id"] == selected
+    with pytest.raises(HTTPException) as conflict:
+        await novel_controller.analyze(novel.id, assistant_model_config_id=other.id)
+    assert conflict.value.status_code == 409
+    await AiModelConfig.filter(id=other.id).update(is_active=False)
+    with pytest.raises(HTTPException) as unavailable:
+        await novel_controller.analyze(novel.id, assistant_model_config_id=other.id)
+    assert unavailable.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_analyze_novel_rejects_empty_content():
     novel = await Novel.create(name="Empty Analyze Novel", content="")
     with pytest.raises(HTTPException) as exc_info:

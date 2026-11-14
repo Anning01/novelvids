@@ -401,3 +401,52 @@ def test_sheet_reference_uses_final_order_and_draft_language(model, tag):
     assert chosen == [sheet]
     sent = render_reference_mentions(prompt, chosen, image_indices={sheet.mention_url:3}, image_format=model_image_format(model))
     assert tag in sent and 'novelvids:' not in sent and sheet.url not in sent
+
+
+@pytest.mark.asyncio
+async def test_generated_chapter_sheets_queue_once_per_new_shot_and_skip_finished_images():
+    from services.storyboard.sheets import enqueue_chapter_sheets, scene_fingerprint
+    from uuid import uuid4
+    conversation, _, _ = await session_fixture()
+    await Novel.filter(id=conversation.novel_id).update(storyboard_enabled=True)
+    first = await Scene.get(chapter__novel_id=conversation.novel_id)
+    first.prompt_params = _shot().model_dump()
+    await first.save()
+    second = await Scene.create(chapter_id=first.chapter_id, sequence=2, prompt='二', prompt_params=_shot(2).model_dump())
+    finished = await Scene.create(chapter_id=first.chapter_id, sequence=3, prompt='三', prompt_params=_shot(3).model_dump())
+    finished.metadata = {'storyboard_sheet': {'status':'completed','image_url':'/media/test.jpg','scene_fingerprint':scene_fingerprint(finished)}}
+    await finished.save()
+    config = await AiModelConfig.create(task_type=2, name='test-image', model='test-image', image_model_type='gpt_image_2', base_url='https://example.invalid/v1', api_key='test', is_active=True)
+    batch_id = uuid4()
+    ids = await enqueue_chapter_sheets(first.chapter_id, [first.id, second.id], config.id, None, None, batch_id=batch_id)
+    assert len(set(ids)) == 2
+    assert await enqueue_chapter_sheets(first.chapter_id, None, config.id, None, None, batch_id=batch_id) == ids
+    for scene, task_id in zip([first, second], ids):
+        await scene.refresh_from_db()
+        assert scene.metadata['storyboard_sheet']['task_id'] == task_id
+        assert (await AiTask.get(id=task_id)).request_params['model_config_id'] == config.id
+
+
+@pytest.mark.asyncio
+async def test_storyboard_parent_queues_sheets_on_completion_with_selected_image_model(monkeypatch):
+    from controllers.scene import scene_controller
+    from services.storyboard.handler import StoryboardTaskHandler
+    conversation, _, _ = await session_fixture()
+    await Novel.filter(id=conversation.novel_id).update(storyboard_enabled=True)
+    scene = await Scene.get(chapter__novel_id=conversation.novel_id)
+    scene.prompt_params = _shot().model_dump()
+    await scene.save()
+    image = await AiModelConfig.create(task_type=2, name='sheet', model='sheet', image_model_type='gpt_image_2',
+        base_url='https://example.invalid', api_key='test', is_active=True)
+    parent = await scene_controller.generate(scene.chapter_id, replace_existing=True, sheet_model_config_id=image.id)
+    handler = StoryboardTaskHandler()
+    monkeypatch.setattr(handler, 'execute', AsyncMock(return_value={'scene_ids':[scene.id], 'scenes_created':1}))
+    executor = AiTaskExecutor()
+    executor.register(AiTaskTypeEnum.storyboard, handler)
+    await executor.run(parent)
+    await parent.refresh_from_db()
+    assert parent.status == 3, parent.error_message
+    child = await AiTask.get(id=parent.response_data['storyboard_sheet_task_ids'][0])
+    assert child.status == 1 and child.request_params['scene_id'] == scene.id
+    assert child.request_params['model_config_id'] == image.id
+    assert child.request_params['origin_run_id'] == str(parent.id)

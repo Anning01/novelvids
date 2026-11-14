@@ -353,7 +353,7 @@ onMounted(() => {
     <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
         <AgentDisclosure class="creation-agent-panel__message-group" :class="{ 'is-assistant': item.role === 'assistant' }" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
-        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" />
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
         <div v-if="item.paragraphs.length" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
@@ -386,7 +386,11 @@ onMounted(() => {
       <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
         <template #actions><button v-if="pendingCount" type="button" class="creation-agent-panel__pending-chip" :title="tr('{p0} 个对象有新设定待核对', { p0: pendingCount })" @click="pickerOpen = true">{{ tr('待核对') }} {{ pendingCount }}</button></template>
-      <AppButton v-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
+      <template v-if="store.currentRun?.recovery?.can_resume_production">
+        <AppButton size="xs" :disabled="store.busy || store.submitting" @click="store.resume()">{{ store.submitting ? tr('核对断点中…') : tr('从断点继续') }}</AppButton>
+        <p class="creation-agent-panel__round-status">{{ tr('复用已完成步骤；已扣费但结果缺失的步骤直接重做，会产生新费用。执行中的请求不会重复提交。') }}</p>
+      </template>
+      <AppButton v-else-if="!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4)" size="xs" @click="composer?.focus()">{{ tr('继续对话') }}</AppButton>
       <p v-if="store.error" class="creation-agent-panel__error" role="alert">{{ store.error }}<template v-if="failedRequest"><AppButton size="xs" @click="editFailedRequest">{{ tr('编辑后重试') }}</AppButton><AppButton size="xs" @click="router.push('/settings')">{{ tr('查看设置') }}</AppButton></template><AppButton v-else-if="!store.busy" size="xs" @click="store.open(projectId)">{{ tr('重新连接') }}</AppButton></p>
       <AppButton v-if="store.currentRun && !store.streamConnected && store.busy && store.error" size="xs" @click="store.follow(store.currentRun.task_id)"><RefreshCw :size="13" />{{ tr('重新连接') }}</AppButton>
       <p v-if="pendingCount" class="creation-agent-panel__constraint-notice"><button type="button" @click="pickerOpen = true">{{ pendingCount }} {{ tr('个对象有新设定待核对') }} <span>{{ tr('查看') }}</span></button></p>

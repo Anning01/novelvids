@@ -24,7 +24,7 @@ def visual_entity_description(description: str | None, prompt: str | None) -> st
 def entities_for_assets(assets, chapter_number: int, selected: dict[int, int], prompt: str | None = None):
     """Use the same variant selection for fresh generation and existing scenes."""
     from schemas.scene import SceneEntity
-    from services.video.asset_resolver import select_asset_variant, _extract_asset_mentions
+    from services.video.asset_resolver import select_asset_variants, variant_selection_ids, _extract_asset_mentions
     from utils.enums import AssetTypeEnum
     from utils.messages import localized_message
 
@@ -34,15 +34,19 @@ def entities_for_assets(assets, chapter_number: int, selected: dict[int, int], p
         if asset.id in explicit_versions:
             entities.extend(generation_entities_for_assets([asset], chapter_number, {}))
             continue
-        variant = select_asset_variant(asset, chapter_number, selected)
-        if selected.get(asset.id) is not None and variant is None:
+        variants = select_asset_variants(asset, chapter_number, selected)
+        identifiers = variant_selection_ids(selected[asset.id]) if asset.id in selected else [None]
+        if any(identifier is not None and variant is None for identifier, variant in zip(identifiers, variants)):
             raise ValueError(localized_message('已选择的资产形态不存在，请先修复素材绑定'))
-        source = variant or asset
-        entities.append(SceneEntity(asset_id=asset.id, name=asset.canonical_name,
-            aliases=[*(asset.aliases or []), *([f'{asset.canonical_name}#{variant.name}'] if variant else [])],
-            description=visual_entity_description(source.description, source.base_traits),
-            asset_type=AssetTypeEnum(asset.asset_type).nickname,
-            variant_id=variant.id if variant else None))
+        for variant in variants:
+            source = variant or asset
+            name = f'{asset.canonical_name}#{variant.name}' if variant and len(variants) > 1 else asset.canonical_name
+            entities.append(SceneEntity(asset_id=asset.id, name=name,
+                aliases=[*(asset.aliases or []), *([f'{asset.canonical_name}#{variant.name}'] if variant else [])],
+                description=visual_entity_description(source.description, source.base_traits),
+                asset_type=AssetTypeEnum(asset.asset_type).nickname,
+                variant_id=variant.id if variant else None))
+
     return entities
 
 
@@ -71,20 +75,12 @@ def generation_entities_for_assets(assets, chapter_number: int, selected: dict[i
     return entities
 
 
-def shot_variant_bindings(shot, entities) -> dict[str, int | None]:
+def shot_variant_bindings(shot, entities):
     from prompts.storyboard import referenced_entities
+    from services.video.asset_resolver import add_variant_binding
 
     bindings = {}
-    multiple = set()
     for entity in referenced_entities(shot, entities):
-        if entity.asset_id is None:
-            continue
-        key = str(entity.asset_id)
-        if key in multiple:
-            continue
-        if key in bindings and bindings[key] != entity.variant_id:
-            bindings.pop(key)
-            multiple.add(key)
-        else:
-            bindings[key] = entity.variant_id
+        if entity.asset_id is not None:
+            add_variant_binding(bindings, entity.asset_id, entity.variant_id)
     return bindings

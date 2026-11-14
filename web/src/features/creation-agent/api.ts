@@ -32,6 +32,7 @@ export const agentApi = {
   }),
   snapshot: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}`),
   stop: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}/stop`, { method: 'POST' }),
+  resume: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}/resume`, { method: 'POST' }),
   undo: (changeId: number) => request<SingleResponse<AgentChange>>(`${base}/changes/${changeId}/undo`, { method: 'POST' }),
 }
 

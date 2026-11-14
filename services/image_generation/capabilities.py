@@ -37,6 +37,7 @@ class ImageModelCapabilities:
 
     def public_dict(self) -> dict:
         return {
+            "sizes": self.sizes,
             "clarities": list(self.clarities),
             "aspect_ratios": list(self.aspect_ratios),
             "output_formats": list(self.output_formats),
@@ -135,7 +136,10 @@ CAPABILITIES: dict[ImageModelTypeEnum, ImageModelCapabilities] = {
        for model_type in GIF_IMAGE_MODELS},
 }
 
+CAPABILITIES[ImageModelTypeEnum.seedream_5_5] = CAPABILITIES[ImageModelTypeEnum.seedream_5_pro]
+
 PROTOCOLS: dict[ImageModelTypeEnum, tuple[ImageApiProtocol, ...]] = {
+    ImageModelTypeEnum.seedream_5_5: (),  # Available through the synchronized platform catalog.
     ImageModelTypeEnum.seedream_5_pro: (
         ImageApiProtocol.volcengine_ark,
         ImageApiProtocol.openrouter_compatible,

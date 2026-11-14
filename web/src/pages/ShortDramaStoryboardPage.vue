@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
+import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import { money } from '@/features/billing/recordDisplay'
@@ -40,6 +42,7 @@ import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModel
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
+import { modelImageMentions } from '@/shared/modelImageMentions'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -65,7 +68,7 @@ import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
 import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
-import { replaceSceneAssetSelection } from '@/shared/sceneAssetSelection'
+import { replaceSceneAssetSelection, updateSceneAssetSelection, selectedVariantIds, readSceneVariantBindings, type SceneVariantBindings } from '@/shared/sceneAssetSelection'
 import { readVideoReferenceMedia as readReferenceMedia, buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { readAutoEnhancement, isVideoGenerationActive, autoEnhancementLabel, preserveAutoEnhancement, autoEnhancementAvailable, currentAutoEnhancement, enhancementEstimate } from '@/shared/autoEnhancement'
@@ -89,6 +92,8 @@ interface ProjectView extends Novel {
 }
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 
+type SceneAssetAppearance = Asset & { sceneVariantId?: number | null }
+
 interface SceneDraft {
   description: string
   prompt: string
@@ -99,7 +104,7 @@ interface SceneDraft {
   basePrompt: string | null
   duration: number
   selectedAssetIds: number[]
-  selectedVariantIds: Record<number, number | null>
+  selectedVariantIds: SceneVariantBindings
   videoGenerationMode: 'reference' | 'keyframes'
   firstFrameUrl: string
   lastFrameUrl: string
@@ -133,6 +138,36 @@ const terminalTaskStatuses = new Set([
 
 const route = useRoute()
 const router = useRouter()
+const stageModelId = ref('')
+const sheetModelId = ref('')
+const generateBlockingMaps = ref(false)
+const updatingSheetOptions = ref(false)
+const submittingSheets = ref(false)
+const missingGenerationOptions = computed(() => !stageModelId.value || updatingSheetOptions.value ||
+  (project.value?.storyboard_enabled && !sheetModelId.value))
+
+async function toggleSheets(enabled: boolean) {
+  if (!project.value || updatingSheetOptions.value) return
+  updatingSheetOptions.value = true
+  try {
+    await api.updateNovel(projectId.value, { storyboard_enabled: enabled })
+    project.value.storyboard_enabled = enabled
+  } catch (error) { notice.error((error as Error).message) }
+  finally { updatingSheetOptions.value = false }
+}
+
+async function fillChapterSheets() {
+  const chapterId = activeChapterId.value
+  if (!chapterId || !sheetModelId.value || submittingSheets.value) return
+  submittingSheets.value = true
+  try {
+    const {data} = await api.generateChapterSheets(chapterId, Number(sheetModelId.value))
+    const rows = await fetchChapterScenes(chapterId)
+    if (activeChapterId.value === chapterId) showChapterScenes(rows)
+    notice.success(data.length ? tr('已排队生成 {p0} 张故事版', {p0: data.length}) : tr('本集故事版已齐全'))
+  } catch (error) { notice.error((error as Error).message) }
+  finally { submittingSheets.value = false }
+}
 const projectId = computed(() => Number(route.params.projectId))
 const project = ref<ProjectView | null>(null)
 const chapters = ref<Chapter[]>([])
@@ -168,6 +203,7 @@ const highlightedReferenceKey = ref('')
 const openAssetPickerKey = ref('')
 const assetPickerFocusIds = ref<Record<string, number>>({})
 const assetPickerReplaceAssetIds = ref<Record<string, number>>({})
+const assetPickerReplaceVariantIds = ref<Record<string, number | null>>({})
 const openAssetActionKey = ref('')
 const editingAsset = ref<Asset | null>(null)
 const assetVoicePickerTarget = ref<AssetVoicePickerTarget | null>(null)
@@ -340,7 +376,14 @@ async function retryStoryboard() {
 function returnToScript() {
   void router.push({ name: 'short-drama-agent', params: { projectId: projectId.value }, query: { chapter: String(activeChapterId.value) } })
 }
-const videoModelOptions = computed(() => videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })))
+const fallbackVideoModel = computed(() => {
+  const defaults = project.value?.video_generation_defaults
+  return defaults && !defaults.model_config_id ? '' : videoModels.value[0]?.config_id ?? ''
+})
+const videoModelOptions = computed(() => [
+  ...(!selectedVideoModel.value ? [{ value: '', label: tr('未选择视频模型') }] : []),
+  ...videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })),
+])
 const videoModelSelectWidth = computed(() => Math.min(420, Math.max(
   220,
   ...videoModelOptions.value.map(option => Math.ceil(Array.from(option.label).reduce(
@@ -404,7 +447,7 @@ async function persistVideoModelPreference(modelId: number) {
   } catch (error) {
     if (selectedVideoModel.value === String(modelId)) {
       const persisted = videoModels.value.find(item => item.config_id === persistedVideoModelId.value)
-      selectedVideoModel.value = String(persisted?.config_id || videoModels.value[0]?.config_id || '')
+      selectedVideoModel.value = String(persisted?.config_id || fallbackVideoModel.value)
     }
     notice.error(error instanceof Error ? error.message : tr('视频模型偏好保存失败'))
   }
@@ -451,19 +494,8 @@ function makeSceneDraft(scene: Scene): SceneDraft {
 }
 
 
-function readSelectedVariantIds(value: unknown): Record<number, number | null> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const selections: Record<number, number | null> = {}
-  for (const [assetIdValue, variantIdValue] of Object.entries(value)) {
-    const assetId = Number(assetIdValue)
-    if (!Number.isInteger(assetId) || assetId < 1) continue
-    if (variantIdValue === null) selections[assetId] = null
-    else {
-      const variantId = Number(variantIdValue)
-      if (Number.isInteger(variantId) && variantId > 0) selections[assetId] = variantId
-    }
-  }
-  return selections
+function readSelectedVariantIds(value: unknown): SceneVariantBindings {
+  return readSceneVariantBindings(value)
 }
 
 function draftFor(scene: Scene) {
@@ -687,7 +719,9 @@ function sceneEnhancementEstimate(scene: Scene) {
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
   const selectedIds = draftFor(scene).selectedAssetIds
+  const bindings = resolvedSelectedVariantIdsFor(scene)
   return group.items.filter(item => selectedIds.includes(item.id))
+    .flatMap(asset => selectedVariantIds(bindings[asset.id]).map(sceneVariantId => ({ ...asset, sceneVariantId })))
 }
 
 function assetPickerKey(scene: Scene, type: number) {
@@ -695,19 +729,19 @@ function assetPickerKey(scene: Scene, type: number) {
 }
 
 function assetRowPickerAnchorId(scene: Scene, asset: Asset) {
-  return `asset-row-picker-trigger-${scene.id}-${asset.id}`
+  return `asset-row-picker-trigger-${scene.id}-${asset.id}-${selectedVariantFor(scene, asset)?.id ?? 'base'}`
 }
 
 function assetPickerAnchorId(scene: Scene, type: number) {
   const key = assetPickerKey(scene, type)
   const replaceAssetId = assetPickerReplaceAssetIds.value[key]
   return replaceAssetId
-    ? `asset-row-picker-trigger-${scene.id}-${replaceAssetId}`
+    ? `asset-row-picker-trigger-${scene.id}-${replaceAssetId}-${assetPickerReplaceVariantIds.value[key] ?? 'base'}`
     : `asset-picker-trigger-${key}`
 }
 
 function assetActionKey(scene: Scene, asset: Asset) {
-  return `${scene.id}:${asset.id}`
+  return `${scene.id}:${asset.id}:${selectedVariantFor(scene, asset)?.id ?? 'base'}`
 }
 
 function toggleAssetActionMenu(scene: Scene, asset: Asset) {
@@ -742,15 +776,15 @@ function saveEditedAsset(asset: Asset) {
 
 async function removeAssetFromScene(scene: Scene, asset: Asset) {
   const confirmed = await appConfirm({
-    title: tr('移除「{p0}」？', { p0: asset.canonical_name }),
+    title: tr('移除「{p0}」？', { p0: selectedAssetLabel(scene, asset) }),
     get message() { return tr('只会从当前分镜移除，不会删除项目资产及其衍生状态。') },
     get confirmLabel() { return tr('确认移除') },
     tone: 'danger',
   })
   if (!confirmed) return
-  updateAssetSelection(scene, { assetId: asset.id, variantId: null, selected: false })
+  updateAssetSelection(scene, { assetId: asset.id, variantId: selectedVariantFor(scene, asset)?.id ?? null, selected: false })
   openAssetActionKey.value = ''
-  notice.success(tr('已从当前分镜移除「{p0}」', { p0: asset.canonical_name }))
+  notice.success(tr('已从当前分镜移除「{p0}」', { p0: selectedAssetLabel(scene, asset) }))
 }
 
 function editingAssetKind(asset: Asset | null): 'character' | 'scene' | 'prop' {
@@ -770,6 +804,8 @@ function toggleAssetPicker(scene: Scene, type: number) {
 function toggleAssetReplacementPicker(scene: Scene, type: number, asset: Asset) {
   const key = assetPickerKey(scene, type)
   const isSameReplacement = openAssetPickerKey.value === key && assetPickerReplaceAssetIds.value[key] === asset.id
+    && assetPickerReplaceVariantIds.value[key] === (selectedVariantFor(scene, asset)?.id ?? null)
+  assetPickerReplaceVariantIds.value = { ...assetPickerReplaceVariantIds.value, [key]: selectedVariantFor(scene, asset)?.id ?? null }
   assetPickerFocusIds.value = { ...assetPickerFocusIds.value, [key]: asset.id }
   assetPickerReplaceAssetIds.value = { ...assetPickerReplaceAssetIds.value, [key]: asset.id }
   openAssetPickerKey.value = isSameReplacement ? '' : key
@@ -781,29 +817,16 @@ function closeAssetPicker(key: string) {
 
 function updateAssetSelection(scene: Scene, selection: SceneAssetVariantSelection) {
   const draft = draftFor(scene)
-  if (selection.selected) {
-    if (!draft.selectedAssetIds.includes(selection.assetId)) {
-      draft.selectedAssetIds = [...draft.selectedAssetIds, selection.assetId]
-    }
-    draft.selectedVariantIds = {
-      ...draft.selectedVariantIds,
-      [selection.assetId]: selection.variantId,
-    }
-    ensureSceneVoiceReferencePrompt(scene)
-    scheduleSceneSave(scene)
-    return
-  }
-  draft.selectedAssetIds = draft.selectedAssetIds.filter(id => id !== selection.assetId)
-  const nextSelections = { ...draft.selectedVariantIds }
-  delete nextSelections[selection.assetId]
-  draft.selectedVariantIds = nextSelections
+  const next = updateSceneAssetSelection({ ...draft, selectedVariantIds: resolvedSelectedVariantIdsFor(scene) }, selection)
+  draft.selectedAssetIds = next.selectedAssetIds
+  draft.selectedVariantIds = next.selectedVariantIds
   ensureSceneVoiceReferencePrompt(scene)
   scheduleSceneSave(scene)
 }
 
-function replaceAssetSelection(scene: Scene, replaceAssetId: number, selection: SceneAssetVariantSelection) {
+function replaceAssetSelection(scene: Scene, replaceAssetId: number, selection: SceneAssetVariantSelection, replaceVariantId: number | null) {
   const draft = draftFor(scene)
-  const replacement = replaceSceneAssetSelection(draft, replaceAssetId, selection)
+  const replacement = replaceSceneAssetSelection({ ...draft, selectedVariantIds: resolvedSelectedVariantIdsFor(scene) }, replaceAssetId, selection, replaceVariantId)
   draft.selectedAssetIds = replacement.selectedAssetIds
   draft.selectedVariantIds = replacement.selectedVariantIds
   ensureSceneVoiceReferencePrompt(scene)
@@ -817,14 +840,17 @@ function handleAssetPickerSelection(scene: Scene, type: number, selection: Scene
     updateAssetSelection(scene, selection)
     return
   }
-  replaceAssetSelection(scene, replaceAssetId, selection)
+  replaceAssetSelection(scene, replaceAssetId, selection, assetPickerReplaceVariantIds.value[key] ?? null)
   closeAssetPicker(key)
 }
 
-function selectedVariantFor(scene: Scene, asset: Asset) {
+function selectedVariantFor(scene: Scene, asset: SceneAssetAppearance) {
+  if (Object.hasOwn(asset, 'sceneVariantId')) {
+    return asset.variants?.find(variant => variant.id === asset.sceneVariantId) || null
+  }
   const draft = draftFor(scene)
   if (Object.prototype.hasOwnProperty.call(draft.selectedVariantIds, asset.id)) {
-    const variantId = draft.selectedVariantIds[asset.id]
+    const variantId = selectedVariantIds(draft.selectedVariantIds[asset.id])[0]
     return variantId === null ? null : asset.variants?.find(variant => variant.id === variantId) || null
   }
   const chapterNumber = activeChapter.value?.number
@@ -837,8 +863,10 @@ function resolvedSelectedVariantIdsFor(scene: Scene) {
   return Object.fromEntries(draft.selectedAssetIds.flatMap(assetId => {
     const asset = assets.value.find(item => item.id === assetId)
     if (!asset) return []
-    return [[assetId, selectedVariantFor(scene, asset)?.id ?? null]]
-  })) as Record<number, number | null>
+    return [[assetId, Object.hasOwn(draft.selectedVariantIds, assetId)
+      ? draft.selectedVariantIds[assetId]!
+      : selectedVariantFor(scene, asset)?.id ?? null]]
+  })) as SceneVariantBindings
 }
 
 function selectedAssetLabel(scene: Scene, asset: Asset) {
@@ -874,14 +902,14 @@ function sceneVoiceReferenceMappings(scene: Scene) {
     prompt: draft.prompt,
     promptParams: scene.prompt_params,
     narratorReferenceId: project.value?.narrator_audio_reference_id,
-    assets: assets.value.flatMap(asset => {
-      if (asset.asset_type !== AssetTypeEnum.PERSON || !draft.selectedAssetIds.includes(asset.id)) return []
+    assets: assetGroups.value.filter(group => group.type === AssetTypeEnum.PERSON).flatMap(group => selectedAssetsFor(scene, group)).flatMap(asset => {
       const referenceId = resolvedAssetVoiceReferenceId(scene, asset)
       if (!referenceId) return []
       return [{
         assetId: asset.id,
-        name: asset.canonical_name,
-        aliases: [...(asset.aliases || []), ...(selectedVariantFor(scene, asset) ? [`${asset.canonical_name}#${selectedVariantFor(scene, asset)!.name}`] : [])],
+        variantId: selectedVariantFor(scene, asset)?.id ?? null,
+        name: selectedVariantIds(resolvedSelectedVariantIdsFor(scene)[asset.id]).length > 1 && selectedVariantFor(scene, asset) ? `${asset.canonical_name}#${selectedVariantFor(scene, asset)!.name}` : asset.canonical_name,
+        aliases: [asset.canonical_name, ...(asset.aliases || []), ...(selectedVariantFor(scene, asset) ? [`${asset.canonical_name}#${selectedVariantFor(scene, asset)!.name}`] : [])],
         referenceId,
       }]
     }),
@@ -1093,13 +1121,16 @@ function referencePrompt(draft: SceneDraft) {
 function videoInputImageReferences(scene: Scene, maxImages = selectedVideoModelConfig.value?.capabilities.max_reference_images ?? Infinity,
   includeSelected = Boolean(draftFor(scene).promptModel)) {
   const draft = draftFor(scene)
-  const selectedAssets = assets.value.filter(asset => draft.selectedAssetIds.includes(asset.id))
+  const selectedAssets = assetGroups.value.flatMap(group => selectedAssetsFor(scene, group))
   return buildVideoInputImageReferences(
     draft.promptModel ? draft.generic || draft.prompt : draft.prompt,
     selectedAssets.map(asset => ({
       assetId: asset.id,
       label: selectedAssetLabel(scene, asset),
-      mentionNames: [asset.canonical_name, ...(asset.aliases || [])],
+      variantId: selectedVariantFor(scene, asset)?.id ?? null,
+      mentionNames: selectedVariantFor(scene, asset)
+        ? [asset.canonical_name, ...(asset.aliases || []), ...[asset.canonical_name, ...(asset.aliases || [])].map(name => `${name}#${selectedVariantFor(scene, asset)!.name}`)]
+        : [asset.canonical_name, ...(asset.aliases || [])],
       imageUrls: selectedAssetReferenceImages(scene, asset),
     })),
     withBlockingReference(scene, draft.referenceMedia),
@@ -1157,14 +1188,14 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
   const assetOptions = assetGroups.value
     .filter(group => [AssetTypeEnum.PERSON, AssetTypeEnum.SCENE, AssetTypeEnum.ITEM].includes(group.type))
     .flatMap(group => selectedAssetsFor(scene, group).map(asset => ({
-    id: `asset-${asset.id}`,
+    id: `asset-${asset.id}-${selectedVariantFor(scene, asset)?.id ?? 'base'}`,
     kind: asset.asset_type === AssetTypeEnum.PERSON
       ? 'person' as const
       : asset.asset_type === AssetTypeEnum.SCENE
         ? 'scene' as const
         : 'item' as const,
     label: selectedAssetLabel(scene, asset),
-    syntax: `@{${asset.canonical_name}}`,
+    syntax: `@{${asset.canonical_name}${selectedVariantFor(scene, asset) ? `#${selectedVariantFor(scene, asset)!.name}` : ''}}`,
     group: asset.asset_type === AssetTypeEnum.PERSON ? tr('角色') : asset.asset_type === AssetTypeEnum.SCENE ? tr('场景') : tr('道具'),
     previewUrl: selectedAssetImage(scene, asset) || undefined,
     thumbnailUrl: selectedAssetThumbnail(scene, asset) || undefined,
@@ -1195,8 +1226,18 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
       description: tr('仅用于参考{p0}的音色，点击播放', { p0: subject }),
     }
   })
+  const draft = draftFor(scene)
+  const numbered: ScenePromptMentionOption[] = draft.promptModel && draft.videoGenerationMode === 'reference'
+    ? modelImageMentions(draft.prompt, videoInputImageReferences(scene)).map(({syntax, image}) => ({
+        id: `numbered-${syntax}`, kind: 'image', syntax, label: `${syntax.startsWith('<') ? syntax.slice(1, -1) : syntax} · ${image.label}`,
+        group: tr('参考图片'), displayOnly: true,
+        previewUrl: image.url.startsWith('/api/') ? undefined : mediaUrl(image.url),
+        blockingPreview: image.url === scene.blocking_reference?.url && image.url.startsWith('/api/'),
+      }))
+    : []
   return [
     ...assetOptions,
+    ...numbered,
     ...mediaOptions,
     ...audioOptions,
     {
@@ -1398,7 +1439,7 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   const chapterModelId = Number(result.scenes[0]?.metadata?.video_model_config_id)
   const chapterModel = videoModels.value.find(item => item.config_id === chapterModelId)
   const projectModel = videoModels.value.find(item => item.config_id === project.value?.video_model_config_id)
-  selectedVideoModel.value = String(chapterModel?.config_id || projectModel?.config_id || videoModels.value[0]?.config_id || '')
+  selectedVideoModel.value = String(chapterModel?.config_id || projectModel?.config_id || fallbackVideoModel.value)
   videoGenerationErrors.value = {}
   const requestedSceneId = Number(route.query.scene)
   const requestedScene = result.scenes.find(scene => scene.id === requestedSceneId)
@@ -1540,10 +1581,11 @@ async function generateChapterStoryboard(chapterId: number, replaceExisting = fa
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
   const pendingTask = readPersistedStoryboardTasks()[chapterId]
   if (pendingTask) { await pollStoryboardTask(chapterId, pendingTask); return }
+  if (missingGenerationOptions.value) return
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId, replaceExisting)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -1645,7 +1687,7 @@ async function load() {
     void exportApi.models().then(response => { if (alive) enhancementModels.value = response.data }).catch(() => { enhancementModels.value = [] })
     const savedVideoModel = videoModels.value.find(item => item.config_id === novelResponse.data.video_model_config_id)
     persistedVideoModelId.value = savedVideoModel?.config_id ?? null
-    selectedVideoModel.value = String(savedVideoModel?.config_id || videoModels.value[0]?.config_id || '')
+    selectedVideoModel.value = String(savedVideoModel?.config_id || fallbackVideoModel.value)
     const preferredChapter = Number(route.query.chapter)
     const firstChapter = chapters.value.find(item => item.id === preferredChapter) ?? chapters.value[0]
     if (firstChapter) {
@@ -1972,6 +2014,15 @@ async function saveScene(
   if (sceneSaveQueues.get(scene.id) === queued) sceneSaveQueues.delete(scene.id)
   return saved
 }
+
+function guardReleaseRefresh(event: Event) {
+  if (sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
+    const draft = sceneDrafts.value[scene.id]
+    return draft && JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(scene))
+  })) event.preventDefault()
+}
+onMounted(() => window.addEventListener('studio-before-refresh', guardReleaseRefresh))
+onBeforeUnmount(() => window.removeEventListener('studio-before-refresh', guardReleaseRefresh))
 
 async function flushPendingSceneSaves() {
   const pendingScenes = [...sceneAutoSaveTimers.keys()]
@@ -2514,16 +2565,21 @@ onBeforeUnmount(() => {
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
-            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
+            <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
+            <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
+            <AppButton v-if="isAgent && scenes.length && project?.storyboard_enabled" variant="secondary" size="sm" :disabled="!sheetModelId || generatingStoryboard || waitingAnalysis || updatingSheetOptions" :loading="submittingSheets" @click="fillChapterSheets">{{ tr('补齐本集故事版') }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建分镜') }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
-        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div>
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
@@ -2550,7 +2606,7 @@ onBeforeUnmount(() => {
                 <h2>{{ tr('分镜信息') }}</h2>
                 <label><span>{{ tr('分镜描述') }}</span><textarea :value="draftFor(scene).description" rows="5" :placeholder="tr('请输入分镜描述')" @input="updateSceneText(scene, 'description', $event)" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.length }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.reduce((sum, asset) => sum + 1 + (asset.variants?.length || 0), 0) }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
                   <div
                     v-if="selectedAssetsFor(scene, group).length"
                     class="selected-assets"
@@ -2560,7 +2616,7 @@ onBeforeUnmount(() => {
                       'is-prop-assets': group.type === AssetTypeEnum.ITEM,
                     }"
                   >
-                    <article v-for="asset in selectedAssetsFor(scene, group)" :key="asset.id" class="selected-asset-row">
+                    <article v-for="asset in selectedAssetsFor(scene, group)" :key="assetActionKey(scene, asset)" class="selected-asset-row">
                       <span
                         class="asset-thumb"
                         :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
@@ -2571,8 +2627,8 @@ onBeforeUnmount(() => {
                         variant="soft"
                         size="sm"
                         class="asset-name-button"
-                        :active="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
-                        :aria-expanded="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id"
+                        :active="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id && assetPickerReplaceVariantIds[assetPickerKey(scene, group.type)] === (selectedVariantFor(scene, asset)?.id ?? null)"
+                        :aria-expanded="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id && assetPickerReplaceVariantIds[assetPickerKey(scene, group.type)] === (selectedVariantFor(scene, asset)?.id ?? null)"
                         :aria-label="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
                         :title="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
                         @click="toggleAssetReplacementPicker(scene, group.type, asset)"
@@ -2582,7 +2638,7 @@ onBeforeUnmount(() => {
                         variant="soft"
                         size="sm"
                         class="asset-voice-button"
-                        :active="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id"
+                        :active="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id && assetVoicePickerTarget?.variantId === (selectedVariantFor(scene, asset)?.id ?? null)"
                         :loading="savingAssetVoiceKey === assetVoicePickerKey(scene, asset)"
                         :disabled="Boolean(savingAssetVoiceKey)"
                         :aria-label="tr('为{p0}更换音色', { p0: selectedAssetLabel(scene, asset) })"
@@ -2591,7 +2647,7 @@ onBeforeUnmount(() => {
                       ><Volume2 :size="13" /><span>{{ selectedAssetVoiceLabel(scene, asset) }}</span></AppButton>
                       <SceneAssetActionMenu
                         :open="openAssetActionKey === assetActionKey(scene, asset)"
-                        :label="asset.canonical_name"
+                        :label="selectedAssetLabel(scene, asset)"
                         @toggle="toggleAssetActionMenu(scene, asset)"
                         @edit="editSceneAsset(asset)"
                         @remove="removeAssetFromScene(scene, asset)"
@@ -2659,6 +2715,7 @@ onBeforeUnmount(() => {
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
+                  :scene="scene"
                   embedded
                   @update:model-value="updateScenePrompt(scene, $event)"
                 />
@@ -2785,6 +2842,7 @@ onBeforeUnmount(() => {
       :scene-sequence="focusedPromptScene?.sequence || 0"
       :model-value="focusedPromptValue"
       :options="focusedPromptOptions"
+      :scene="focusedPromptScene || undefined"
       @close="closePromptFocus"
       @update:model-value="updateFocusedPrompt"
     />
@@ -2792,6 +2850,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .prompt-panel > header .prompt-header-actions { display:flex; flex:0 0 auto; align-items:center; gap:6px; }
 .model-optimized-prompt { min-width: 0; color: var(--app-text); }
 .model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
@@ -2836,7 +2895,7 @@ onBeforeUnmount(() => {
 .storyboard-state strong { color: #454a59; font-size: 14px; }
 .storyboard-state p { max-width: 460px; margin: 0; color: #9297a6; font-size: 11px; }
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
-.storyboard-state button { margin-top: 8px; }
+.storyboard-state > button, .storyboard-state > .stage-actions { margin-top: 8px; }
 .shot-editor-list { display: grid; gap: 12px; }
 .shot-editor { overflow: hidden; scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px); border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
 .shot-editor.is-active { box-shadow: inset 0 0 0 1px #dfe1f5; }
@@ -2867,11 +2926,11 @@ onBeforeUnmount(() => {
 .shot-assets > header button { width: 26px; min-height: 26px; padding: 0; }
 .selected-assets { display: grid; gap: 7px; }
 .selected-asset-row { display: grid; min-width: 0; grid-template-columns: 38px minmax(0,1fr) 30px; align-items: center; gap: 6px; }
-.selected-assets.is-person-assets .selected-asset-row { grid-template-columns: 38px minmax(0,1fr) 116px 30px; }
+.selected-assets.is-person-assets .selected-asset-row { grid-template-columns: 38px minmax(0,1fr) 90px 30px; }
 .selected-asset-row > button { min-width: 0; justify-content: flex-start; }
-.selected-asset-row .asset-name-button { padding-inline: 9px; color: #4c5261; background: #fff; box-shadow: inset 0 0 0 1px #e0e3eb; }
-.selected-asset-row .asset-name-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selected-asset-row .asset-voice-button { color: #858b9b; background: #fafbfc; box-shadow: inset 0 0 0 1px #e7e9f0; font-size: 9px; }
+.selected-asset-row .asset-name-button { height: auto; padding: 7px 9px; color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border); }
+.selected-asset-row .asset-name-button span { overflow-wrap: anywhere; white-space: normal; line-height: 1.4; text-align: left; }
+.selected-asset-row .asset-voice-button { padding-inline: 8px; color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 9px; }
 .selected-asset-row .asset-voice-button:hover:not(:disabled),.selected-asset-row .asset-voice-button.is-active { color: #5557ea; background: #ededff; box-shadow: inset 0 0 0 1px rgb(91 92 240 / 12%); }
 .selected-asset-row .asset-voice-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-assets.is-scene-assets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }

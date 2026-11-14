@@ -21,6 +21,7 @@ class StoryboardCandidateValidator:
         self.source_facts = facts
         while isinstance(self.source_facts, dict) and 'original_input' in self.source_facts:
             self.source_facts = self.source_facts['original_input']
+        self.blocking_enabled = not (isinstance(self.source_facts, dict) and self.source_facts.get('generate_blocking_maps') is False)
         seed = facts.get('storyboard_repair') if isinstance(facts, dict) else None
         if seed:
             self.preserve_speech = False
@@ -57,6 +58,10 @@ class StoryboardCandidateValidator:
                 validate_storyboard_duration(shot, self.duration_range)
                 if 'storyboard_contract' in self.snapshot.contents:
                     validate_skill_storyboard_timing(shot)
+                    if (isinstance(self.source_facts, dict) and self.source_facts.get('source_scene_number')
+                            and shot.blocking_map is None):
+                        # Model placement runs after segment order is final.
+                        shot = shot.model_copy(update={'duration_split_part': None})
                     validate_blocking_map(shot, self.snapshot)
                     if isinstance(self.source_facts, dict) and 'entities' in self.source_facts:
                         from schemas.scene import SceneEntity
@@ -91,6 +96,8 @@ class StoryboardCandidateValidator:
                     continue
             updates.setdefault(number, []).append({key: value for key, value in raw.items() if key != 'repair_of'})
         for number, values in updates.items():
+            if not self.blocking_enabled:
+                values = [{**value, 'blocking_map': None, 'duration_split_part': None} for value in values]
             self.raw[number] = values
             try:
                 shots = [self.shot_type.model_validate({**value, 'sequence': number}) for value in values]

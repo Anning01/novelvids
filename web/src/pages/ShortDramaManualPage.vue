@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import StageModelSelect from '@/components/StageModelSelect.vue'
 import { tr } from '@/i18n'
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpenText,
@@ -67,6 +68,7 @@ function readProjectMeta(): ManualProjectMeta {
 const route = useRoute()
 const router = useRouter()
 const agentStore = useCreationAgentStore()
+const stageModelId = ref('')
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
@@ -101,7 +103,9 @@ let workspaceRefreshVersion = 0
 let refreshingWorkspace = false
 let discoveringGenerations = false
 let generationDiscoveryTimer: ReturnType<typeof setInterval> | undefined
-const generationMonitors = new Map<string, { assetId: number; result: Promise<boolean> }>()
+const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; result: Promise<boolean> }>())
+const generatingTargets = computed(() => new Set([...generationMonitors.values()].map(item => item.targetKey)))
+const failedTargets = ref(new Set<string>())
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAssetClickUntil = 0
 
@@ -365,12 +369,12 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
 
 async function extractSelectedChapterAssets() {
   const chapter = selectedChapter.value
-  if (!chapter || extractionBusy.value) return
+  if (!chapter || !stageModelId.value || extractionBusy.value) return
   submittingExtraction.value = true
   extractionSubmissionError.value = ''
   try {
     const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
-    const task = (await (conversationId ? api.extract(chapter.id, conversationId) : api.extract(chapter.id))).data
+    const task = (await api.extract(chapter.id, conversationId ?? undefined, Number(stageModelId.value))).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
@@ -596,15 +600,17 @@ function setAssetFailed(assetId: number, value: boolean) {
   failedAssetIds.value = next
 }
 
-async function monitorAssetGeneration(assetId: number, taskId: string): Promise<boolean> {
+async function monitorAssetGeneration(assetId: number, taskId: string, variantId?: number | null): Promise<boolean> {
   const existing = generationMonitors.get(taskId)
   if (existing) return existing.result
   setAssetGenerating(assetId, true)
   setAssetFailed(assetId, false)
+  const targetKey = variantId == null ? `asset:${assetId}` : `variant:${variantId}`
+  failedTargets.value.delete(targetKey)
   const projectAtStart = projectId.value
   const current = () => pageAlive && projectAtStart === projectId.value
   const result = pollAssetGeneration()
-  generationMonitors.set(taskId, { assetId, result })
+  generationMonitors.set(taskId, { assetId, targetKey, result })
   return result
 
   async function pollAssetGeneration(): Promise<boolean> {
@@ -617,11 +623,15 @@ async function monitorAssetGeneration(assetId: number, taskId: string): Promise<
       }
       if (!current()) return false
       const completed = task.status === TaskStatusEnum.COMPLETED
+      if (!completed) failedTargets.value.add(targetKey)
       setAssetFailed(assetId, !completed)
       if (completed) await refreshAssets()
       return completed
     } catch {
-      if (current()) setAssetFailed(assetId, true)
+      if (current()) {
+        setAssetFailed(assetId, true)
+        failedTargets.value.add(targetKey)
+      }
       return false
     } finally {
       generationMonitors.delete(taskId)
@@ -633,7 +643,7 @@ async function monitorAssetGeneration(assetId: number, taskId: string): Promise<
 }
 
 function trackAssetGeneration(generation: AssetActiveGeneration) {
-  void monitorAssetGeneration(generation.asset_id, generation.task_id)
+  void monitorAssetGeneration(generation.asset_id, generation.task_id, generation.variant_id)
 }
 
 async function resumeActiveGenerations() {
@@ -645,45 +655,53 @@ async function resumeActiveGenerations() {
     if (!pageAlive || projectAtStart !== projectId.value) return
     for (const item of response.data) {
       if (!assets.value.some(asset => asset.id === item.asset_id)) continue
-      void monitorAssetGeneration(item.asset_id, item.task_id)
+      void monitorAssetGeneration(item.asset_id, item.task_id, item.variant_id)
     }
   } catch (error) {
     notice.error((error as Error).message)
   } finally { discoveringGenerations = false }
 }
 
-async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
+async function batchGenerateAssets(options: { assetIds: number[]; variantIds?: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
   if (batchGenerating.value) return
   const selected = new Set(options.assetIds)
-  const targets = assets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
-  if (!targets.length) return
+  const targets = assets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingTargets.value.has(`asset:${asset.id}`))
+  const selectedVariants = new Set(options.variantIds || [])
+  const variants = assets.value.flatMap(asset => (asset.variants || []).filter(variant => selectedVariants.has(variant.id)
+    && !variant.images.length && !generatingTargets.value.has(`variant:${variant.id}`)))
+  if (!targets.length && !variants.length) return
+  const targetAssetIds = new Set([...targets.map(asset => asset.id), ...variants.map(variant => variant.asset_id)])
 
   showBatchDialog.value = false
   batchGenerating.value = true
-  for (const asset of targets) {
-    setAssetGenerating(asset.id, true)
-    setAssetFailed(asset.id, false)
+  for (const id of targetAssetIds) {
+    setAssetGenerating(id, true)
+    setAssetFailed(id, false)
   }
   try {
     const response = await api.generateAssetBatch({
       novel_id: projectId.value,
       asset_ids: targets.map(asset => asset.id),
+      ...(variants.length ? { variant_ids: variants.map(variant => variant.id) } : {}),
       model_config_id: options.modelConfigId,
       clarity: options.clarity,
       aspect_ratio: options.ratio,
       output_format: options.outputFormat,
     })
     if (!pageAlive) return
-    for (const id of response.data.skipped_asset_ids) setAssetGenerating(id, false)
     for (const task of response.data.tasks) {
       const assetId = Number(task.request_params?.asset_id)
-      if (Number.isFinite(assetId)) void monitorAssetGeneration(assetId, task.id)
+      const variantId = task.request_params?.variant_id as number | null | undefined
+      if (Number.isFinite(assetId)) void monitorAssetGeneration(assetId, task.id, variantId)
+    }
+    for (const id of targetAssetIds) {
+      if (![...generationMonitors.values()].some(item => item.assetId === id)) setAssetGenerating(id, false)
     }
     await refreshAssets()
     notice.info(tr('任务已提交，正在等待模型执行。'))
     void resumeActiveGenerations()
   } catch (error) {
-    for (const asset of targets) setAssetGenerating(asset.id, false)
+    for (const id of targetAssetIds) setAssetGenerating(id, false)
     notice.error((error as Error).message)
   } finally {
     batchGenerating.value = false
@@ -761,13 +779,14 @@ onBeforeUnmount(() => {
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">{{ tr('全部项目') }}</AppButton>
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">{{ tr('当前章节') }}</AppButton>
           </div>
+          <StageModelSelect v-if="project.creationMode === 'agent' && (visibleAssets.length || loading)" v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
           <AppButton
-            v-if="project.creationMode === 'agent'"
+            v-if="(visibleAssets.length || loading) && project.creationMode === 'agent'"
             type="button"
             variant="secondary"
             size="sm"
             :loading="extractionBusy"
-            :disabled="!selectedChapter || extractionBusy"
+            :disabled="!selectedChapter || !stageModelId || extractionBusy"
             :aria-label="tr('提取本章资产')"
             :title="selectedChapter ? tr('提取第 {p0} 章资产', { p0: selectedChapter.number }) : tr('请先在剧本阶段选择章节')"
             @click="extractSelectedChapterAssets"
@@ -809,7 +828,10 @@ onBeforeUnmount(() => {
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
         <strong>{{ tr('暂无') }}{{ activeTabConfig.label }}</strong>
         <p>{{ project.creationMode === 'agent' ? tr('从本章正文提取角色、场景与道具，再和助手一起完善画面。') : tr('添加第一个{p0}，开始搭建你的短剧世界。', { p0: activeTabConfig.label }) }}</p>
-        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        <div v-if="project.creationMode === 'agent'" class="stage-actions">
+          <StageModelSelect v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
+          <AppButton type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || !stageModelId || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        </div>
         <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
@@ -917,6 +939,8 @@ onBeforeUnmount(() => {
       :generating-ids="generatingAssetIds"
       :failed-ids="failedAssetIds"
       :submitting="batchGenerating"
+      :generating-targets="generatingTargets"
+      :failed-targets="failedTargets"
       @close="showBatchDialog = false"
       @generate="batchGenerateAssets"
     />
@@ -925,6 +949,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .manual-page { min-height: 100%; color: #303442; background: #f8f9fc; }
 .project-name-line { display: flex; align-items: center; gap: 5px; min-height: 25px; }
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

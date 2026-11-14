@@ -17,11 +17,12 @@ class EpisodeScript(BaseModel):
     screenplay: str = Field(min_length=1, description="可直接交给演员和制作团队的完整分场导演剧本")
 
 
-async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None):
+async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None, *, assistant_model_config_id: int | None = None):
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
         raise HTTPException(404, localized_message("章节不存在"))
     params = {"novel_id": chapter.novel_id, "chapter_id": chapter_id, "operation": "screenplay",
+              "assistant_model_config_id": assistant_model_config_id,
               "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None}
     params = await prepare_workflow(params)
     async with project_write(chapter.novel_id) as db:
@@ -34,6 +35,8 @@ async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = N
             params["screenplay_version"] = fingerprint(expected_screenplay)
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.screenplay, status__in=ACTIVE_TASK_STATUSES).using_db(db):
             if task.request_params.get("chapter_id") == chapter_id:
+                if assistant_model_config_id is not None and task.request_params.get("assistant_model_config_id") != assistant_model_config_id:
+                    raise HTTPException(409, localized_message("已有改编任务正在运行，请等待完成后再切换模型"))
                 return task
         params["episode_pacing"] = chapter.episode_pacing or {"preset": "smart"}
         params["source_version"] = fingerprint([chapter.name, chapter.content])
@@ -62,11 +65,6 @@ class ScreenplayHandler(BaseTaskHandler):
             "episode_pacing": params.get("episode_pacing") or {"preset": "smart"}}, EpisodeScript)
         if not draft.screenplay.strip():
             raise ValueError(localized_message("模型未返回导演剧本"))
-        if "episode_pacing" in params:
-            from services.storyboard.validation import episode_duration_limit
-
-            if episode_duration_limit(draft.screenplay, params["episode_pacing"]) is None:
-                raise ValueError(localized_message("导演剧本缺少本集时长上限"))
 
         async def save():
             async with project_write(chapter.novel_id) as db:

@@ -24,8 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#快速开始">开始创作</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
+  <a href="#快速开始">快速开始</a> · <a href="#加入交流群">加入交流群</a> · <a href="#使用教程">使用教程</a> · <a href="#作品示例">作品示例</a> · <a href="https://shortdramas.xiazq.com">进入商业站</a> · <a href="#本地开发">本地开发</a> · <a href="#开发与社区">参与贡献</a> · <a href="#赞赏支持">赞赏支持</a>
 </p>
+
+## 快速开始
+
+选一种用法，把对应的一句话发给 AI。
+
+**下载并使用猫影工作台**
+
+```text
+请从 https://github.com/Anning01/novelvids 下载并用 Docker 部署猫影工作台，在支持的 Linux 主机上用仓库自带的 scripts/update/install.sh 一并启用在线升级，验证部署结果后把工作台地址和小说导入入口发给我。
+```
+
+**单独使用创作 Skills**
+
+```text
+请用 https://github.com/Anning01/novelvids 里的 scripts/export_skill.py，把剧本改编、资产设定和分镜设计三个 Skills 安装到我当前的创作项目，然后告诉我怎么用它们处理第一章小说。
+```
 
 ## 加入交流群
 
@@ -106,53 +122,7 @@
 
 截图使用公开示例项目，展示当前版本的中文界面；系统也支持英文。
 
-## 快速开始
-
-1. 按下方步骤启动本地工作台，在「设置 → 模型配置」添加自有模型，或填入猫影开放平台的 Base URL、模型 ID 和 API Key。
-2. 在首页选择图片或视频模型，填写画面描述、添加参考素材并核对预计费用；也可以从「短剧制作」导入故事，进入资产与分镜工作区。
-3. 查看生成结果与历史版本，继续编辑镜头、整理资源，或在作品库管理成片。团队和费用归属以当前选中的团队为准。
-
-### 自行部署
-
-默认可匿名在本地创作。资产设计模板、分镜语速规则和 15 套视觉风格随源码提供，统一在 `prompts/skills/` 编辑。
-
-<details>
-<summary>展开 Docker 自部署与首次配置步骤</summary>
-
-需要 Docker 与 Docker Compose，以及可用的模型服务。**自部署不等于离线推理**：当前 AI 能力通过你配置的 API 调用，供应商可能收费。
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
-```
-
-启动后打开 **[http://localhost:8080](http://localhost:8080)**。
-
-首次创作前：
-
-1. 在「设置 → 模型配置」添加并启用文本模型，勾选「创作助手」和「支持多轮工具调用」；在通用设置中启用助手。
-2. 配置要使用的图片、视频模型和价格。只配置文本模型，也可以先做故事、资产和分镜规划。
-3. 从一段短故事或一章正文开始，检查提取与分镜结果，再生成媒体。明确的生成请求会调用付费模型；只改提示词不会自动生图或生视频。
-
-Docker 后端镜像已包含 FFmpeg；使用旧镜像时，可安装并检查：
-
-```bash
-docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
-docker compose exec backend ffprobe -version
-```
-
-可用 `docker compose exec backend ffprobe -version` 检查视频工具是否就绪。
-
-- **数据在本地：**`./data` 保存数据库和私有导出，`./media` 保存图片、视频、音频；更新前备份这两个目录。
-- **自建工作台初始登录：**全新安装的初始账号为 `admin`，密码为 `123456`，默认团队获 `999999` 元本地余额。公网部署前请设置自己的 `SUPER_ADMIN_PASSWORD` 并启用 HTTPS。仅本机单人使用时可设置 `AUTH_ENABLED=false`。
-- **API 平台器灵扫码登录：**在 `NOVELVIDS_ROLE=platform` 上设置 `AUTH_ENABLED=true`、`AUTH_PROVIDER=qiling` 和器灵服务的 HTTPS 地址 `QILING_API_BASE_URL`。开放新账号注册时设置 `QILING_SIGNUP_ENABLED=true`，并填写 Compose 中的 `LEGAL_*` 运营者、协议与第三方信息。自建工作台开启登录后使用自己部署的账号密码。
-- **微信支付与远程重制：**启用充值时，为后端配置自己的 `WECHAT_PAY_*` 商户参数和回调地址（站点的 `/api/payment/wechat/notify`），通过 Compose 覆盖文件把密钥文件只读挂载到配置的容器路径。重制默认在本机处理；已安装媒体工作进程时，填写 `REMAKE_MEDIA_SSH_HOST` 并为后端配置 SSH 身份和已验证的主机公钥。
-- **本地开发：**Python 3.12+、Node.js 22.12+、uv 与 FFmpeg，步骤见下方「本地开发」。
-
-</details>
-
-### 本地工作台和开放平台
+## 本地工作台和开放平台
 
 本仓库部署创作工作台，默认使用 `NOVELVIDS_ROLE=studio`。开放平台请使用独立的 [Cat API 项目](https://github.com/Anning01/cat-api)。在项目列表的更多操作中选择「导出作品」，在另一套本地工作台选择「导入作品」即可恢复为新项目。云端素材由导出浏览器直接下载，存储域名需允许该工作台来源的跨域读取。
 
@@ -174,38 +144,6 @@ flowchart LR
 ```
 
 故事板适合逐镜头检查，画布适合组织引用与工作流。开始生成后可以关闭页面，后台继续查询已受理任务；结果不确定时需核对，不会自动重复提交收费请求。
-
-## 单独使用创作技能
-
-故事分析是工作台内置功能，导入书稿后提供故事速览。3 个可单独安装的猫影创作技能统一在本仓库的 `prompts/skills/` 下维护，每个技能一个目录。只做某个环节时，可以单独导出并安装对应的技能，再向助手提供正文、剧本或参考资料。
-
-| 技能名称 | 安装标识 | 交付内容 |
-| --- | --- | --- |
-| 猫影剧本改编 | `novelvids-screenplay` | 分场剧本、动作与对白 |
-| 猫影资产设定 | `novelvids-assets` | 人物、群像、场景、道具和形态的完整设计 |
-| 猫影分镜设计 | `novelvids-storyboard` | 镜头、资产引用与人声时间轴 |
-
-每个导出包自带所需的共享规则和脚本，安装一个包只会增加一个技能。图像制作、视频制作和视频拆解由工作台提供。
-
-改稿时继续使用负责该产物的技能，例如用资产设定修改某一章的服装形态，用分镜制作调整对白时间轴。跨章节、跨环节的步骤编排由宿主 Agent 负责。
-
-从仓库根目录导出或安装一个技能，只需 Python 标准库：
-
-```bash
-python3 scripts/export_skill.py --list
-python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
-python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
-```
-
-第一条列出可选环节。第二条导出包含所需规则的技能目录 `output/skills/novelvids-storyboard/`。第三条安装剧本技能到当前项目；在该项目的会话中可用 `$novelvids-screenplay` 指定它。例如：“把下面这一章改成 60 秒短剧，保留结尾那句对白。”
-
-分镜技能支持项目全局的「故事版」开关，默认关闭。在作品根目录运行 `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` 开启，或用 `off` 关闭。开启后，每个生成段交付一张简约黑白线稿故事版和配套视频提示词，图内格数随动作与构图变化。
-
-工作台在剧本页保存作品画风、全片视听约定和故事版开关；开启后生成新分镜会逐镜出图。已有分镜可单独生成或重试故事版，成图可加入视频参考并保留配套提示词。
-
-分镜和视频技能默认交付通用提示词。Seedance 2.0（标准版、Mini、Fast）专项稿使用 `sd2-pe`，Seedance 2.5 使用 `sd25-pe`，MiniMax H3 使用 `h3-prompt-writing`，万相 3.0 使用 `wan3-pe`，按需单独安装。分镜包自带模型选择脚本；缺少专项技能时仍可使用通用稿。可在本次任务指定模型，或在作品根目录的 `novelvids.config.json` 设置 `video_model_type`。工作台从 `CREATION_AGENT_OPTIONAL_SKILLS_PATH`（默认 `.agents/skills`）读取已安装的官方技能，并按作品所选视频模型冻结本次优化规则；通用稿与专项稿分别保留。详见[模型映射与官方安装命令](prompts/skills/novelvids-video/references/model_optimization.md)。
-
-规则源文件位于 `prompts/skills/novelvids-*/references/`。各包的 `SKILL.md` 说明输入、交付物与所需规则。导出时共享规则会复制进包内，因此只装分镜也能使用其风格、叙事和语速规则。独立包可以直接编辑；更新有本地修改的安装时，先导出到新目录再比较。工作台继续负责数据、媒体和任务执行，单独使用技能时由实际接入的助手工具提供这些能力。
 
 ## 本地开发
 

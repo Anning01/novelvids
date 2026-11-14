@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Upload, X } from 'lucide-vue-next'
 import { exportProject, importProject } from '@/features/project-transfer/transfer'
-import { api, ApiRequestError } from '@/api'
+import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import AppPagination from '@/components/AppPagination.vue'
@@ -203,6 +203,16 @@ async function remove(project: ProjectOverviewItem) {
 watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
 watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { cancelTransfers(); overview.value = null; void load() })
+const exporting = ref(false)
+async function downloadDiagnostics() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    if (await exportDiagnostics()) notice.success(tr('诊断日志已导出'))
+    else notice.info(tr('已导出网页日志，后台日志暂时无法读取'))
+  } catch (cause) { notice.error(cause instanceof Error ? cause.message : tr('文件下载失败，请稍后重试')) }
+  finally { exporting.value = false }
+}
 function refreshOnFocus() { if (!loading.value) void load() }
 onMounted(() => { void load(); window.addEventListener('focus', refreshOnFocus) })
 onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEventListener('focus', refreshOnFocus) })
@@ -261,10 +271,18 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
       </section>
     </template>
     <div v-if="errorMessage" class="projects-page__error" role="alert"><h2>{{ tr('项目加载失败') }}</h2><p>{{ errorMessage }}</p><AppButton variant="secondary" :loading="loading" @click="load">{{ tr('重新加载') }}</AppButton></div>
+    <details v-if="auth.deploymentRole === 'studio'" class="projects-support">
+      <summary>{{ tr('技术支持') }}</summary>
+      <AppButton variant="ghost" size="sm" :loading="exporting" @click="downloadDiagnostics">{{ tr('导出最近 100 条诊断日志') }}</AppButton>
+    </details>
   </main>
 </template>
 
 <style scoped>
+.projects-support { margin-top: 24px; color: var(--app-text-secondary); font-size: 12px; }
+.projects-support summary { width: fit-content; padding: 5px 0; cursor: pointer; }
+.projects-support summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+
 .projects-page { container: projects / inline-size; min-height: 100%; padding: 32px 30px 60px; color: var(--app-text); background: var(--app-canvas); }
 .projects-page__header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
 .projects-page__migration-hint { margin: 8px 0 0; color: var(--app-text-secondary); font-size: 13px; line-height: 1.5; }

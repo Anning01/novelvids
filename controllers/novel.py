@@ -327,6 +327,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         cover_model_config_id: int | None = None,
         *,
         cover_only: bool = False,
+        assistant_model_config_id: int | None = None,
     ) -> AiTask:
         """提交 Agent 项目分析任务，模型密钥始终只从本地配置读取。"""
         novel = await self.get(novel_id)
@@ -341,13 +342,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             await ai_model_config_controller.get_active(
                 AiTaskTypeEnum.reference_image, cover_model_config_id, team_id=team_id,
             )
-            from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
-            for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
-                if pending.request_params.get("novel_id") == novel_id:
-                    if not await reconcile_unstarted_model_task(pending):
-                        raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
-        from services.creation_agent.skill_execution import require_agent
-        await require_agent(team_id)
+        from services.creation_agent.preflight_recovery import reconcile_unstarted_model_task
+        for pending in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, stage="needs_review"):
+            if pending.request_params.get("novel_id") == novel_id:
+                if not await reconcile_unstarted_model_task(pending):
+                    raise HTTPException(409, detail=localized_message('外部请求结果待核对，系统不会自动重试'))
         prompt_language = await general_config_controller.get_prompt_language()
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.project_analysis)
 
@@ -355,6 +354,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "novel_id": novel_id,
             "resolution": "1K",
             "include_cover": include_cover,
+            "assistant_model_config_id": assistant_model_config_id,
             **({"operation": "project_cover"} if cover_only else {}),
             **({"cover_model_config_id": cover_model_config_id} if include_cover else {}),
             "prompt_language": prompt_language,
@@ -373,6 +373,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('novel_id') == novel_id:
+                    if assistant_model_config_id is not None and existing.request_params.get('assistant_model_config_id') != assistant_model_config_id:
+                        raise HTTPException(409, localized_message('已有分析任务正在运行，请等待完成后再切换分析模型'))
                     if (existing.request_params.get('cover_model_config_id') != params.get('cover_model_config_id')
                             or existing.request_params.get('operation') != params.get('operation')):
                         raise HTTPException(409, localized_message('项目已有分析任务，请等待完成后再调整封面模型'))

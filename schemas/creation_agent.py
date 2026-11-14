@@ -34,6 +34,7 @@ LEGACY_AGENT_DEFAULTS = {
 class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Legacy configuration field retained for stored snapshots and older API clients.
     enabled: bool = False
     runtime: Literal["deepagents", "pydantic_ai"] = "deepagents"
     production_concurrency: int = Field(4, ge=1, le=20)

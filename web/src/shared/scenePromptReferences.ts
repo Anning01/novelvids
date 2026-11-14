@@ -6,6 +6,7 @@ const BRACED_ASSET_MENTION_PATTERN = /@\{([^}]+)\}/gu
 
 export interface VideoInputAssetImageSource {
   assetId: number
+  variantId?: number | null
   label: string
   mentionNames: string[]
   imageUrls: string[]
@@ -38,20 +39,23 @@ export function buildVideoInputImageReferences(
   includeSelected = false,
   mediaPrompt = prompt,
 ): VideoInputImageReference[] {
-  const sourcesByName = new Map<string, VideoInputAssetImageSource>()
+  const sourcesByName = new Map<string, VideoInputAssetImageSource[]>()
   for (const source of assets) {
-    for (const name of source.mentionNames) sourcesByName.set(name, source)
+    for (const name of source.mentionNames) sourcesByName.set(name, [...(sourcesByName.get(name) || []), source])
   }
 
   const orderedAssets: VideoInputAssetImageSource[] = []
-  const seenAssetIds = new Set<number>()
+  const seenAssetIds = new Set<string>()
+  const identity = (source: VideoInputAssetImageSource) => `${source.assetId}:${source.variantId ?? 'base'}`
   const bracedRanges: Array<[number, number]> = []
   const occurrences = new Map<number, { name: string; length: number }>()
   for (const match of prompt.matchAll(BRACED_ASSET_MENTION_PATTERN)) {
     const index = match.index
     bracedRanges.push([index, index + match[0].length])
-    const [name] = (match[1] || '').split('#', 1)
-    if (sourcesByName.has(name)) occurrences.set(index, { name, length: match[0].length })
+    const name = match[1] || ''
+    const resolved = sourcesByName.has(name) || assets.some(source => source.variantId !== undefined)
+      ? name : name.split('#')[0]!
+    if (sourcesByName.has(resolved)) occurrences.set(index, { name: resolved, length: match[0].length })
   }
   for (const name of sourcesByName.keys()) {
     const syntax = `@${name}`
@@ -66,14 +70,15 @@ export function buildVideoInputImageReferences(
     }
   }
   for (const [, occurrence] of [...occurrences.entries()].sort(([left], [right]) => left - right)) {
-    const source = sourcesByName.get(occurrence.name)
-    if (!source || seenAssetIds.has(source.assetId)) continue
-    seenAssetIds.add(source.assetId)
-    orderedAssets.push(source)
+    for (const source of sourcesByName.get(occurrence.name) || []) {
+      if (seenAssetIds.has(identity(source))) continue
+      seenAssetIds.add(identity(source))
+      orderedAssets.push(source)
+    }
   }
 
   if (includeSelected) {
-    orderedAssets.push(...assets.filter(asset => !seenAssetIds.has(asset.assetId))
+    orderedAssets.push(...assets.filter(asset => !seenAssetIds.has(identity(asset)))
       .sort((left, right) => left.assetId - right.assetId))
   }
 

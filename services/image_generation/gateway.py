@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -75,6 +76,24 @@ def _http_provider_error(response: httpx.Response) -> str | None:
         return _provider_error(response.json())
     except ValueError:
         return None
+
+
+def _capacity_retry_delay(response: httpx.Response) -> int | None:
+    # CAT admission rejects before creating a receipt. Forwarded provider errors carry a receipt.
+    if (response.status_code != 429 or _request_id(response) or response.headers.get("x-cat-request-id")
+            or response.headers.get("x-novelvids-request-id")):
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict) or error.get("code") != "rate_limit_exceeded":
+        return None
+    if error.get("message") != "模型并发已满，请稍后重试":
+        return None
+    delay = response.headers.get("retry-after", "")
+    return max(1, int(delay)) if delay.isascii() and delay.isdigit() and len(delay) < 10 else 2
 
 
 def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
@@ -176,6 +195,7 @@ async def generate_images(
             headers = {"Authorization": f"Bearer {api_key}"}
             if api_protocol == ImageApiProtocol.novelvids.value:
                 from uuid import uuid4
+                headers["X-NovelVids-Capabilities"] = "pixel_tier_images"
                 headers["Idempotency-Key"] = str(platform_call.request_key if platform_call else uuid4())
             if prepared.images:
                 try:
@@ -185,7 +205,12 @@ async def generate_images(
                 response = await client.post(endpoint, headers=headers,
                     data={key: str(value) for key, value in prepared.payload.items()}, files=files)
             else:
-                response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                while True:
+                    response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                    delay = _capacity_retry_delay(response) if api_protocol == ImageApiProtocol.novelvids.value else None
+                    if delay is None:
+                        break
+                    await asyncio.sleep(delay)
             if platform_call:
                 from services.billing.platform import capture_platform_response
                 await capture_platform_response(platform_call, response)

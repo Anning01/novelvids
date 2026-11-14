@@ -5,6 +5,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
+import SceneAssetVariantPicker from '@/components/SceneAssetVariantPicker.vue'
+import ScenePromptEditor from '@/components/ScenePromptEditor.vue'
 import { api } from '@/api'
 import { AssetTypeEnum } from '@/types'
 import type { Asset, AssetVariant, AudioReference } from '@/types'
@@ -22,6 +24,7 @@ vi.mock('@/api', async (importOriginal) => {
       audioReferences: vi.fn(),
       updateAsset: vi.fn(),
       updateAssetVariant: vi.fn(),
+      updateScene: vi.fn(),
     },
   }
 })
@@ -95,7 +98,7 @@ const AudioReferencePickerStub = defineComponent({
   template: '<div v-if="open" data-testid="audio-reference-picker" />',
 })
 
-function bootstrap(assetVariantId: number | null) {
+function bootstrap(assetVariantId: number | null | Array<number | null>) {
   return {
     code: 0,
     message: 'ok',
@@ -146,6 +149,40 @@ function openVoicePicker(wrapper: Awaited<ReturnType<typeof mountPage>>) {
 }
 
 describe('分镜角色音色选择', () => {
+  it('renders and preserves a qualified form reference restored from MCP metadata', async () => {
+    const response = bootstrap(variant.id)
+    response.data.assets = [{ ...character, variants: [{ ...variant, images: ['/media/imported-form.png'] }] }]
+    response.data.scenes[0]!.prompt = '@{总工程师#退休形态}伸手，随后@{总工程师#退休形态}转身。'
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(response as never)
+    const wrapper = await mountPage()
+    await flushPromises()
+    const editor = wrapper.findComponent(ScenePromptEditor)
+    const tokens = editor.findAll('[data-mention-kind="person"]')
+    expect(tokens).toHaveLength(2)
+    expect(tokens.map(token => token.attributes('data-syntax'))).toEqual(['@{总工程师#退休形态}', '@{总工程师#退休形态}'])
+    expect(tokens[0]!.get('img').attributes('src')).toBe('/media/imported-form.png')
+    await editor.get('.scene-prompt-editor__input').trigger('input')
+    expect(editor.emitted('update:modelValue')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('restores multiple forms as separate rows and saves the remaining forms after one is unchecked', async () => {
+    const response = bootstrap([null, variant.id, 102])
+    response.data.assets = [{ ...character, variants: [variant, { ...variant, id: 102, name: '少年形态', metadata: {} }] }]
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(response as never)
+    vi.mocked(api.updateScene).mockImplementation(async (_id, patch) => ({ code: 0, message: '', data: { ...response.data.scenes[0]!, ...patch } }))
+    const wrapper = await mountPage()
+    await flushPromises()
+    expect(wrapper.findAll('.asset-name-button').map(row => row.text())).toEqual(['总工程师', '总工程师 · 退休形态', '总工程师 · 少年形态'])
+    const options = wrapper.findComponent(ScenePromptEditor).props('options')
+    expect(options.map(option => option.syntax)).toEqual(expect.arrayContaining(['@{总工程师}', '@{总工程师#退休形态}', '@{总工程师#少年形态}']))
+    const picker = wrapper.findAllComponents(SceneAssetVariantPicker)[0]!
+    picker.vm.$emit('select', { assetId: character.id, variantId: variant.id, selected: false })
+    await flushPromises()
+    expect(wrapper.findAll('.asset-name-button').map(row => row.text())).toEqual(['总工程师', '总工程师 · 少年形态'])
+    await vi.waitFor(() => expect(api.updateScene).toHaveBeenCalled(), { timeout: 1500 })
+    expect(vi.mocked(api.updateScene).mock.lastCall?.[1]).toMatchObject({ asset_ids: [character.id], metadata: { asset_variant_ids: { [character.id]: [null, 102] } } })
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     sessionStorage.clear()

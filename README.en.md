@@ -24,8 +24,24 @@
 </p>
 
 <p align="center">
-  <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#quick-start">Get started</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
+  <a href="#quick-start">Quick start</a> · <a href="#join-the-community">Join the community</a> · <a href="#video-tutorial">Video tutorial</a> · <a href="#example-videos">Example videos</a> · <a href="https://shortdramas.xiazq.com">NovelVids service</a> · <a href="#local-development">Local development</a> · <a href="#development-and-community">Contribute</a> · <a href="#support-the-project">Support the project</a>
 </p>
+
+## Quick start
+
+Choose one option and send its prompt to your AI assistant.
+
+**Download and run the studio**
+
+```text
+Download NovelVids from https://github.com/Anning01/novelvids and deploy it with Docker, use the included scripts/update/install.sh to enable online updates on supported Linux hosts, then verify the installation and send me the studio URL and where to import my novel.
+```
+
+**Use the creative skills on their own**
+
+```text
+Use scripts/export_skill.py from https://github.com/Anning01/novelvids to install the screenplay, asset design and storyboard skills in my current project, then show me how to use them on the first chapter of my novel.
+```
 
 ## Join the community
 
@@ -106,53 +122,7 @@ You can also use **Remake studio** to analyze reference videos you are authorize
 
 Screenshots use public example projects in the current Chinese interface. English is also supported.
 
-## Quick start
-
-1. Start the local studio using the steps below. In **Settings → Model configuration**, add your own model or enter the NovelVids platform Base URL, model ID and API key.
-2. Choose an image or video model, enter a visual idea, add references and review the estimate. For a series, import a story through Short dramas and continue into assets and storyboards.
-3. Review generated versions, revise shots, organize resources and manage finished episodes in the works library. Projects and costs belong to the currently selected team.
-
-### Self-hosting
-
-Local use is anonymous by default. The asset design templates, storyboard speech timing rules and 15 visual styles ship in `prompts/skills/`, where you can edit them.
-
-<details>
-<summary>Expand Docker self-hosting and first-run configuration</summary>
-
-You need Docker with Docker Compose and access to model services. **Self-hosting is not offline inference:** AI features call the APIs you configure, and providers may charge for them.
-
-```bash
-git clone https://github.com/Anning01/novelvids.git
-cd novelvids
-docker compose up -d --build
-```
-
-Open **[http://localhost:8080](http://localhost:8080)** when startup completes.
-
-Before creating your first project:
-
-1. Under **Settings → Model settings**, enable a text model, select **Creation assistant**, and enable **Multi-turn tool calling**. Enable the assistant in General settings.
-2. Configure the image/video models you want and their prices. A text model alone is enough to start planning stories, assets and storyboards.
-3. Start with a short story or one chapter. Review extraction and storyboard results before generating media. Explicit generation requests can incur model charges; editing a prompt does not automatically generate images or videos.
-
-The Docker backend image includes FFmpeg. For older images, install and check it in the backend container:
-
-```bash
-docker compose exec -u root backend sh -c 'apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*'
-docker compose exec backend ffprobe -version
-```
-
-Use `docker compose exec backend ffprobe -version` to check that the video tools are ready.
-
-- **Local persistence:** `./data` holds the database and private exports; `./media` holds images, video and audio. Back up both before updating.
-- **Initial studio sign-in:** A fresh studio starts with username `admin`, password `123456`, and a local balance of CNY `999999` for its default team. Set your own `SUPER_ADMIN_PASSWORD` and enable HTTPS before public exposure. For personal use on your machine, you can set `AUTH_ENABLED=false`.
-- **Qiling sign-in on the API platform:** On `NOVELVIDS_ROLE=platform`, set `AUTH_ENABLED=true`, `AUTH_PROVIDER=qiling` and `QILING_API_BASE_URL` to your Qiling HTTPS endpoint. To accept new accounts, set `QILING_SIGNUP_ENABLED=true` and fill in the operator, policy and third-party disclosures under `LEGAL_*` in Compose. Self-hosted studios use their own username and password when sign-in is enabled.
-- **WeChat Pay and remote media processing:** To enable top-ups, configure the backend with your own `WECHAT_PAY_*` merchant settings and point the callback URL to `/api/payment/wechat/notify` on your site. Use a Compose override to mount the key files read-only at their configured container paths. Remake jobs run locally by default. To use an installed media worker, set `REMAKE_MEDIA_SSH_HOST` and configure backend SSH credentials and a verified host key.
-- **Local development:** Python 3.12+, Node.js 22.12+, uv and FFmpeg. See Local development below.
-
-</details>
-
-### Local studio and developer platform
+## Local studio and developer platform
 
 This repository runs the creative workspace with `NOVELVIDS_ROLE=studio` by default. Deploy the developer platform from the separate [Cat API repository](https://github.com/Anning01/cat-api). Use **Export project** in the project menu and **Import project** in another local studio to restore a new project. The exporting browser downloads cloud media directly from storage, which must permit cross-origin reads from the studio origin.
 
@@ -174,24 +144,6 @@ flowchart LR
 ```
 
 Use the storyboard to inspect each shot and the canvas to organize references and workflow. Accepted media tasks continue to be collected after you close the page. Uncertain submissions require review rather than an automatic repeat of a paid request.
-
-## Standalone creative skills
-
-Story analysis is built into the workbench. The three installable creative skills are maintained in this repository under `prompts/skills/`, one directory per skill. Install any stage individually in an assistant that loads `SKILL.md`. Available packages cover screenplay adaptation (`novelvids-screenplay`), asset design and storyboarding. Image production, video production and reference-video analysis are available in the workbench. Each skill handles revisions to its own output. The host agent coordinates requests spanning chapters or stages.
-
-From the repository root, use Python's standard library to list, export or install a package:
-
-```bash
-python3 scripts/export_skill.py --list
-python3 scripts/export_skill.py novelvids-storyboard --dest ./output/skills
-python3 scripts/export_skill.py novelvids-screenplay --dest .agents/skills
-```
-
-The storyboard skill has a project-wide picture-board switch, off by default. From the production project root, run `python3 .agents/skills/novelvids-storyboard/scripts/storyboard_sheets.py on` (or `off`). When enabled, each video generation segment gets a single black-and-white storyboard image and a companion video prompt. The action determines the panel count.
-
-Storyboard and video skills keep the generic prompt. Install the optional optimizer for your video model: `sd2-pe` for Seedance 2.0 (standard, Mini and Fast), `sd25-pe` for Seedance 2.5, `h3-prompt-writing` for MiniMax H3, or `wan3-pe` for Wan 3.0. Pass the active video model to the skill or set `video_model_type` in the production project’s `novelvids.config.json`. See the [model routing and official installation instructions](prompts/skills/novelvids-video/references/model_optimization.md).
-
-The exported directory contains its entrypoint, referenced rules and MIT license. The last command installs a project-local skill. Invoke it with `$novelvids-screenplay` and supply the source passage and target running time. Each source entrypoint under `prompts/skills/novelvids-*/` explains the inputs and deliverable. The application and exports share the rules under `references/`. Shared resources are included in each export. To update a locally edited package, export to a fresh directory and review the differences.
 
 ## Local development
 

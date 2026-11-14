@@ -55,6 +55,48 @@ it('confirms a server-owned creation plan without sending client-authored operat
 })
 
 describe('creation assistant panel', () => {
+  it('follows nested thought growth even when the capped thought box no longer grows', async () => {
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.currentRun = { task_id: 'stream', conversation_id: 1, status: 2, content: '', error_message: null, changes: [], usage: {}, event_count: 0 }
+    store.messages = [{ id: 2, role: 'assistant', task_id: 'stream', status: 2, content: '', changes: [], usage: {}, created_at: '',
+      activity: [{ id: 'thought', kind: 'thinking', status: 'running', label: '思考过程', detail: '第一段' }] }]
+    await flushPromises()
+    scrollToBottom.mockClear()
+    store.messages[0]!.activity![0]!.detail += '流式追加的新内容'
+    await flushPromises()
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    expect(scrollToBottom).toHaveBeenCalledWith(false)
+    wrapper.unmount()
+  })
+  it.each(['light', 'dark'])('offers real checkpoint resume for a stopped production in %s', async theme => {
+    document.documentElement.dataset.appTheme = theme
+    const pinia = createPinia()
+    const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+    await flushPromises()
+    const store = useCreationAgentStore(pinia)
+    store.currentRun = { task_id: 'old-production', conversation_id: 1, status: 5, content: '', error_message: null,
+      changes: [], usage: {}, event_count: 0, recovery: { can_resume_production: true, can_resume: false,
+        reusable_count: 15, pending_count: 0, responses_saved: 10, failure_step: null, error_code: null } }
+    const resume = vi.spyOn(store, 'resume').mockResolvedValue()
+    const send = vi.spyOn(store, 'send')
+    await flushPromises()
+    const button = wrapper.findAll('button').find(item => item.text() === '从断点继续')!
+    expect(button).toBeDefined()
+    expect(wrapper.text()).toContain('复用已完成步骤')
+    expect(wrapper.text()).not.toContain('继续对话')
+    await button.trigger('click')
+    expect(resume).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalled()
+    store.submitting = true
+    store.error = '核对中'
+    await flushPromises()
+    expect(wrapper.findAll('button').find(item => item.text() === '核对断点中…')?.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  })
   it.each(['light','dark'])('keeps ordinary media progress free of reconnection notices and retains real failure recovery (%s)',async theme=>{
     document.documentElement.dataset.appTheme=theme
     const pinia=createPinia()
@@ -235,11 +277,11 @@ describe('creation assistant panel', () => {
     expect(send).toHaveBeenCalledWith({ message: '灯光柔和一点', chapter_id: 3, model_config_id: 1, targets: [{ kind: 'scene', id: 9 }], write_scope: 'selected' })
   })
 
-  it('disables sending when the server feature flag is off', async () => {
+  it('disables sending when no assistant model is available', async () => {
     vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: { enabled: false, can_write: true, max_targets: 2, models: [] } })
     const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [createPinia()] } })
     await flushPromises()
-    expect(wrapper.text()).toContain('尚未启用')
+    expect(wrapper.text()).toContain('还需要配置一个对话模型')
     expect(wrapper.find('[data-testid="sender"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="助手连接状态"]').exists()).toBe(true)
     await wrapper.get('[aria-label="关闭创作助手"]').trigger('click')

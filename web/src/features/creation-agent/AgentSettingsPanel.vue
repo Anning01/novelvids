@@ -2,8 +2,6 @@
 import { tr } from '@/i18n'
 
 import { computed, onMounted, ref, useId } from 'vue'
-import { ElSwitch } from 'element-plus'
-import 'element-plus/theme-chalk/el-switch.css'
 import { Bot, ChevronDown, SlidersHorizontal } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AppSettingsCard from '@/components/AppSettingsCard.vue'
@@ -66,10 +64,6 @@ async function save() {
     <template #status><span class="agent-settings-panel__tag">{{ tr('对话创作') }}</span></template>
     <p v-if="error" class="agent-settings-panel__error" role="alert">{{ error }}</p>
     <form v-if="configuration" :id="formId" @submit.prevent="save">
-      <div class="agent-settings-panel__enable">
-        <div><strong>{{ tr('启用创作助手') }}</strong><p>{{ tr('所有新创作任务都需要启用助手并配置支持工具调用的模型。') }}</p></div>
-        <ElSwitch v-model="configuration.enabled" :aria-label="tr('启用创作助手')" :disabled="saving" />
-      </div>
       <div class="agent-settings-panel__features" :aria-label="tr('助手能力')">
         <span>{{ tr('跨对话记忆') }}</span><span>{{ tr('自动整理上下文') }}</span><span>{{ tr('修改可撤销') }}</span>
       </div>
@@ -96,12 +90,7 @@ async function save() {
 </template>
 
 <style scoped>
-.agent-settings-panel { --el-switch-on-color: var(--app-accent); --el-switch-off-color: var(--app-border-strong); }
 .agent-settings-panel__tag { padding: 4px 9px; border-radius: 6px; background: var(--app-surface-muted); color: var(--app-text-secondary); }
-.agent-settings-panel__enable { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.agent-settings-panel__enable strong { font-size: 13px; font-weight: 600; }
-.agent-settings-panel__enable p { margin: 5px 0 0; font-size: 12px; line-height: 1.6; color: var(--app-text-secondary); }
-.agent-settings-panel :deep(.el-switch) { flex: 0 0 auto; --el-switch-on-color: var(--app-accent); --el-switch-off-color: var(--app-border-strong); }
 .agent-settings-panel__features { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 16px 0 18px; font-size: 11px; color: var(--app-text-secondary); }
 .agent-settings-panel__features span { display: inline-flex; align-items: center; gap: 7px; }
 .agent-settings-panel__features span::before { content: ''; width: 4px; height: 4px; background: var(--app-accent); border-radius: 50%; }

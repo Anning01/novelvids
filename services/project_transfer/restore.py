@@ -51,14 +51,21 @@ class LocalIds:
         output = {}
         scalar = {"scene_id": Scene, "chapter_id": Chapter, "variant_id": AssetVariant, "current_video_id": Video,
                   "source_video_id": Video, "video_id": Video, "voice_reference_id": AudioReference,
-                  "narrator_audio_reference_id": AudioReference, "library_resource_id": VideoResource}
+                  "narrator_audio_reference_id": AudioReference, "library_resource_id": VideoResource,
+                  "remake_source_id": RemakeSource}
         for key, item in value.items():
+            if key in {"model_config_id", "video_model_config_id"}:
+                continue
             if key == "asset_variant_ids" and isinstance(item, dict):
-                output[key] = {str(self.get(Asset, k)): self.get(AssetVariant, v) for k, v in item.items()}
+                output[key] = {str(self.get(Asset, k)): [self.get(AssetVariant, identifier) for identifier in v] if isinstance(v, list) else self.get(AssetVariant, v) for k, v in item.items()}
+            elif key == "voice_asset_ids" and isinstance(item, dict):
+                output[key] = {stable_id: self.get(Asset, asset_id) for stable_id, asset_id in item.items()}
             elif key in {"asset_ids", "voice_asset_ids"} and isinstance(item, list) and all(type(v) is int for v in item):
                 output[key] = [self.get(Asset, v) for v in item]
             elif key == "asset_id" and type(item) is int:
                 output[key] = self.get(Asset, item)
+            elif key == "remake_source_ids" and isinstance(item, list):
+                output[key] = [self.get(RemakeSource, source_id) for source_id in item]
             elif key in scalar and type(item) is int:
                 output[key] = self.get(scalar[key], item)
             elif key in {"video_prompt_tasks", "auto_enhancement", "modelType", "activeVideoId", "restored_generation_task_id"}:
@@ -101,7 +108,7 @@ async def restore_graph(project, *, team_id, user_id):
             suffix += 1
             name = f"{base[:240]} ({suffix})"
         novel = await create(Novel, row, name=name, narrator_audio_reference_id=ids.get(AudioReference, row.get("narrator_audio_reference_id")),
-                             video_generation_defaults=ids.references(row.get("video_generation_defaults")), **scope)
+                             video_generation_defaults=ids.references(creative_value(row.get("video_generation_defaults"))), **scope)
         for source in project["library"]:
             resource = await create(VideoResource, source, **{**scope,"team_id":team_id or 0})
             await ProjectResource.create(novel_id=novel.id, resource_id=resource.id, using_db=db)
@@ -122,27 +129,29 @@ async def restore_graph(project, *, team_id, user_id):
             if status in (TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued):
                 status = TaskStatusEnum.cancelled.value
             await create(Video, row, scene_id=ids.get(Scene,row["scene_id"]), metadata={}, status=status)
+        for row in project["remake_sources"]:
+            await create(RemakeSource, row, chapter_id=ids.get(Chapter,row["chapter_id"]), novel_id=novel.id,
+                         storage_provider="local", source_video_manifest=ids.references(row.get("source_video_manifest")), **scope)
         for model, group in [(Asset,"assets"), (AssetVariant,"variants"), (Scene,"scenes"), (Video,"videos")]:
             for row in project[group]:
                 changes = {"metadata": ids.references(row.get("metadata") or {})}
                 if model is Scene:
                     changes["prompt_params"] = ids.references(row.get("prompt_params"))
                 await model.filter(id=ids.get(model,row["id"])).using_db(db).update(**changes)
-        for row in project["remake_sources"]:
-            await create(RemakeSource, row, chapter_id=ids.get(Chapter,row["chapter_id"]), novel_id=novel.id,
-                         storage_provider="local", source_video_manifest=ids.references(row.get("source_video_manifest")), **scope)
         for row in project["edit_drafts"]:
             await create(ChapterEditDraft, row, chapter_id=ids.get(Chapter,row["chapter_id"]),
                          document=ids.references(row["document"]), updated_by=user_id)
+        export_ids = {row["id"] for row in project["exports"]}
         for row in sorted(project["exports"], key=lambda r:r["id"]):
             # The finished-episode library uses a completed task to identify playable versions.
             # This is an import receipt only; it is never scheduled or charged.
             receipt = await AiTask.create(using_db=db, task_type=AiTaskTypeEnum.video, status=TaskStatusEnum.completed,
                 stage="project_import", finished_at=datetime.now(timezone.utc),
                 request_params={"operation":"project_import", "novel_id":novel.id, "team_id":team_id, "user_id":user_id})
+            parent_id = row.get("parent_export_id")
             await create(ChapterExport, row, novel_id=novel.id, chapter_id=ids.get(Chapter,row["chapter_id"]),
                 source_video_id=ids.get(Video,row.get("source_video_id")),
-                parent_export_id=ids.get(ChapterExport,row.get("parent_export_id")), identity_key=uuid4().hex, task_id=receipt.id,
+                parent_export_id=ids.get(ChapterExport, parent_id) if parent_id in export_ids else None, identity_key=uuid4().hex, task_id=receipt.id,
                 manifest=ids.references(row["manifest"]), recipe=ids.references(row["recipe"]), **scope)
         for row in project["publications"]:
             await create(FinishedEpisodePublication, row, chapter_id=ids.get(Chapter,row["chapter_id"]),

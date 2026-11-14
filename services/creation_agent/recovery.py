@@ -62,7 +62,14 @@ class ProductionRecovery:
             await AgentOperation.filter(
                 task_id=task.id, state="running", external=False
             ).update(state="pending")
-            await AiTask.filter(id=task.id).update(status=6, stage="resuming")
+            if task.task_type == 6 and task.request_params.get("remake_source_id"):
+                from models.remake_source import RemakeSource
+                from services.remake.checkpoints import resume_position
+                source = await RemakeSource.get(id=task.request_params["remake_source_id"])
+                stage, progress, _, _ = await resume_position(task, source)
+                await AiTask.filter(id=task.id).update(status=6, stage=stage, progress=progress)
+            else:
+                await AiTask.filter(id=task.id).update(status=6, stage="resuming")
 
     async def start(self):
         from services.video_enhancement.automatic import automatic_enhancements

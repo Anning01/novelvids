@@ -9,21 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from services.llm.json_output import create_json_completion, completion_usage
 
 
-ASSET_EXTRACTION_GATEWAY_ERROR_CODE = "asset_extraction_gateway_error"
-ASSET_EXTRACTION_GATEWAY_ERROR_MESSAGE = (
-    "资产提取模型调用失败"
-    f"（错误代码：{ASSET_EXTRACTION_GATEWAY_ERROR_CODE}）"
-)
-
-
-class AssetExtractionGatewayError(RuntimeError):
-    """Stable, content-free extraction boundary failure."""
-
-    error_code = ASSET_EXTRACTION_GATEWAY_ERROR_CODE
-
-    def __init__(self, usage: dict | None = None) -> None:
-        super().__init__(ASSET_EXTRACTION_GATEWAY_ERROR_MESSAGE)
-        self.usage = usage or {}
+from services.extraction.errors import AssetExtractionGatewayError
 
 
 class ExtractedVariant(BaseModel):
@@ -215,7 +201,16 @@ class AssetExtractor:
             if self.targeted:
                 from prompts.extraction import targeted_design_instructions
                 options['additional_instructions'] = options.get('additional_instructions', '') + '\n' + targeted_design_instructions(self.prompt_language)
-            return await execution.generate('assets', messages, self.response_model, **options)
+            from services.creation_agent.model_boundary import ModelOutputLimitError
+            from services.extraction.continuation import finish_asset_inventory, interrupted_inventory
+            if not self.targeted and not self.initial_assets and not self.required_assets:
+                previous = await interrupted_inventory(execution, messages)
+                if previous:
+                    return await finish_asset_inventory(self, execution, messages, previous)
+            try:
+                return await execution.generate('assets', messages, self.response_model, **options)
+            except ModelOutputLimitError:
+                return await finish_asset_inventory(self, execution, messages)
         try:
             parsed, completion = await create_json_completion(
                 self.client,
@@ -232,6 +227,4 @@ class AssetExtractor:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            raise AssetExtractionGatewayError(
-                usage=getattr(error, "usage", None) or {}
-            ) from None
+            raise AssetExtractionGatewayError.from_exception(error) from None

@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from schemas.work_package import Assets, Episode, Shot, Storyboard
 
 MAX_FILE_BYTES = 256 * 1024 * 1024
@@ -59,6 +60,8 @@ class PackageFiles:
             self.read(manifest.source_text).decode("utf-8-sig")
         assets = Assets.model_validate(self.json(manifest.assets)).assets
         board = Storyboard.model_validate(self.json(manifest.storyboard))
+        if manifest.remake_source:
+            self.read(manifest.remake_source.path)
         for filename in manifest.originals:
             self.read(filename)
         for asset in assets:
@@ -85,16 +88,25 @@ class PackageFiles:
                 raise ValueError('声音资产引用无效')
         return manifest, screenplay, assets, board
 
-    def archive(self, destination: Path) -> dict[str, str]:
+    def archive(self, destination: Path, *, remake_source: str | None = None) -> dict[str, str]:
         urls = {}
         for relative, data in self.files.items():
             # Content addressing avoids overwriting old imported revisions.
             key = hashlib.sha256(data).hexdigest() + Path(relative).suffix.lower()
-            target = destination / key
+            directory = destination.parent / 'remake/sources/mcp' if relative == remake_source else destination
+            target = directory / key
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists():
-                target.write_bytes(data)
-            urls[relative] = '/media/work-packages/' + key
+                # Concurrent PostgreSQL clients may archive the same content from different works.
+                with NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
+                    pending = Path(temporary.name)
+                    try:
+                        temporary.write(data)
+                        temporary.close()
+                        pending.replace(target)
+                    finally:
+                        pending.unlink(missing_ok=True)
+            urls[relative] = '/media/' + str(target.relative_to(destination.parent))
         return urls
 
     def receipt(self, receipt: dict):

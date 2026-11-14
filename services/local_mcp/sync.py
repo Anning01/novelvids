@@ -1,5 +1,6 @@
 """Package orchestration using the workbench's canonical objects and write locks."""
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 from tortoise.transactions import in_transaction
@@ -11,6 +12,7 @@ from controllers.novel import novel_controller
 from schemas.novel import NovelCreate
 from controllers.asset import asset_controller
 from models.scene import Scene
+from models.remake_source import RemakeSource
 from models.work_sync import WorkSyncObject, WorkSyncRequest
 from prompts.skill_pack import read_skill
 from services.project_config import validate_project_config
@@ -23,6 +25,8 @@ from services.creation_objects import CreationObjects, project_write
 from services.creation_agent.object_state import write_fields
 from services.extraction.extractor import validate_asset_design
 from services.local_mcp.package import PackageFiles, digest
+from services.local_mcp.remake import persist_source, shot_metadata, validate_source
+from utils.enums import TaskStatusEnum, WorkflowStatus
 
 
 class SyncConflict(ValueError):
@@ -70,6 +74,17 @@ class WorkSync:
         return await WorkSyncObject.create(work_id=self.work_key(work), episode_id=episode, kind=kind,
                                          stable_id=stable, local_id=local_id, payload=payload)
 
+    @asynccontextmanager
+    async def write_request(self, work_id, request_id):
+        async with in_transaction() as connection:
+            if connection.capabilities.dialect == 'postgres':
+                # Serialize first imports and request IDs across MCP processes, before rows exist.
+                keys = [digest(['work', self.work_key(work_id)]), digest(['request', self.request_key(request_id)])]
+                for key in sorted(keys):
+                    lock_id = int.from_bytes(bytes.fromhex(key[:16]), 'big', signed=True)
+                    await connection.execute_query('SELECT pg_advisory_xact_lock($1)', [lock_id])
+            yield
+
     async def replay(self, request_id, fingerprint):
         previous = await WorkSyncRequest.get_or_none(request_id=self.request_key(request_id))
         if previous:
@@ -89,9 +104,16 @@ class WorkSync:
                 'path': path, 'url': self.app_url + path}
 
     async def link_episode_assets(self, work, chapter, assets, board, objects):
+        source = await RemakeSource.get_or_none(chapter_id=chapter.id, novel_id=objects.novel_id)
         for asset in assets:
             mapping = await self.mapping(work, '', 'asset', asset.id)
             target = await asset_controller.reuse_in_chapter(mapping.local_id, chapter.id)
+            if source:
+                metadata = target.metadata or {}
+                source_ids = sorted(set(metadata.get('remake_source_ids', [])) | {source.id})
+                await write_fields(objects, target, {'metadata': {**metadata,
+                    'analysis_source': 'work_package', 'remake_source_id': metadata.get('remake_source_id', source.id),
+                    'remake_source_ids': source_ids}})
             mapping.payload = {**mapping.payload, 'version': await objects.recovery_version(target)}
             await mapping.save(update_fields=['payload'])
             selected = {ref.variant_id for shot in board.shots for ref in shot.visual
@@ -122,15 +144,20 @@ class WorkSync:
         return project
 
     async def scene_values(self, work_id, shot, urls):
+        from services.video.asset_resolver import add_variant_binding
+
         assets, bindings = [], {}
         for ref in shot.visual:
             asset = await self.mapping(work_id, '', 'asset', ref.asset_id)
-            assets.append(asset.local_id)
+            if asset.local_id not in assets:
+                assets.append(asset.local_id)
             if ref.variant_id:
                 variant = await self.mapping(work_id, '', 'variant', ref.variant_id)
                 if variant.payload['asset_id'] != ref.asset_id:
                     raise ValueError('形态不属于指定资产')
-                bindings[str(asset.local_id)] = variant.local_id
+                add_variant_binding(bindings, asset.local_id, variant.local_id)
+            else:
+                add_variant_binding(bindings, asset.local_id, None)
         voice_asset_ids = {}
         for key in dict.fromkeys(voice.asset_id for voice in shot.voices):
             asset = await self.mapping(work_id, '', 'asset', key)
@@ -151,6 +178,8 @@ class WorkSync:
         await objects.active_assets(assets)
         await objects.validate_variant_bindings(assets, bindings)
         metadata = {**(target.metadata if target else {}), **values['metadata']}
+        source = await RemakeSource.get_or_none(chapter_id=chapter_id, novel_id=objects.novel_id)
+        metadata.update(shot_metadata(source, shot))
         if sync_media:
             sheet = next((m for m in shot.media if m.role == "storyboard"), None)
             if sheet:
@@ -175,9 +204,10 @@ class WorkSync:
     async def import_episode(self, request: ImportEpisode):
         files = PackageFiles(request.directory, self.allowed_root)
         manifest, screenplay, assets, board = files.episode()
+        media = await validate_source(files, manifest, board)
         fingerprint = digest({k: digest(v.hex()) for k, v in files.files.items()})
         fingerprint = digest({'tool': 'import_episode', 'files': fingerprint})
-        async with in_transaction():
+        async with self.write_request(manifest.work.id, request.request_id):
             previous = await self.replay(request.request_id, fingerprint)
             if previous:
                 files.receipt(previous)
@@ -194,9 +224,14 @@ class WorkSync:
                 project = await novel_controller.create(
                     NovelCreate(name=manifest.work.name, aspect_ratio=manifest.aspect_ratio, author="Agent 创建", **preferences),
                     team_id=self.ctx.team_id if self.ctx else None, created_by=self.ctx.user.id if self.ctx else None)
+                if manifest.workflow_kind == 'remake':
+                    project.workflow_kind = 'remake'
+                    await project.save(update_fields=['workflow_kind'])
                 await self.register(work, '', 'work', work, project.id, manifest.work.model_dump())
             else:
                 project = await self.project(work)
+                if project.workflow_kind != manifest.workflow_kind:
+                    raise SyncConflict('workflow_kind_conflict', message='同一作品不能混用普通剧本与重制分集')
             async with project_write(project.id):
                 # Recheck after acquiring the canonical project lock.
                 previous = await self.replay(request.request_id, fingerprint)
@@ -210,7 +245,7 @@ class WorkSync:
                 for asset in assets:
                     for obj in [asset, *asset.variants]:
                         validate_asset_design(obj.prompt)
-                urls = files.archive(self.archive_root)
+                urls = files.archive(self.archive_root, remake_source=manifest.remake_source.path if manifest.remake_source else None)
                 objects = CreationObjects(project.id)
                 for asset in assets:
                     payload = asset.model_dump()
@@ -241,6 +276,11 @@ class WorkSync:
                 chapter = await chapter_controller.create(ChapterCreate(novel_id=project.id, number=manifest.number,
                     name=manifest.episode.name, screenplay=screenplay,
                     content=files.files[manifest.source_text].decode("utf-8-sig") if manifest.source_text else ""))
+                if media:
+                    await persist_source(project, chapter, media, urls[manifest.remake_source.path])
+                    chapter.status = TaskStatusEnum.completed.value
+                    chapter.workflow_status = WorkflowStatus.storyboard_ready.value
+                    await chapter.save(update_fields=['status', 'workflow_status'])
                 await self.register(work, episode, 'episode', episode, chapter.id,
                                     {'manifest': manifest.model_dump(), 'archive': urls,
                                      'scenes': [s.model_dump() for s in board.scenes]})
@@ -269,13 +309,20 @@ class WorkSync:
                 if request.shot_id == row.stable_id:
                     item.update(description=target.description, prompt=target.prompt, duration=target.duration,
                                 structure=target.prompt_params, metadata=target.metadata,
+                                source_range=(target.metadata or {}).get('source_range'),
                                 asset_ids=await target.assets.all().values_list('id', flat=True))
                 if request.shot_id is None or request.shot_id == row.stable_id:
                     shots.append(item)
         if request.shot_id is not None and not shots:
             raise ValueError('镜头不存在或已移除')
+        source = await RemakeSource.get_or_none(chapter_id=chapter.id, novel_id=project.id)
         return {'status': 'ok', 'format_version': 1, 'work_id': request.work_id,
                 'episode_id': request.episode_id, 'novel_id': project.id, 'chapter_id': chapter.id,
+                'workflow_kind': project.workflow_kind,
+                'remake_source': ({'id': source.id, 'url': '/media/' + source.object_key,
+                    'original_filename': source.original_filename, 'duration': source.duration_seconds,
+                    'width': source.width, 'height': source.height, 'checksum': source.checksum,
+                    'status': source.media_status} if source else None),
                 'location': self.location(project.id, chapter.id, chapter.number),
                 'project_settings': {'style_key': project.style_key, 'custom_style_prompt': project.custom_style_prompt,
                                      'storyboard_enabled': project.storyboard_enabled},
@@ -286,7 +333,7 @@ class WorkSync:
         if not set(request.changes) <= (set(Shot.model_fields) - {'id'}):
             raise ValueError('不支持的镜头变更字段')
         project = await self.project(request.work_id)
-        async with project_write(project.id):
+        async with self.write_request(request.work_id, request.request_id), project_write(project.id):
             if 'media' in request.changes:
                 for media in request.changes['media']:
                     files.read(media['path'])
@@ -308,7 +355,9 @@ class WorkSync:
                                    current_version=current, message='猫影内容已修改，请先读取、对比并由用户确认合并，不能自动覆盖')
             shot = Shot.model_validate({**row.payload, 'description': target.description or '',
                 'prompt': target.prompt or '', 'duration': target.duration,
-                'structure': target.prompt_params or {}, **request.changes})
+                'structure': target.prompt_params or {},
+                'source_range': (target.metadata or {}).get('source_range', row.payload.get('source_range')),
+                **request.changes})
             if shot.scene_id not in {s['id'] for s in episode.payload['scenes']}:
                 raise ValueError('未登记的场 ID')
             # Unchanged archived media do not require the source files to still exist.
