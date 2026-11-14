@@ -242,6 +242,13 @@
             "title": "Media",
             "type": "array"
           },
+          "image_references": {
+            "items": {
+              "$ref": "#/$defs/VisualReference"
+            },
+            "title": "Image References",
+            "type": "array"
+          },
           "kind": {
             "enum": [
               "person",
@@ -306,6 +313,13 @@
             },
             "title": "Media",
             "type": "array"
+          },
+          "image_references": {
+            "items": {
+              "$ref": "#/$defs/VisualReference"
+            },
+            "title": "Image References",
+            "type": "array"
           }
         },
         "required": [
@@ -314,6 +328,32 @@
           "prompt"
         ],
         "title": "Variant",
+        "type": "object"
+      },
+      "VisualReference": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "variant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Variant Id"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "VisualReference",
         "type": "object"
       }
     },

@@ -323,8 +323,8 @@ async def test_extract_stale_task_cleaned(client: AsyncClient, configured_creati
 
 
 @pytest.mark.asyncio
-async def test_extract_without_assistant_returns_409(client: AsyncClient):
-    """助手未启用时阻止新任务。"""
+async def test_extract_without_assistant_returns_422(client: AsyncClient):
+    """未配置支持工具调用的助手模型时，按 require_agent 的 422 契约阻止新任务。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id, number=1, name="Ch1", content="content"
@@ -332,9 +332,10 @@ async def test_extract_without_assistant_returns_409(client: AsyncClient):
 
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
-    assert body["code"] == 409
+    assert body["code"] == 422
     assert "assistant" in body["message"].lower()
 
+    assert await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value).count() == 0
 
 @pytest.mark.asyncio
 @patch(

@@ -156,6 +156,16 @@ class ProductionRecovery:
                     if not value.done()
                 }
                 for waiting in await AiTask.filter(status=2, stage='waiting_dependencies'):
+                    if waiting.task_type == 2 and waiting.request_params.get('asset_id'):
+                        from services.reference.dependencies import image_dependencies_ready
+                        try:
+                            ready = await image_dependencies_ready(waiting.request_params)
+                        except ValueError as error:
+                            await ai_task_executor._fail(waiting, str(error), error=error, record_usage=False)
+                            continue
+                        if ready:
+                            await AiTask.filter(id=waiting.id, status=2, stage='waiting_dependencies').update(status=6, stage='resuming')
+                        continue
                     operations = await AgentOperation.filter(task=waiting, key__startswith='submit:', state='completed')
                     if waiting.request_params.get('operation') == 'video_batch':
                         # Continuity uses the original video/tail, not its independent HD follow-up.

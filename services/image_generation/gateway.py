@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerationError(RuntimeError):
-    pass
+    def __init__(self, message, *, submission_uncertain=True):
+        super().__init__(message)
+        self.submission_uncertain = submission_uncertain
 
 
 @dataclass(frozen=True)
@@ -226,6 +228,8 @@ async def generate_images(
     request_id = _request_id(response)
     if response.status_code >= 400:
         provider_error = _http_provider_error(response)
+        if provider_error and api_key:
+            provider_error = provider_error.replace(api_key, '[redacted]')
         logger.warning(
             "image_generation_http_error protocol=%s endpoint=%s status=%s request_id=%s has_provider_detail=%s",
             api_protocol,
@@ -235,12 +239,14 @@ async def generate_images(
             bool(provider_error),
         )
         suffix = f"，request_id={request_id}" if request_id else ""
+        uncertain = response.status_code not in {400, 401, 402, 403, 404, 413, 415, 422, 429}
         if provider_error:
             raise ImageGenerationError(
-                f"生图供应商请求失败：{provider_error}（HTTP {response.status_code}{suffix}）"
+                f"生图供应商请求失败：{provider_error}（HTTP {response.status_code}{suffix}）",
+                submission_uncertain=uncertain,
             )
         raise ImageGenerationError(
-            f"生图供应商请求失败（HTTP {response.status_code}{suffix}）"
+            f"生图供应商请求失败（HTTP {response.status_code}{suffix}）", submission_uncertain=uncertain,
         )
 
     try:

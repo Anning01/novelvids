@@ -51,6 +51,11 @@ export async function resolveModelPrompt(scene: Scene, model: VideoGenerationMod
   if (!cached && typeof importedBase === 'string' && plainPrompt(importedBase, scene) === facts.generic_prompt) {
     optimized = modelPromptTexts(scene).get(model.model_type)
   }
+  if (optimized) {
+    const markers = [...facts.generic_prompt.matchAll(/@\{([^{}]+)\}/g)]
+      .filter(match => !match[1]!.includes(':') && !/^(?:参考图|图片|图|视频|音频)\d+$/.test(match[1]!))
+    if (markers.some(match => !optimized!.includes(match[0]))) optimized = undefined
+  }
   if (!optimized) {
     const {data: task} = await api.optimizeScenePrompt(scene.id, {model_config_id: model.config_id, ...facts})
     const result = terminalTaskStatuses.has(task.status) ? task : await pollUntilTerminal(

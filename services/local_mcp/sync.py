@@ -247,12 +247,14 @@ class WorkSync:
                         validate_asset_design(obj.prompt)
                 urls = files.archive(self.archive_root, remake_source=manifest.remake_source.path if manifest.remake_source else None)
                 objects = CreationObjects(project.id)
+                created_image_targets = []
                 for asset in assets:
                     payload = asset.model_dump()
                     existing = await WorkSyncObject.get_or_none(work_id=self.work_key(work), episode_id='', kind='asset', stable_id=asset.id)
                     if existing:
                         target = await objects.get('asset', existing.local_id)
-                        if existing.payload['source'] != payload or existing.payload['version'] != await objects.recovery_version(target):
+                        from schemas.work_package import PackageAsset
+                        if PackageAsset.model_validate(existing.payload['source']).model_dump() != payload or existing.payload['version'] != await objects.recovery_version(target):
                             raise SyncConflict('asset_changed', asset_id=asset.id)
                     else:
                         images = {m.role: urls[m.path] for m in asset.media}
@@ -266,6 +268,7 @@ class WorkSync:
                                 {**m.model_dump(), 'url': urls[m.path]} for m in asset.media]}})
                         await self.register(work, '', 'asset', asset.id, target.id,
                             {'source': payload, 'version': await objects.recovery_version(target)})
+                        created_image_targets.append(('asset', asset, target))
                         for variant in asset.variants:
                             obj = await objects.create_variant(target.id, {'name': variant.name,
                                 'description': variant.description, 'base_traits': variant.prompt,
@@ -273,6 +276,21 @@ class WorkSync:
                             await self.register(work, '', 'variant', variant.id, obj.id,
                                                 {'asset_id': asset.id, 'source': variant.model_dump(),
                                                  'version': await objects.recovery_version(obj)})
+                            created_image_targets.append(('variant', variant, obj))
+                # Resolve stable references only after the complete catalog exists;
+                # input array order never becomes an image-generation dependency.
+                for kind, definition, target in created_image_targets:
+                    references = []
+                    for ref in definition.image_references:
+                        source = await self.mapping(work, '', 'asset', ref.asset_id)
+                        variant = await self.mapping(work, '', 'variant', ref.variant_id) if ref.variant_id else None
+                        references.append({'asset_id': source.local_id, 'variant_id': variant.local_id if variant else None})
+                    if references:
+                        await write_fields(objects, target, {'metadata': {**(target.metadata or {}),
+                                           'generation_reference_assets': references}})
+                        mapping = await self.mapping(work, '', kind, definition.id)
+                        mapping.payload = {**mapping.payload, 'version': await objects.recovery_version(target)}
+                        await mapping.save(update_fields=['payload'])
                 chapter = await chapter_controller.create(ChapterCreate(novel_id=project.id, number=manifest.number,
                     name=manifest.episode.name, screenplay=screenplay,
                     content=files.files[manifest.source_text].decode("utf-8-sig") if manifest.source_text else ""))

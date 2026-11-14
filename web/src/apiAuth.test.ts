@@ -18,6 +18,33 @@ afterEach(() => {
 })
 
 it.each([
+  [413, '<html>Request Entity Too Large</html>', '上传内容超过服务器允许的大小，请减小文件后重试'],
+  [502, '<html>Bad Gateway</html>', '服务暂不可用，请稍后重试'],
+])('reports a readable file-upload error for HTTP %i without losing the login', async (status, body, message) => {
+  setAuthToken('existing-session')
+  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({code: 0, data: {direct: false}}))
+    .mockResolvedValueOnce(new Response(body, {status}))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(api.upload(new File(['book'], 'novel.txt'))).rejects.toMatchObject({
+    message: tr(message), code: status, httpStatus: status,
+  })
+  expect(getAuthToken()).toBe('existing-session')
+})
+
+it('uploads a manuscript with browser-managed multipart framing and returns the parsed file', async () => {
+  const result = {filename: 'novel.txt', text_content: '第一章', file_path: '/media/novel.txt'}
+  const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({code: 0, data: {direct: false}}))
+    .mockResolvedValueOnce(Response.json({code: 0, data: {files: [result]}}))
+  vi.stubGlobal('fetch', fetchMock)
+  const file = new File(['第一章'], 'novel.txt')
+  expect(await api.upload(file)).toEqual(result)
+  const [, options] = fetchMock.mock.calls[1]!
+  expect(options.body).toBeInstanceOf(FormData)
+  expect(options.body.get('files')).toBe(file)
+  expect(options.headers).not.toHaveProperty('Content-Type')
+})
+
+it.each([
   { body: '', status: 502 },
   { body: '<html>Bad Gateway</html>', status: 502 },
   { body: '{"code":', status: 200 },

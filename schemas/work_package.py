@@ -57,21 +57,22 @@ class Media(StrictModel):
     role: Literal['main', 'angle_1', 'angle_2', 'reference', 'video', 'audio', 'blocking', 'storyboard']
 
 
+class VisualReference(StrictModel):
+    asset_id: str
+    variant_id: str | None = None
+
+
 class Variant(Identity):
     description: str = ''
     prompt: str = Field(min_length=1)
     media: list[Media] = Field(default_factory=list)
+    image_references: list[VisualReference] = Field(default_factory=list)
 
 
 class PackageAsset(Variant):
     kind: Literal['person', 'group', 'scene', 'item']
     aliases: list[str] = Field(default_factory=list)
     variants: list[Variant] = Field(default_factory=list)
-
-
-class VisualReference(StrictModel):
-    asset_id: str
-    variant_id: str | None = None
 
 
 class Voice(StrictModel):
@@ -114,6 +115,29 @@ class Shot(Identity):
 
 class Assets(StrictModel):
     assets: list[PackageAsset]
+
+    @model_validator(mode='after')
+    def check_image_dependencies(self):
+        nodes = {(asset.id, None): asset for asset in self.assets}
+        nodes.update({(asset.id, variant.id): variant for asset in self.assets for variant in asset.variants})
+        visiting, visited = set(), set()
+        def visit(key):
+            if key not in nodes:
+                raise ValueError('生图引用的资产或形态未登记')
+            if key in visiting:
+                raise ValueError('参考图片依赖不能形成循环')
+            if key in visited:
+                return
+            visiting.add(key)
+            dependencies = [(key[0], None)] if key[1] is not None else []
+            dependencies.extend((ref.asset_id, ref.variant_id) for ref in nodes[key].image_references)
+            for dependency in dependencies:
+                visit(dependency)
+            visiting.remove(key)
+            visited.add(key)
+        for key in nodes:
+            visit(key)
+        return self
 
 
 class Storyboard(StrictModel):
