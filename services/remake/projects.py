@@ -420,8 +420,7 @@ class RemakeProjectService:
                     id=source.analysis_task_id
                 ).using_db(connection)
             if (
-                source.media_status != "failed"
-                or previous is None
+                previous is None
                 or previous.status != TaskStatusEnum.failed.value
             ):
                 raise RemakeError(

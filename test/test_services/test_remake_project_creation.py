@@ -544,8 +544,9 @@ async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('media_status', ['failed', 'processing'])
 @pytest.mark.parametrize('has_uncertain_clip', [False, True])
-async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent, has_uncertain_clip):
+async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent, has_uncertain_clip, media_status):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -558,7 +559,7 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     old_task = await AiTask.get(id=source.analysis_task_id)
     old_task.status = TaskStatusEnum.failed.value
     await old_task.save(update_fields=["status", "updated_at"])
-    source.media_status = "failed"
+    source.media_status = media_status
     await source.save(update_fields=["media_status", "updated_at"])
 
     from models.agent_operation import AgentOperation
