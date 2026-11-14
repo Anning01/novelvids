@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
 import { fallbackImage } from '@/shared/mediaFallback'
 import type { Asset, AssetVariant } from '@/types'
+import { selectedVariantIds, type SceneVariantBindings } from '@/shared/sceneAssetSelection'
 
 export interface SceneAssetVariantSelection {
   assetId: number
@@ -19,7 +20,7 @@ const props = withDefaults(defineProps<{
   label: string
   assets: Asset[]
   selectedAssetIds: number[]
-  selectedVariantIds: Record<number, number | null>
+  selectedVariantIds: SceneVariantBindings
   initialAssetId?: number
   selectionMode?: 'add' | 'replace'
   placement?: 'auto' | 'below'
@@ -75,21 +76,14 @@ const panelStyle = computed(() => ({
   maxHeight: `${position.value.maxHeight}px`,
 }))
 
-function hasOwnVariantSelection(assetId: number) {
-  return Object.prototype.hasOwnProperty.call(props.selectedVariantIds, assetId)
-}
-
 function isSelected(assetId: number, variantId: number | null) {
   if (!props.selectedAssetIds.includes(assetId)) return false
-  if (variantId === null) {
-    return !hasOwnVariantSelection(assetId) || props.selectedVariantIds[assetId] === null
-  }
-  return props.selectedVariantIds[assetId] === variantId
+  return selectedVariantIds(props.selectedVariantIds[assetId]).includes(variantId)
 }
 
 function assetThumbnail(asset: Asset) {
   if (props.selectedAssetIds.includes(asset.id)) {
-    const variantId = props.selectedVariantIds[asset.id]
+    const variantId = selectedVariantIds(props.selectedVariantIds[asset.id])[0]
     const selectedVariant = asset.variants?.find(variant => variant.id === variantId)
     if (selectedVariant?.images[0]) {
       return mediaUrl(selectedVariant.image_thumbnails?.[0] || selectedVariant.images[0])
@@ -105,7 +99,7 @@ function assetThumbnail(asset: Asset) {
 }
 
 function assetOriginal(asset: Asset) {
-  const variantId = props.selectedVariantIds[asset.id]
+  const variantId = selectedVariantIds(props.selectedVariantIds[asset.id])[0]
   const selectedVariant = asset.variants?.find(variant => variant.id === variantId)
   return mediaUrl(selectedVariant?.images[0] || asset.main_image || asset.angle_image_1 || asset.angle_image_2 || '')
 }
@@ -252,8 +246,10 @@ onBeforeUnmount(() => {
           </nav>
 
           <div v-if="activeAsset" class="scene-asset-variant-picker__variants" :aria-label="tr('{p0}的衍生状态', { p0: activeAsset.canonical_name })">
+            <p v-if="selectionMode === 'add'">{{ tr('可多选，多个形态可同时出镜') }}</p>
             <button
               type="button"
+              :aria-pressed="isSelected(activeAsset.id, null)"
               :class="{ 'is-selected': isSelected(activeAsset.id, null) }"
               @click="selectVariant(activeAsset.id, null)"
             >
@@ -267,6 +263,7 @@ onBeforeUnmount(() => {
               type="button"
               :disabled="!variantIsAvailable(variant)"
               :aria-disabled="!variantIsAvailable(variant)"
+              :aria-pressed="isSelected(activeAsset.id, variant.id)"
               :class="{ 'is-selected': isSelected(activeAsset.id, variant.id), 'is-unavailable': !variantIsAvailable(variant) }"
               @click="selectVariant(activeAsset.id, variant.id)"
             >
@@ -295,6 +292,7 @@ onBeforeUnmount(() => {
 .scene-asset-variant-picker nav::-webkit-scrollbar,.scene-asset-variant-picker__variants::-webkit-scrollbar { display: none; }
 .scene-asset-variant-picker nav { border-right: 1px solid var(--app-border); }
 .scene-asset-variant-picker button { width: 100%; border: 0; color: var(--app-text-secondary); background: transparent; font: inherit; cursor: pointer; }
+.scene-asset-variant-picker button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
 .scene-asset-variant-picker nav button,.scene-asset-variant-picker__variants button { display: grid; min-height: 54px; grid-template-columns: 38px minmax(0,1fr) 18px; align-items: center; gap: 9px; padding: 8px; border-radius: 9px; text-align: left; transition: color 140ms ease,background 140ms ease,transform 140ms ease; }
 .scene-asset-variant-picker nav button:hover,.scene-asset-variant-picker__variants button:hover { color: var(--app-text); background: var(--app-surface-hover); }
 .scene-asset-variant-picker nav button:active,.scene-asset-variant-picker__variants button:active { transform: scale(.992); }
@@ -310,7 +308,7 @@ onBeforeUnmount(() => {
 .scene-asset-variant-picker__thumb.is-empty { box-shadow: inset 0 0 0 1px var(--app-border); }
 .scene-asset-variant-picker__thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .scene-asset-variant-picker__selected-mark { color: var(--app-accent); }
-.scene-asset-variant-picker__check { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 6px; color: #fff; background: transparent; box-shadow: inset 0 0 0 1px var(--app-border-strong); }
+.scene-asset-variant-picker__check { display: grid; width: 18px; height: 18px; place-items: center; border-radius: 6px; color: var(--app-surface); background: transparent; box-shadow: inset 0 0 0 1px var(--app-border-strong); }
 .scene-asset-variant-picker__variants button.is-selected .scene-asset-variant-picker__check { background: var(--app-accent); box-shadow: none; }
 .scene-asset-variant-picker__variants > p,.scene-asset-variant-picker__empty { margin: 0; color: var(--app-text-muted); font-size: 10px; text-align: center; }
 .scene-asset-variant-picker__variants > p { padding: 18px 8px; }

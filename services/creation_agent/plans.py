@@ -172,14 +172,15 @@ class CreationPlanner:
                 plan.object_versions[f'{kind}:{obj.id}'] = await object_version(obj)
                 keys.append(f'{kind}:{obj.id}')
                 if step.operation == 'video':
-                    from services.video.asset_resolver import normalize_selected_variant_ids, select_asset_variant
+                    from services.video.asset_resolver import normalize_selected_variant_ids, select_asset_variants
                     await obj.fetch_related('chapter', 'assets__variants')
                     selected = normalize_selected_variant_ids((obj.metadata or {}).get('asset_variant_ids'))
                     for asset in obj.assets:
                         plan.object_versions[f'asset:{asset.id}'] = await object_version(asset)
                         keys.append(f'asset:{asset.id}')
-                        variant = select_asset_variant(asset, obj.chapter.number, selected)
-                        if variant:
+                        for variant in select_asset_variants(asset, obj.chapter.number, selected):
+                            if not variant:
+                                continue
                             plan.object_versions[f'variant:{variant.id}'] = await object_version(variant)
                             keys.append(f'variant:{variant.id}')
             plan.object_scopes[step.id] = list(dict.fromkeys(keys))

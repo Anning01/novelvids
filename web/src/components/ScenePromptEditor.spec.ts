@@ -386,9 +386,67 @@ it('removes a selection spanning text and the reference chip as a whole', async 
 })
 
 
-it('renders a saved core-skill variant reference with its selected identity label', () => {
+it('keeps the qualified form reference when editing an imported legacy mention option', async () => {
   const wrapper = mount(ScenePromptEditor, {props: {modelValue: '@{林舟#灯塔守望者} 保持闭口。', options: [{id: 'person-1', kind: 'person', label: '林舟 · 灯塔守望者', syntax: '@{林舟}', group: '角色', aliases: ['林舟#灯塔守望者']}]}})
   expect(wrapper.get('[data-mention-id="person-1"]').text()).toBe('林舟 · 灯塔守望者')
   expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  await wrapper.get('.scene-prompt-editor__input').trigger('input')
+  expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  expect(wrapper.get('[data-mention-id="person-1"]').attributes('data-syntax')).toBe('@{林舟#灯塔守望者}')
+  wrapper.unmount()
+})
+
+it('recognizes unbraced qualified form names without leaving the suffix as plain text', async () => {
+  const wrapper = mount(ScenePromptEditor, { props: {
+    modelValue: '@苏玄#前世少年伸手，@苏玄#婴儿安睡。', options: [
+      { id: 'young', kind: 'person', label: '苏玄 · 前世少年', syntax: '@{苏玄#前世少年}', group: '角色' },
+      { id: 'baby', kind: 'person', label: '苏玄 · 婴儿', syntax: '@{苏玄#婴儿}', group: '角色' },
+    ],
+  } })
+  expect(wrapper.findAll('[data-mention-id]').map(mention => mention.attributes('data-mention-id'))).toEqual(['young', 'baby'])
+  expect(wrapper.get('.scene-prompt-editor__input').text()).not.toContain('#')
+  await wrapper.get('.scene-prompt-editor__input').trigger('input')
+  expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['@{苏玄#前世少年}伸手，@{苏玄#婴儿}安睡。'])
+  wrapper.unmount()
+})
+
+it('recognizes a qualified character alias without turning unknown forms into the base character', () => {
+  const wrapper = mount(ScenePromptEditor, { props: {
+    modelValue: '@{苏前辈#前世少年}与@苏前辈#前世少年，@苏玄#未登记形态。', options: [
+      { id: 'base', kind: 'person', label: '苏玄', syntax: '@{苏玄}', aliases: ['苏前辈'], group: '角色' },
+      { id: 'young', kind: 'person', label: '苏玄 · 前世少年', syntax: '@{苏玄#前世少年}', aliases: ['苏前辈'], group: '角色' },
+    ],
+  } })
+  expect(wrapper.findAll('[data-mention-id]').map(mention => mention.attributes('data-mention-id'))).toEqual(['young', 'young'])
+  expect(wrapper.get('.scene-prompt-editor__input').text()).toContain('@苏玄#未登记形态')
+  wrapper.unmount()
+})
+
+it('renders a numbered model reference with its name and preserves the original token while editing', async () => {
+  const wrapper = mount(ScenePromptEditor, {props:{modelValue:'see <Subject 1>', options:[{
+    id:'subject1', label:'Subject 1 · 家丁', kind:'image', syntax:'<Subject 1>', group:'参考图片',
+    displayOnly:true, previewUrl:'/media/servant.png',
+  }]}})
+  const chip = wrapper.get('[data-mention-id="subject1"]')
+  expect(chip.text()).toBe('Subject 1 · 家丁')
+  expect(chip.get('img').attributes('src')).toBe('/media/servant.png')
+  const editor = wrapper.get('[contenteditable="true"]')
+  editor.element.append(document.createTextNode('!'))
+  await editor.trigger('input')
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['see <Subject 1>!'])
+  wrapper.unmount()
+})
+
+it('keeps Seedance tokens exact on edit and leaves an unbound longer number untouched', async () => {
+  const prompt = '@图片10，将 @图片1 中的人定义为<主体1>。'
+  const options: ScenePromptMentionOption[] = ['@图片1','<主体1>'].map(syntax => ({
+    id: syntax, syntax, kind: 'image', label: syntax+' · 苏卫国', group:'参考图片', displayOnly:true, previewUrl:'/media/su.png',
+  }))
+  const wrapper = mount(ScenePromptEditor, {props:{modelValue:prompt,options}})
+  expect(wrapper.findAll('[data-syntax]').map(chip => chip.attributes('data-syntax'))).toEqual(['@图片1','<主体1>'])
+  const editor = wrapper.get('[contenteditable="true"]')
+  editor.element.append(document.createTextNode('继续'))
+  await editor.trigger('input')
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([prompt+'继续'])
   wrapper.unmount()
 })

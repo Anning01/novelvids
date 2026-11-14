@@ -21,6 +21,7 @@ export interface ScenePromptMentionOption {
   thumbnailUrl?: string
   fallbackUrl?: string
   description?: string
+  displayOnly?: boolean
   aliases?: string[]
 }
 
@@ -62,7 +63,7 @@ const DURATION_MENTION_PATTERN = new RegExp(DURATION_MENTION_SOURCE, 'g')
 
 const filteredOptions = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase()
-  return props.options.filter(option => !normalized
+  return props.options.filter(option => !option.displayOnly).filter(option => !normalized
     || option.label.toLocaleLowerCase().includes(normalized)
     || option.group.toLocaleLowerCase().includes(normalized))
 })
@@ -165,13 +166,25 @@ function createMentionNode(option: ScenePromptMentionOption) {
 function findNextMention(value: string, start: number) {
   let match: { option: ScenePromptMentionOption; index: number; length: number } | null = null
   for (const option of props.options.filter(item => item.kind !== 'duration')) {
-    const canonicalName = option.syntax.match(/^@\{([^{}:#]+)(?:#[^{}]+)?\}$/)?.[1]
-    const legacyNames = canonicalName ? [canonicalName, ...(option.aliases || [])] : []
-    const syntaxes = [option.syntax, ...(option.aliases || []).map(name => `@{${name}}`), ...legacyNames.map(name => `@${name}`)]
+    const assetReference = option.syntax.match(/^@\{([^{}:#]+)(#[^{}]+)?\}$/)
+    const qualifiedNames = assetReference
+      ? [assetReference[1]! + (assetReference[2] || ''), ...(option.aliases || []).map(name =>
+          assetReference[2] && !name.includes('#') ? name + assetReference[2] : name)]
+      : option.aliases || []
+    const syntaxes = [option.syntax, ...qualifiedNames.map(name => `@{${name}}`),
+      ...(assetReference ? qualifiedNames.map(name => `@${name}`) : [])]
     for (const syntax of syntaxes) {
-      const index = value.indexOf(syntax, start)
+      let index = value.indexOf(syntax, start)
+      // Short names must not consume an unknown form or a longer numbered reference.
+      while (index >= 0 && (value.charAt(index + syntax.length) === '#'
+        || option.displayOnly && syntax.startsWith('@图片') && /[0-9]/.test(value.charAt(index + syntax.length)))) {
+        index = value.indexOf(syntax, index + syntax.length)
+      }
       if (index < 0 || (match && (index > match.index || (index === match.index && syntax.length <= match.length)))) continue
-      match = { option, index, length: syntax.length }
+      const resolved = syntax.includes('#') && !option.syntax.includes('#')
+        ? { ...option, syntax: syntax.startsWith('@{') ? syntax : `@{${syntax.slice(1)}}` }
+        : option
+      match = { option: resolved, index, length: syntax.length }
     }
   }
   DURATION_MENTION_PATTERN.lastIndex = start

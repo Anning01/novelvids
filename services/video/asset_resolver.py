@@ -18,20 +18,51 @@ logger = logging.getLogger(__name__)
 MENTION_PATTERN = re.compile(r"@\{([^}]+)\}|@([\w\u4e00-\u9fff·]+)")
 
 
-def normalize_selected_variant_ids(value: Any) -> dict[int, int | None]:
-    """将 Scene.metadata 中的 JSON 键安全转换为资产与形态 ID。"""
+VariantSelection = int | None | list[int | None]
+
+
+def variant_selection_ids(value: Any) -> list[int | None]:
+    values = value if isinstance(value, list) else [value]
+    if not values:
+        raise ValueError('Empty variant selection')
+    result = []
+    for raw in values:
+        if raw is None:
+            identifier = None
+        elif isinstance(raw, bool) or not str(raw).isdigit() or int(raw) < 1:
+            raise ValueError('Invalid variant identifier')
+        else:
+            identifier = int(raw)
+        if identifier not in result:
+            result.append(identifier)
+    return result
+
+
+def compact_variant_selection(values: list[int | None]) -> VariantSelection:
+    return values[0] if len(values) == 1 else values
+
+
+def add_variant_binding(bindings: dict, asset_id: int, variant_id: int | None):
+    key = str(asset_id)
+    values = variant_selection_ids(bindings[key]) if key in bindings else []
+    if variant_id not in values:
+        values.append(variant_id)
+    bindings[key] = compact_variant_selection(values)
+
+
+def normalize_selected_variant_ids(value: Any) -> dict[int, VariantSelection]:
+    """Read both legacy single-form bindings and simultaneous visual forms."""
     if not isinstance(value, dict):
         return {}
-    selections: dict[int, int | None] = {}
-    for raw_asset_id, raw_variant_id in value.items():
+    selections = {}
+    for raw_asset_id, raw in value.items():
         try:
             asset_id = int(raw_asset_id)
-            variant_id = int(raw_variant_id) if raw_variant_id is not None else None
+            identifiers = variant_selection_ids(raw)
         except (TypeError, ValueError):
             continue
-        if asset_id < 1 or (variant_id is not None and variant_id < 1):
-            continue
-        selections[asset_id] = variant_id
+        if asset_id > 0:
+            selections[asset_id] = identifiers if isinstance(raw, list) else compact_variant_selection(identifiers)
     return selections
 
 
@@ -40,7 +71,7 @@ async def resolve_assets(
     novel_id: int,
     chapter_number: int | None = None,
     selected_asset_ids: Sequence[int] | None = None,
-    selected_variant_ids: Mapping[int, int | None] | None = None,
+    selected_variant_ids: Mapping[int, VariantSelection] | None = None,
     *,
     include_selected: bool = False,
 ) -> list[dict[str, Any]]:
@@ -82,46 +113,41 @@ async def resolve_assets(
             if asset.id in allowed_asset_ids and asset.id not in mentioned_ids
         )
 
-    subjects: list[dict[str, Any]] = []
     explicit_variant_ids = selected_variant_ids or {}
+    resolved = []
     for matched, mentioned_variant_name in requested_assets:
         multiple_versions = sum(asset.id == matched.id for asset, _ in requested_assets) > 1
         if mentioned_variant_name:
             variant = _find_variant(mentioned_variant_name, list(matched.variants))
             if variant is None:
                 raise ValueError(localized_message('引用的资产形态不存在或已移除，请重新选择'))
-        elif multiple_versions:
-            variant = None
-        elif matched.id in explicit_variant_ids:
-            selected_variant_id = explicit_variant_ids[matched.id]
-            variant = select_asset_variant(matched, chapter_number, explicit_variant_ids, mentioned_variant_name)
-            if selected_variant_id is not None and variant is None:
-                logger.warning(
-                    "resolve_assets: selected variant %s does not belong to asset_id=%s; using base asset",
-                    selected_variant_id,
-                    matched.id,
-                )
+            selection = explicit_variant_ids.get(matched.id)
+            # Legacy scalar bindings allow extra prompt references; lists record explicit choices.
+            if isinstance(selection, list) and variant.id not in selection:
+                continue
+            resolved.append((matched, variant, True))
+        elif multiple_versions and not isinstance(explicit_variant_ids.get(matched.id), list):
+            resolved.append((matched, None, False))
         else:
-            variant = select_asset_variant(matched, chapter_number, explicit_variant_ids, mentioned_variant_name)
-        images = _collect_images(matched, variant)
-        logger.info(
-            "resolve_assets: asset_id=%s variant_id=%s images=%d (main=%s, a1=%s, a2=%s)",
-            matched.id, variant.id if variant else None, len(images),
-            bool(matched.main_image), bool(matched.angle_image_1), bool(matched.angle_image_2),
-        )
+            resolved.extend((matched, variant, False) for variant in select_asset_variants(matched, chapter_number, explicit_variant_ids))
+    if include_selected and allowed_asset_ids:
+        for asset in sorted(assets, key=lambda asset: asset.id):
+            if asset.id in allowed_asset_ids:
+                resolved.extend((asset, variant, False) for variant in select_asset_variants(asset, chapter_number, explicit_variant_ids))
+
+    subjects: list[dict[str, Any]] = []
+    seen = set()
+    for matched, variant, qualified in resolved:
+        identity = (matched.id, variant.id if variant else None)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        multiple = len({item.id if item else None for asset, item, _ in resolved if asset.id == matched.id}) > 1
         subjects.append({
-            "name": (
-                f"{matched.canonical_name}#{variant.name}"
-                if variant and mentioned_variant_name
-                else matched.canonical_name
-            ),
+            "name": f"{matched.canonical_name}#{variant.name}" if variant and (qualified or multiple) else matched.canonical_name,
             "variant_name": variant.name if variant else None,
-            "images": images,
-            "description": (
-                variant.description or variant.base_traits
-                if variant
-                else matched.description or matched.base_traits or ""
-            ),
+            "images": _collect_images(matched, variant),
+            "description": (variant.description or variant.base_traits) if variant else matched.description or matched.base_traits or "",
         })
 
     return subjects
@@ -189,17 +215,26 @@ def _extract_asset_mentions(
 def select_asset_variant(
     asset: Asset,
     chapter_number: int | None,
-    selected_variant_ids: Mapping[int, int | None],
+    selected_variant_ids: Mapping[int, VariantSelection],
     mentioned_variant_name: str = "",
 ) -> AssetVariant | None:
     """Shared visual-version precedence for prompt context and media generation."""
+    return select_asset_variants(asset, chapter_number, selected_variant_ids, mentioned_variant_name)[0]
+
+
+def select_asset_variants(
+    asset: Asset,
+    chapter_number: int | None,
+    selected_variant_ids: Mapping[int, VariantSelection],
+    mentioned_variant_name: str = "",
+) -> list[AssetVariant | None]:
     variants = list(asset.variants)
     if asset.id in selected_variant_ids:
-        variant_id = selected_variant_ids[asset.id]
-        return _find_variant_by_id(variant_id, variants) if variant_id is not None else None
+        return [_find_variant_by_id(identifier, variants) if identifier is not None else None
+                for identifier in variant_selection_ids(selected_variant_ids[asset.id])]
     if mentioned_variant_name:
-        return _find_variant(mentioned_variant_name, variants)
-    return _find_chapter_variant(chapter_number, variants)
+        return [_find_variant(mentioned_variant_name, variants)]
+    return [_find_chapter_variant(chapter_number, variants)]
 
 
 def _find_variant(name: str, variants: list[AssetVariant]) -> AssetVariant | None:

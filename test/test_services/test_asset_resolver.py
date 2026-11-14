@@ -13,6 +13,25 @@ from utils.enums import AssetTypeEnum
 
 
 @pytest.mark.asyncio
+async def test_bound_multiple_forms_are_all_resolved_without_losing_base_or_order():
+    novel = await Novel.create(name='Selected simultaneous forms')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', main_image='https://example.test/base.png')
+    young = await AssetVariant.create(asset=asset, name='少年', images=['https://example.test/young.png'])
+    baby = await AssetVariant.create(asset=asset, name='婴儿', images=['https://example.test/baby.png'])
+    selected = normalize_selected_variant_ids({str(asset.id): [None, young.id, baby.id, young.id]})
+    assert selected == {asset.id: [None, young.id, baby.id]}
+    subjects = await resolve_assets('@{苏玄}同框', novel.id, selected_asset_ids=[asset.id], selected_variant_ids=selected)
+    assert [subject['name'] for subject in subjects] == ['苏玄', '苏玄#少年', '苏玄#婴儿']
+    assert [subject['images'] for subject in subjects] == [[asset.main_image], young.images, baby.images]
+    from services.video.content import process_subject_prompt
+    prepared, images = process_subject_prompt('@{苏玄}与@{苏玄#少年}、@{苏玄#婴儿}同框', subjects, 9)
+    assert prepared == '[图1]与[图2]、[图3]同框'
+    assert images == [asset.main_image, *young.images, *baby.images]
+    subjects = await resolve_assets('@{苏玄#婴儿}抬头', novel.id, selected_asset_ids=[asset.id], selected_variant_ids=selected, include_selected=True)
+    assert [subject['name'] for subject in subjects] == ['苏玄#婴儿', '苏玄', '苏玄#少年']
+
+
+@pytest.mark.asyncio
 async def test_one_shot_can_reference_base_and_multiple_variants_without_collapsing_identity():
     novel = await Novel.create(name='同镜多形态')
     asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', main_image='https://example.test/base.png')

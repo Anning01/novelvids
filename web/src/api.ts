@@ -332,7 +332,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ variant_id: variantId, reference_images: referenceImages }),
   }),
-  generateAssetBatch: (payload: { novel_id: number; asset_ids: number[]; model_config_id: number; clarity: string; aspect_ratio: string; output_format: string }) => request<SingleResponse<{ tasks: AiTask[]; skipped_asset_ids: number[] }>>('/asset/reference-batch', { method: 'POST', body: JSON.stringify(payload) }),
+  generateAssetBatch: (payload: { novel_id: number; asset_ids: number[]; variant_ids?: number[]; model_config_id: number; clarity: string; aspect_ratio: string; output_format: string }) => request<SingleResponse<{ tasks: AiTask[]; skipped_asset_ids: number[]; skipped_variant_ids?: number[] }>>('/asset/reference-batch', { method: 'POST', body: JSON.stringify(payload) }),
   activeAssetGenerations: (novelId: number) => request<SingleResponse<AssetActiveGeneration[]>>(`/asset/active-generations${qs({ novel_id: novelId })}`),
   scenes: (chapterId: number, page = 1) => request<PaginationResponse<Scene>>(`/scene${qs({ chapter_id: chapterId, page, page_size: 100, sort: 'sequence' })}`),
   scene: (id: number) => request<SingleResponse<Scene>>(`/scene/${id}`),
