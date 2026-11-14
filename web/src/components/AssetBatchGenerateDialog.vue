@@ -67,8 +67,8 @@ const eligibleAssets = computed(() => targets.value.filter(target => !target.ima
 const selectedTargets = computed(() => eligibleAssets.value.filter(target => selectedIds.value.includes(target.key)))
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.config_id), label: item.name || item.model || tr('生图模型 {p0}', { p0: item.config_id }) })))
 const selectedModel = computed(() => models.value.find(item => String(item.config_id) === modelId.value) || null)
-const estimatedCost = computed(() => selectedTargets.value.reduce((sum, asset) => {
-  const refs = asset.metadata?.generation_reference_images
+const estimatedCost = computed(() => selectedTargets.value.reduce((sum, target) => {
+  const refs = target.metadata?.generation_reference_images
   return sum + estimateAssetImageCost(selectedModel.value, imageParameters.value, Array.isArray(refs) ? new Set(refs).size : 0)
 }, 0))
 const allSelected = computed(() => Boolean(eligibleAssets.value.length) && eligibleAssets.value.every(asset => selectedIds.value.includes(asset.key)))

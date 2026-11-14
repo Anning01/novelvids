@@ -1,6 +1,4 @@
 {
-  "形态必须属于出镜设定": "Variants must belong to an on-screen setting",
-  "请至少选择一个资产或形态": "Select at least one base image or variant",
   "已保留 {p0} 个片段的分镜。模型服务已受理第 {p1} 段的请求，但工作台未收到完整结果。请导出诊断日志交给管理员核对，避免重复扣费。": "Storyboard results for {p0} clips are saved. The model service accepted requests for clips {p1}, but their full results did not reach the workspace. Export diagnostics for administrator review to avoid duplicate charges.",
   "视频分析服务未通过身份验证，请联系管理员检查模型密钥。": "Video analysis authentication failed. Ask an administrator to check the model credentials.",
   "请联系管理员配置可用的视频分析模型，然后重试。": "Ask an administrator to configure an available video analysis model, then retry.",
@@ -32,6 +30,8 @@
   "请等待当前任务完成后再切换模型": "Wait for the current task to finish before switching models.",
   "已有改编任务正在运行，请等待完成后再切换模型": "Wait for the current adaptation to finish before switching models.",
   "已有分析任务正在运行，请等待完成后再切换分析模型": "Wait for the current analysis to finish before switching models.",
+  "请至少选择一个资产或形态": "Select at least one base image or variant",
+  "形态必须属于出镜设定": "Variants must belong to an on-screen setting",
   "API 平台账户可用额度不足，请前往 API 平台检查余额和限额": "The API platform account has insufficient available credit. Check its balance and limits on the API platform.",
   "请先设置工作台的平台地址": "Configure the studio platform URL first.",
   "请先填写平台 API Key": "Enter your platform API key first.",

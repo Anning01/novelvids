@@ -34,7 +34,7 @@
 **下载并使用猫影工作台**
 
 ```text
-请从 https://github.com/Anning01/novelvids 下载并用 Docker 部署猫影工作台，在支持的 Linux 主机上用仓库自带的 scripts/update/install.sh 一并启用在线升级，验证部署结果后把工作台地址和小说导入入口发给我。
+请从 https://github.com/Anning01/novelvids 下载猫影工作台，用 Docker 在我的电脑上启动它，并用 scripts/update/install-docker.sh 启用在线升级，然后告诉我在哪里打开工作台、导入小说。
 ```
 
 **单独使用创作 Skills**
@@ -42,6 +42,14 @@
 ```text
 请用 https://github.com/Anning01/novelvids 里的 scripts/export_skill.py，把剧本改编、资产设定和分镜设计三个 Skills 安装到我当前的创作项目，然后告诉我怎么用它们处理第一章小说。
 ```
+
+## 在线升级
+
+合并 PR 到 `main` 后，GitHub Actions 自动检查、构建前后端 Docker 镜像并发布新版，版本按 `1.2.0 → 1.3.0 → 1.4.0` 递增。版本标签和安装包包含对应的版本信息；自动发布不会向 `main` 推送代码或版本提交。构建失败不会发布新版。
+
+已有 Docker Compose 部署在安装目录运行一次 `sh scripts/update/install-docker.sh`，即可启用工作台里的「升级工作台」。支持 Linux Docker 和 Docker Desktop，更新服务自身也运行在容器中，不需要宿主机安装 Python 或 systemd。它沿用现有 Compose 项目、端口覆盖、环境配置和数据目录；目前支持默认 SQLite 部署。安装会重建后端容器以接入更新服务，已有数据和素材保留。更新容器需要管理本项目的 Docker 容器，因此单独挂载 Docker socket；业务容器不挂载该 socket。
+
+收到新版后，由部署管理员点击升级。更新服务先准备镜像、等待任务结束，再备份数据库并切换版本；健康检查失败会恢复上一版。旧的 Linux systemd 更新服务须先停用并迁移，不能与容器更新服务同时管理同一部署。
 
 ## 加入交流群
 

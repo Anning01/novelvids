@@ -13,12 +13,14 @@ import tempfile
 import hashlib
 import threading
 import time
+import tarfile
+import shutil
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(sys.argv[1]).resolve() if __name__ == "__main__" else Path.cwd()
 RUNTIME = Path("/run/novelvids-update")
-STATE = Path("/var/lib/novelvids-update")
+STATE = Path(os.environ.get("NOVELVIDS_UPDATE_STATE", "/var/lib/novelvids-update"))
 REPO = "Anning01/novelvids"
 TAG = re.compile(r"v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})")
 LOCK = threading.Lock()
@@ -77,14 +79,41 @@ def current_images():
     return result
 
 
+def release_source(release, version, source):
+    """Prefer the stamped release package; retain compatibility with older tags."""
+    assets = {asset["name"]: asset["browser_download_url"] for asset in release.get("assets", [])}
+    if "release.json" not in assets:
+        run("git", "clone", "--depth", "1", "--branch", "v" + version,
+            "https://github.com/" + REPO + ".git", str(source))
+        return
+    with urllib.request.urlopen(assets["release.json"], timeout=30) as response:
+        manifest = json.load(response)
+    if manifest["version"] != version or manifest.get("update_format") != 1:
+        raise ValueError("Release manifest mismatch")
+    archive = manifest["source_archive"]
+    with tempfile.TemporaryFile() as bundle:
+        with urllib.request.urlopen(assets[archive["name"]], timeout=120) as response:
+            shutil.copyfileobj(response, bundle)
+        bundle.seek(0)
+        if hashlib.file_digest(bundle, "sha256").hexdigest() != archive["sha256"]:
+            raise ValueError("Release archive checksum mismatch")
+        bundle.seek(0)
+        with tarfile.open(fileobj=bundle) as package:
+            package.extractall(source, filter="data")
+
+
 def override():
-    return ROOT / "docker-compose.override.yml"
+    return Path(os.environ.get("NOVELVIDS_UPDATE_OVERRIDE", str(ROOT / "docker-compose.override.yml")))
 
 
 def activate(images):
     services = {name: {"image": image, "pull_policy": "never"} for name, image in images.items()}
-    services["backend"]["volumes"] = [f"{RUNTIME}:/run/novelvids-update:ro"]
-    write(override(), {"services": services})
+    runtime_volume = os.environ.get("NOVELVIDS_UPDATE_VOLUME")
+    services["backend"]["volumes"] = [f"{runtime_volume or RUNTIME}:/run/novelvids-update:ro"]
+    config = {"services": services}
+    if runtime_volume:
+        config["volumes"] = {runtime_volume: {"external": True}}
+    write(override(), config)
     compose("up", "-d", "--no-build", "--force-recreate", "backend", "frontend")
 
 
@@ -126,8 +155,8 @@ def upgrade(version):
             raise ValueError("Host compose configuration has changed")
         images = {}
         with tempfile.TemporaryDirectory(dir=STATE) as directory:
-            run("git", "clone", "--depth", "1", "--branch", tag, "https://github.com/" + REPO + ".git", directory)
             source = Path(directory)
+            release_source(release, version, source)
             manifest = json.loads((source / "release.json").read_text())
             if manifest["version"] != version or manifest.get("update_format") != 1:
                 raise ValueError("Release manifest mismatch")

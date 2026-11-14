@@ -98,7 +98,7 @@ async function upgrade() {
       <button v-if="stale" type="button" @click="refresh">{{ tr('刷新页面') }}</button>
       <template v-else-if="auth.isSuperAdmin">
         <button v-if="latest?.online && status?.updater && status.updater.phase !== 'recovery_needed'" type="button" :disabled="busy" @click="upgrade">{{ tr('升级工作台') }}</button>
-        <a v-else :href="`https://github.com/Anning01/novelvids/releases/tag/v${latest?.version}`" target="_blank" rel="noopener">{{ tr('查看升级步骤') }}</a>
+        <a v-else href="https://github.com/Anning01/novelvids#在线升级" target="_blank" rel="noopener">{{ tr('查看升级步骤') }}</a>
       </template>
       <button v-if="!stale && !required" type="button" @click="dismiss">{{ tr('收起此版本提醒') }}</button>
     </template>

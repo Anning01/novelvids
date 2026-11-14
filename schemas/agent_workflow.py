@@ -1,5 +1,6 @@
 """Structured production inputs; natural-language layout belongs to skills."""
 
+from math import isclose
 from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator

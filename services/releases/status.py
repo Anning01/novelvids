@@ -19,14 +19,17 @@ async def latest_release():
         if _checked and time.monotonic() - _checked < 300:
             return _latest
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
                 response = await client.get(f"https://api.github.com/repos/{REPO}/releases/latest")
                 response.raise_for_status()
                 release = response.json()
                 tag = release["tag_name"]
                 if not TAG.fullmatch(tag) or release["draft"] or release["prerelease"]:
                     raise ValueError("Expected stable release")
-                response = await client.get(f"https://raw.githubusercontent.com/{REPO}/{tag}/release.json")
+                manifest_url = next((asset["browser_download_url"] for asset in release.get("assets", [])
+                                     if asset["name"] == "release.json"),
+                                    f"https://raw.githubusercontent.com/{REPO}/{tag}/release.json")
+                response = await client.get(manifest_url)
                 response.raise_for_status()
                 manifest = response.json()
                 if manifest["version"] != tag[1:]:
