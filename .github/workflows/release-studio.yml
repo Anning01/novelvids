@@ -30,6 +30,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: uv sync --frozen --dev
+      - name: Install media tools used by integration tests
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Verify release and multi-form contracts
         env:
           AUTH_ENABLED: 'false'
