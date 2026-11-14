@@ -7,6 +7,7 @@ const LEGACY_VOICE_REFERENCE_PATTERN = /(?:^|\n{2,})【音色参考】\n[\s\S]*$
 
 export interface VoiceReferenceAsset {
   assetId: number
+  variantId?: number | null
   name: string
   aliases: string[]
   referenceId: number
@@ -49,8 +50,8 @@ function firstMention(prompt: string, asset: VoiceReferenceAsset) {
   let match: { index: number; length: number } | null = null
   for (const name of [asset.name, ...asset.aliases]) {
     for (const pattern of [
-      new RegExp(`@\\{${escapePattern(name)}(?:#[^}]*)?\\}`, 'gu'),
-      new RegExp(`@${escapePattern(name)}`, 'gu'),
+      new RegExp(`@\\{${escapePattern(name)}${asset.variantId === undefined ? '(?:#[^}]*)?' : ''}\\}`, 'gu'),
+      new RegExp(`@${escapePattern(name)}${asset.variantId === undefined ? '' : '(?!#)'}`, 'gu'),
     ]) {
       const occurrence = pattern.exec(prompt)
       if (!occurrence) continue
@@ -80,10 +81,11 @@ export function buildVoiceReferenceMappings(context: VoiceReferenceContext): Voi
       return occurrence ? [{ asset, ...occurrence }] : []
     })
     .sort((left, right) => left.index - right.index || right.length - left.length)
-  const assignedAssetIds = new Set<number>()
+  const assignedAssetIds = new Set<string>()
+  const identity = (asset: VoiceReferenceAsset) => `${asset.assetId}:${asset.variantId ?? 'base'}`
   for (const { asset } of mentioned) {
-    if (assignedAssetIds.has(asset.assetId)) continue
-    assignedAssetIds.add(asset.assetId)
+    if (assignedAssetIds.has(identity(asset))) continue
+    assignedAssetIds.add(identity(asset))
     assignments.push({
       referenceId: asset.referenceId,
       kind: 'character',
@@ -91,8 +93,8 @@ export function buildVoiceReferenceMappings(context: VoiceReferenceContext): Voi
     })
   }
   for (const asset of context.assets) {
-    if (assignedAssetIds.has(asset.assetId) || !characterHasDialogue([context.prompt, ...(['dialogue', 'narration'].flatMap(key => Array.isArray(context.promptParams?.[key]) ? context.promptParams[key] as string[] : []))].join('\n'), asset)) continue
-    assignedAssetIds.add(asset.assetId)
+    if (assignedAssetIds.has(identity(asset)) || !characterHasDialogue([context.prompt, ...(['dialogue', 'narration'].flatMap(key => Array.isArray(context.promptParams?.[key]) ? context.promptParams[key] as string[] : []))].join('\n'), asset)) continue
+    assignedAssetIds.add(identity(asset))
     assignments.push({
       referenceId: asset.referenceId,
       kind: 'character',

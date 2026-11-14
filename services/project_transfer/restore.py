@@ -54,7 +54,7 @@ class LocalIds:
                   "narrator_audio_reference_id": AudioReference, "library_resource_id": VideoResource}
         for key, item in value.items():
             if key == "asset_variant_ids" and isinstance(item, dict):
-                output[key] = {str(self.get(Asset, k)): self.get(AssetVariant, v) for k, v in item.items()}
+                output[key] = {str(self.get(Asset, k)): [self.get(AssetVariant, identifier) for identifier in v] if isinstance(v, list) else self.get(AssetVariant, v) for k, v in item.items()}
             elif key in {"asset_ids", "voice_asset_ids"} and isinstance(item, list) and all(type(v) is int for v in item):
                 output[key] = [self.get(Asset, v) for v in item]
             elif key == "asset_id" and type(item) is int:

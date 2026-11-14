@@ -660,7 +660,7 @@ it('shows a live animated generation state immediately after regeneration starts
   await flushPromises()
 
   expect(api.generateAsset).toHaveBeenCalledWith(assetWithBaseImage.id, pendingVariant.id)
-  expect(wrapper.emitted('generation-started')).toEqual([[{ asset_id: editedAsset.id, task_id: 'generation-pending', status: TaskStatusEnum.PENDING }]])
+  expect(wrapper.emitted('generation-started')).toEqual([[{ asset_id: editedAsset.id, variant_id: pendingVariant.id, task_id: 'generation-pending', status: TaskStatusEnum.PENDING }]])
   expect(wrapper.get('.asset-generated-preview > header strong').text()).toContain('测试形态')
   expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('生成中')
   expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('自动显示最新结果')

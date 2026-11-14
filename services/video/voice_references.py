@@ -174,47 +174,51 @@ async def resolve_voice_references(
     if imported_voice_ids:
         for asset in await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.person.value, id__in=imported_voice_ids):
             scene_assets[asset.canonical_name] = asset
-    raw_variant_ids = metadata.get("asset_variant_ids")
-    variant_ids = raw_variant_ids if isinstance(raw_variant_ids, dict) else {}
-    selected_variant_ids = {
-        asset.id: _positive_reference_id(variant_ids.get(str(asset.id), variant_ids.get(asset.id)))
-        for asset in scene_assets.values()
-    }
-    requested_variant_ids = [value for value in selected_variant_ids.values() if value]
-    variants = {
-        variant.id: variant
-        for variant in await AssetVariant.filter(id__in=requested_variant_ids)
-    } if requested_variant_ids else {}
+    from services.video.asset_resolver import normalize_selected_variant_ids, variant_selection_ids
+    selected = normalize_selected_variant_ids(metadata.get('asset_variant_ids'))
+    variants = {variant.id: variant for variant in await AssetVariant.filter(
+        asset_id__in=[asset.id for asset in scene_assets.values()])}
 
-    def asset_voice_reference_id(asset: Any) -> int | None:
+    def asset_voice_reference_id(asset: Any, variant=None) -> int | None:
         asset_metadata = asset.metadata if isinstance(asset.metadata, dict) else {}
         reference_id = _positive_reference_id(asset_metadata.get("voice_reference_id"))
-        variant_id = selected_variant_ids.get(asset.id)
-        variant = variants.get(variant_id) if variant_id else None
         if variant is not None and isinstance(variant.metadata, dict) and "voice_reference_id" in variant.metadata:
             reference_id = _positive_reference_id(variant.metadata["voice_reference_id"])
         return reference_id
 
     assigned_names: set[str] = set()
     for subject in subjects:
-        name = str(subject.get("name") or "").partition("#")[0]
+        display_name = str(subject.get("name") or "")
+        name, _, suffix = display_name.partition("#")
         asset = scene_assets.get(name)
         reference_id = _positive_reference_id(subject.get("voice_reference_id"))
         if asset is not None:
-            reference_id = asset_voice_reference_id(asset)
-        if reference_id and name:
-            assignments.append((reference_id, "character", name))
-            assigned_names.add(name)
+            variant_name = subject.get('variant_name') or suffix
+            variant = next((row for row in variants.values() if row.asset_id == asset.id and row.name == variant_name), None)
+            identifiers = variant_selection_ids(selected.get(asset.id))
+            if not variant_name and len(identifiers) == 1:
+                variant = variants.get(identifiers[0])
+            reference_id = asset_voice_reference_id(asset, variant)
+        if reference_id and display_name:
+            assignments.append((reference_id, "character", display_name))
+            assigned_names.add(display_name)
     for asset in scene_assets.values():
-        name = asset.canonical_name
-        if name in assigned_names or asset.asset_type != AssetTypeEnum.person.value:
+        if asset.asset_type != AssetTypeEnum.person.value:
             continue
-        aliases = asset.aliases if isinstance(asset.aliases, list) else []
-        if asset.id not in imported_voice_ids and not _character_has_dialogue(scene, [name, *aliases]):
-            continue
-        reference_id = asset_voice_reference_id(asset)
-        if reference_id:
-            assignments.append((reference_id, "character", name))
+        identifiers = variant_selection_ids(selected.get(asset.id))
+        for identifier in identifiers:
+            variant = variants.get(identifier)
+            name = f'{asset.canonical_name}#{variant.name}' if variant and len(identifiers) > 1 else asset.canonical_name
+            if name in assigned_names:
+                continue
+            aliases = asset.aliases if isinstance(asset.aliases, list) else []
+            if variant and len(identifiers) > 1:
+                aliases = [f'{alias}#{variant.name}' for alias in aliases]
+            if asset.id not in imported_voice_ids and not _character_has_dialogue(scene, [name, *aliases]):
+                continue
+            reference_id = asset_voice_reference_id(asset, variant)
+            if reference_id:
+                assignments.append((reference_id, "character", name))
     if not assignments:
         return []
 

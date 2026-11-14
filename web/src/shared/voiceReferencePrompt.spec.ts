@@ -6,6 +6,15 @@ import {
 } from './voiceReferencePrompt'
 
 describe('可编辑音色参考 Prompt', () => {
+  it('uses separate voice identities for simultaneous forms without matching sibling references', () => {
+    const forms = [
+      { assetId: 1, variantId: null, name: '苏玄', aliases: [], referenceId: 1 },
+      { assetId: 1, variantId: 11, name: '苏玄#少年', aliases: ['苏玄'], referenceId: 2 },
+      { assetId: 1, variantId: 12, name: '苏玄#婴儿', aliases: ['苏玄'], referenceId: 3 },
+    ]
+    expect(buildVoiceReferenceMappings({ prompt: '@{苏玄#婴儿}与@{苏玄#少年}', assets: forms }).map(mapping => mapping.referenceId)).toEqual([3, 2])
+    expect(buildVoiceReferenceMappings({ prompt: '@{苏玄}', assets: forms }).map(mapping => mapping.referenceId)).toEqual([1, 2, 3])
+  })
   const assets = [
     { assetId: 10, name: '总工程师', aliases: ['工程师'], referenceId: 21 },
     { assetId: 11, name: '林冲', aliases: [], referenceId: 22 },

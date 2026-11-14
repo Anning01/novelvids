@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpenText,
@@ -101,7 +101,9 @@ let workspaceRefreshVersion = 0
 let refreshingWorkspace = false
 let discoveringGenerations = false
 let generationDiscoveryTimer: ReturnType<typeof setInterval> | undefined
-const generationMonitors = new Map<string, { assetId: number; result: Promise<boolean> }>()
+const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; result: Promise<boolean> }>())
+const generatingTargets = computed(() => new Set([...generationMonitors.values()].map(item => item.targetKey)))
+const failedTargets = ref(new Set<string>())
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAssetClickUntil = 0
 
@@ -596,15 +598,17 @@ function setAssetFailed(assetId: number, value: boolean) {
   failedAssetIds.value = next
 }
 
-async function monitorAssetGeneration(assetId: number, taskId: string): Promise<boolean> {
+async function monitorAssetGeneration(assetId: number, taskId: string, variantId?: number | null): Promise<boolean> {
   const existing = generationMonitors.get(taskId)
   if (existing) return existing.result
   setAssetGenerating(assetId, true)
   setAssetFailed(assetId, false)
+  const targetKey = variantId == null ? `asset:${assetId}` : `variant:${variantId}`
+  failedTargets.value.delete(targetKey)
   const projectAtStart = projectId.value
   const current = () => pageAlive && projectAtStart === projectId.value
   const result = pollAssetGeneration()
-  generationMonitors.set(taskId, { assetId, result })
+  generationMonitors.set(taskId, { assetId, targetKey, result })
   return result
 
   async function pollAssetGeneration(): Promise<boolean> {
@@ -617,11 +621,15 @@ async function monitorAssetGeneration(assetId: number, taskId: string): Promise<
       }
       if (!current()) return false
       const completed = task.status === TaskStatusEnum.COMPLETED
+      if (!completed) failedTargets.value.add(targetKey)
       setAssetFailed(assetId, !completed)
       if (completed) await refreshAssets()
       return completed
     } catch {
-      if (current()) setAssetFailed(assetId, true)
+      if (current()) {
+        setAssetFailed(assetId, true)
+        failedTargets.value.add(targetKey)
+      }
       return false
     } finally {
       generationMonitors.delete(taskId)
@@ -633,7 +641,7 @@ async function monitorAssetGeneration(assetId: number, taskId: string): Promise<
 }
 
 function trackAssetGeneration(generation: AssetActiveGeneration) {
-  void monitorAssetGeneration(generation.asset_id, generation.task_id)
+  void monitorAssetGeneration(generation.asset_id, generation.task_id, generation.variant_id)
 }
 
 async function resumeActiveGenerations() {
@@ -645,45 +653,53 @@ async function resumeActiveGenerations() {
     if (!pageAlive || projectAtStart !== projectId.value) return
     for (const item of response.data) {
       if (!assets.value.some(asset => asset.id === item.asset_id)) continue
-      void monitorAssetGeneration(item.asset_id, item.task_id)
+      void monitorAssetGeneration(item.asset_id, item.task_id, item.variant_id)
     }
   } catch (error) {
     notice.error((error as Error).message)
   } finally { discoveringGenerations = false }
 }
 
-async function batchGenerateAssets(options: { assetIds: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
+async function batchGenerateAssets(options: { assetIds: number[]; variantIds?: number[]; modelConfigId: number; concurrency: number; clarity: string; ratio: string; outputFormat: string; generationCount: number }) {
   if (batchGenerating.value) return
   const selected = new Set(options.assetIds)
-  const targets = assets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingAssetIds.value.has(asset.id))
-  if (!targets.length) return
+  const targets = assets.value.filter(asset => selected.has(asset.id) && !asset.main_image && !generatingTargets.value.has(`asset:${asset.id}`))
+  const selectedVariants = new Set(options.variantIds || [])
+  const variants = assets.value.flatMap(asset => (asset.variants || []).filter(variant => selectedVariants.has(variant.id)
+    && !variant.images.length && !generatingTargets.value.has(`variant:${variant.id}`)))
+  if (!targets.length && !variants.length) return
+  const targetAssetIds = new Set([...targets.map(asset => asset.id), ...variants.map(variant => variant.asset_id)])
 
   showBatchDialog.value = false
   batchGenerating.value = true
-  for (const asset of targets) {
-    setAssetGenerating(asset.id, true)
-    setAssetFailed(asset.id, false)
+  for (const id of targetAssetIds) {
+    setAssetGenerating(id, true)
+    setAssetFailed(id, false)
   }
   try {
     const response = await api.generateAssetBatch({
       novel_id: projectId.value,
       asset_ids: targets.map(asset => asset.id),
+      ...(variants.length ? { variant_ids: variants.map(variant => variant.id) } : {}),
       model_config_id: options.modelConfigId,
       clarity: options.clarity,
       aspect_ratio: options.ratio,
       output_format: options.outputFormat,
     })
     if (!pageAlive) return
-    for (const id of response.data.skipped_asset_ids) setAssetGenerating(id, false)
     for (const task of response.data.tasks) {
       const assetId = Number(task.request_params?.asset_id)
-      if (Number.isFinite(assetId)) void monitorAssetGeneration(assetId, task.id)
+      const variantId = task.request_params?.variant_id as number | null | undefined
+      if (Number.isFinite(assetId)) void monitorAssetGeneration(assetId, task.id, variantId)
+    }
+    for (const id of targetAssetIds) {
+      if (![...generationMonitors.values()].some(item => item.assetId === id)) setAssetGenerating(id, false)
     }
     await refreshAssets()
     notice.info(tr('任务已提交，正在等待模型执行。'))
     void resumeActiveGenerations()
   } catch (error) {
-    for (const asset of targets) setAssetGenerating(asset.id, false)
+    for (const id of targetAssetIds) setAssetGenerating(id, false)
     notice.error((error as Error).message)
   } finally {
     batchGenerating.value = false
@@ -917,6 +933,8 @@ onBeforeUnmount(() => {
       :generating-ids="generatingAssetIds"
       :failed-ids="failedAssetIds"
       :submitting="batchGenerating"
+      :generating-targets="generatingTargets"
+      :failed-targets="failedTargets"
       @close="showBatchDialog = false"
       @generate="batchGenerateAssets"
     />

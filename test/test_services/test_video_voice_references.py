@@ -27,6 +27,25 @@ async def _scene(novel: Novel, *, narration=None) -> Scene:
 
 
 @pytest.mark.asyncio
+async def test_same_character_forms_keep_separate_voices_in_subject_order():
+    voices = [await AudioReference.create(nickname=f'Form voice {i}', gender='男',
+        audio_url=f'https://cdn.example.com/{i}.wav', avatar_url='', asset_id=f'form-{i}') for i in range(3)]
+    novel = await Novel.create(name='同角色多音色')
+    scene = await _scene(novel)
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='苏玄', metadata={'voice_reference_id': voices[0].id})
+    young = await AssetVariant.create(asset=asset, name='少年', metadata={'voice_reference_id': voices[1].id})
+    baby = await AssetVariant.create(asset=asset, name='婴儿', metadata={'voice_reference_id': voices[2].id})
+    await scene.assets.add(asset)
+    scene.metadata = {'asset_variant_ids': {str(asset.id): [None, young.id, baby.id]}}
+    await scene.save()
+    references = await resolve_voice_references(scene=scene, novel=novel,
+        subjects=[{'name': '苏玄#婴儿', 'variant_name': '婴儿'}, {'name': '苏玄'}, {'name': '苏玄#少年', 'variant_name': '少年'}],
+        capabilities=capabilities_for('seedance_2'))
+    assert [reference.subjects for reference in references] == [('苏玄#婴儿',), ('苏玄',), ('苏玄#少年',)]
+    assert [reference.url for reference in references] == [voices[2].audio_url, voices[0].audio_url, voices[1].audio_url]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("variant_metadata", [{}, {"voice_reference_id": None}])
 async def test_explicitly_cleared_variant_voice_does_not_inherit_or_reuse_stale_subject_voice(variant_metadata):
     voice = await AudioReference.create(nickname="主形象音色", gender="女",
