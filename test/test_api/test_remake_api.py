@@ -645,3 +645,25 @@ async def test_create_dispatches_background_decomposition_and_failed_source_can_
     assert second_task.id != first_task.id
     assert second_task.request_params["attempt"] == 2
     assert await AiTask.filter(id=second_task.id).exists()
+
+
+@pytest.mark.asyncio
+async def test_stream_publishes_clip_changes_even_when_timestamp_does_not_change(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from api.remake import stream_project_progress
+    from auth.deps import AuthContext
+    base = {"updated_at": "same-time", "aggregate_status": "processing", "terminal": False,
+            "overall_progress": 73, "sources": [{"completed_clips": 57}]}
+    changed = {**base, "sources": [{"completed_clips": 58}]}
+    terminal = {**changed, "aggregate_status": "failed", "terminal": True}
+    monkeypatch.setattr("api.remake._get_remake_novel", AsyncMock(return_value=SimpleNamespace()))
+    monkeypatch.setattr("api.remake.remake_progress_service.snapshot",
+                        AsyncMock(side_effect=[base, base, changed, terminal]))
+    monkeypatch.setattr("api.remake.asyncio.sleep", AsyncMock())
+    response = await stream_project_progress(2, SimpleNamespace(is_disconnected=AsyncMock(return_value=False)), AuthContext())
+    events = [item async for item in response.body_iterator if not item.startswith(":")]
+    assert len(events) == 3
+    assert '"completed_clips":57' in events[0]
+    assert '"completed_clips":58' in events[1]
+    assert "event: terminal" in events[2]

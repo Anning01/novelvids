@@ -290,10 +290,11 @@ async def stream_project_progress(
     novel = await _get_remake_novel(novel_id, ctx)
 
     async def event_stream():
-        last_version: str | None = None
+        last_payload: str | None = None
         while True:
             snapshot = await remake_progress_service.snapshot(novel)
-            if snapshot["updated_at"] != last_version:
+            payload = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+            if payload != last_payload:
                 event = (
                     "complete"
                     if snapshot["aggregate_status"] == "completed"
@@ -304,9 +305,9 @@ async def stream_project_progress(
                 yield (
                     f"id: {snapshot['updated_at']}\n"
                     f"event: {event}\n"
-                    f"data: {json.dumps(snapshot, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    f"data: {payload}\n\n"
                 )
-                last_version = snapshot["updated_at"]
+                last_payload = payload
             if snapshot["terminal"] or await request.is_disconnected():
                 break
             yield ": keep-alive\n\n"
