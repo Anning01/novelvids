@@ -1,9 +1,10 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minimum": {
     "pixel_tier_images": "1.1.0"
   },
-  "summary": "支持 Seedream 5.5、像素分档报价和工作台在线更新。",
-  "summary_en": "Adds Seedream 5.5, pixel-tier pricing and studio updates.",
-  "update_format": 1
+  "summary": "工作台 1.2.0，包含本次合并的功能与修复。",
+  "summary_en": "Studio 1.2.0, including the merged features and fixes.",
+  "update_format": 1,
+  "source_commit": "f2ef81e1b584e5a24684536e880f1ffd81427230"
 }
