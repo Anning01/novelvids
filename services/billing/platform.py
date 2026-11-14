@@ -91,6 +91,7 @@ async def begin_platform_image(base_url, model, api_key):
 
 
 def platform_text_client(config):
+    from services.remake.capacity_transport import PlatformCapacityTransport
     async def before_request(request):
         if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
             return
@@ -114,7 +115,7 @@ def platform_text_client(config):
         if request_id and active:
             active[1]["platform_request_id"] = str(request_id)
 
-    return AsyncClient(timeout=None, follow_redirects=False, trust_env=False,
+    return AsyncClient(timeout=None, follow_redirects=False, trust_env=False, transport=PlatformCapacityTransport(trust_env=False),
         event_hooks={"request": [before_request], "response": [after_response]})
 
 
