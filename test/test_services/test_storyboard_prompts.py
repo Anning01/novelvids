@@ -326,45 +326,20 @@ def test_normalized_storyboard_reference_fields_handles_attached_chinese_prose()
 
 
 @pytest.mark.asyncio
-async def test_storyboard_generator_uses_fresh_continuation_calls():
-    completions = [
-        SimpleNamespace(
-            model="storyboard-model",
-            id=f"response-{index}",
-            created=index,
-            usage=None,
-            choices=[SimpleNamespace(message=SimpleNamespace(refusal=None))],
-        )
-        for index in (1, 2)
-    ]
-    completion_call = AsyncMock(
-        side_effect=[
-            (Storyboard(shots=[_shot(9, "第一批")]), completions[0]),
-            (Storyboard(shots=[_shot(1, "第二批")]), completions[1]),
-        ]
-    )
-
-    with patch(
-        "services.storyboard.generator.create_json_completion",
-        completion_call,
-    ):
-        result, metadata = await generate_storyboard(
-            client=object(),
-            long_text="第一句。" * 1600,
-            entities=[_entity()],
-            model="storyboard-model",
-            prompt_language="zh",
-        )
-
-    assert [shot.sequence for shot in result.shots] == [1, 2]
-    assert completion_call.await_count == 2
-    first_messages = completion_call.await_args_list[0].kwargs["messages"]
-    second_messages = completion_call.await_args_list[1].kwargs["messages"]
-    assert '"previous_shot": null' in first_messages[-1]["content"]
-    assert '"previous_shot": {' in second_messages[-1]["content"]
-    assert '"sequence": 1' in second_messages[-1]["content"]
-    assert "第一句。" * 20 not in second_messages[0]["content"]
-    assert metadata["batch_count"] == 2
+@pytest.mark.parametrize('context_limit', [None, 100_000])
+async def test_storyboard_generator_keeps_large_multiscene_episode_in_one_call(context_limit):
+    completion = SimpleNamespace(model='storyboard-model', id='response-1', created=1,
+        usage=None, choices=[SimpleNamespace(message=SimpleNamespace(refusal=None))])
+    completion_call = AsyncMock(return_value=(Storyboard(shots=[_shot(1), _shot(2)]), completion))
+    text = '1-1 前院 外 日\n' + '第一句。' * 1600 + '\n1-2 卧房 内 夜\n父亲哭求。'
+    with patch('services.storyboard.generator.create_json_completion', completion_call):
+        result, metadata = await generate_storyboard(client=object(), long_text=text,
+            entities=[_entity()], model='storyboard-model', max_context_characters=context_limit)
+    assert completion_call.await_count == 1
+    content = completion_call.await_args.kwargs['messages'][-1]['content']
+    assert '1-1 前院 外 日' in content and '1-2 卧房 内 夜' in content
+    assert content.count('第一句。') == 1600
+    assert len(result.shots) == 2 and metadata['batch_count'] == 1
 
 
 @pytest.mark.asyncio

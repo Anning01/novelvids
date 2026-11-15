@@ -429,7 +429,7 @@ def test_visual_roster_uses_registered_asset_or_form_names():
 
 
 @pytest.mark.asyncio
-async def test_numbered_screenplay_is_generated_and_saved_with_separate_source_scenes():
+async def test_numbered_screenplay_is_generated_once_and_preserves_source_scenes():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from schemas.agent_workflow import StructuredSkillStoryboard
@@ -444,7 +444,9 @@ async def test_numbered_screenplay_is_generated_and_saved_with_separate_source_s
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     from test.test_services.test_scene_blueprint import SHOT, LAYOUT
     prototype = {**_shot().model_dump(exclude={'prompt'}), 'blocking_map':{**SHOT, 'layout':LAYOUT}}
-    batch = StructuredSkillStoryboard.model_validate({'shots': [prototype]})
+    batch = StructuredSkillStoryboard.model_validate({'shots': [
+        {**prototype, 'sequence': index, 'source_scene_number': number}
+        for index, number in enumerate(['1-1', '1-2', '1-3'], 1)]})
     execution = SimpleNamespace(snapshot=snapshot, params={'assistant_model_config_id':1},
                                 generate=AsyncMock(return_value=batch))
     token = current_execution.set(execution)
@@ -453,17 +455,46 @@ async def test_numbered_screenplay_is_generated_and_saved_with_separate_source_s
     finally:
         current_execution.reset(token)
     calls = [call.args[1] for call in execution.generate.await_args_list]
-    assert [call['source_scene_number'] for call in calls] == ['1-1', '1-2', '1-3']
-    assert len({call['segment'] for call in calls}) == 3
-    for call, line in zip(calls, ['家丁引医。', '老者报信。', '父亲哭求。']):
-        assert line in call['chapter']
-        assert sum(key in call['chapter'] for key in ['家丁引医。', '老者报信。', '父亲哭求。']) == 1
+    assert len(calls) == 1
+    assert calls[0]['chapter'] == text
+    assert calls[0]['source_scene_numbers'] == ['1-1', '1-2', '1-3']
+    assert metadata['batch_count'] == 1
+    assert execution.generate.await_args.kwargs['activity_label'] == '生成整集分镜'
     assert [shot.sequence for shot in result.shots] == [1, 2, 3]
     novel = await Novel.create(name='边界')
     chapter = await Chapter.create(novel=novel, number=1, name='第一集', content=text, screenplay=text)
     scenes = await StoryboardTaskHandler()._save_scenes(chapter.id, result, metadata, 0)
     assert [s.prompt_params['source_scene_number'] for s in scenes] == ['1-1', '1-2', '1-3']
     assert screenplay_sections('苏言：从1-1说到1-2。') == [(None, '苏言：从1-1说到1-2。')]
+
+
+@pytest.mark.parametrize('language', ['zh', 'en'])
+def test_episode_instruction_covers_all_scenes_and_source_numbers(language):
+    from prompts.storyboard import episode_storyboard_instruction, build_storyboard_messages
+    instruction = episode_storyboard_instruction(language)
+    assert 'source_scene_number' in instruction
+    assert ('完整一集' if language == 'zh' else 'complete episode') in instruction
+    assert instruction in build_storyboard_messages('1-1 院落\n1-2 卧房', [], language)[0]['content']
+
+
+def test_episode_candidate_repair_preserves_valid_shots_and_checks_source_scene():
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.candidates import StoryboardCandidateValidator
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    validator = StoryboardCandidateValidator(StructuredSkillStoryboard, snapshot, 'zh', [4, 30],
+        {'source_scene_numbers': ['1-1', '1-2'], 'generate_blocking_maps': False})
+    raw = _shot().model_dump(exclude={'prompt'})
+    result, checkpoint = validator.merge(validator.draft_type(shots=[
+        {**raw, 'sequence': 1, 'source_scene_number': '1-1'},
+        {**raw, 'sequence': 2, 'source_scene_number': 'wrong'},
+    ]))
+    assert result is None and checkpoint['accepted_shots'] == [1]
+    assert list(checkpoint['pending']) == [2]
+    result, checkpoint = validator.merge(validator.draft_type(shots=[
+        {**raw, 'sequence': 2, 'repair_of': 2, 'source_scene_number': '1-2'},
+    ]))
+    assert checkpoint['pending'] == {}
+    assert [shot.source_scene_number for shot in result.shots] == ['1-1', '1-2']
 
 
 def test_blocking_skill_only_requests_maps_for_duration_continuations():

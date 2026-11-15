@@ -263,6 +263,10 @@ class SoraScenePromptConfig(BaseModel):
         description="允许使用的克制效果；无特殊效果时明确写自然光写实拍摄",
     )
 
+    source_scene_number: str | None = Field(
+        default=None, description="所属导演剧本场号，如 1-2；沿用输入场号，无场号时留空。",
+    )
+
     duration_split_part: int | None = Field(
         default=None, ge=2, description="同一个导演镜头因单次生成时长上限拆段时填写续段序号，从 2 开始；首段及独立镜头留空。segments 中的内部切镜不算拆段。",
     )

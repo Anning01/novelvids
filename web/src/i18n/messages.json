@@ -1,5 +1,10 @@
 {
   "common": {
+    "删除这条失败记录？": "Delete this failed record?",
+    "删除后不再显示在生成记录中，不影响资产图片和费用记录。": "Remove this entry from generation history. Asset images and billing records are unaffected.",
+    "删除记录": "Delete record",
+    "删除失败记录": "Delete failed record",
+    "失败记录已删除": "Failed record deleted",
     "一键 Skills 优化": "Optimize all with Skills",
     "Skills 优化进度": "Skills optimization progress",
     "Skills 优化进度：{p0}/{p1} 镜": "Skills optimization: {p0}/{p1} shots",

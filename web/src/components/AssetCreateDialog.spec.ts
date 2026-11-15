@@ -14,6 +14,8 @@ import EpisodeSelectionPicker from './EpisodeSelectionPicker.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import assetDialogSource from './AssetCreateDialog.vue?raw'
 import annotationEditorSource from './ImageAnnotationEditor.vue?raw'
+import { appConfirm } from '@/shared/confirmDialog'
+vi.mock('@/shared/confirmDialog', () => ({ appConfirm: vi.fn() }))
 
 vi.mock('@/api', () => ({
   mediaUrl: (path?: string | null) => path ?? '',
@@ -25,6 +27,7 @@ vi.mock('@/api', () => ({
     assetLibrary: vi.fn(),
     asset: vi.fn(),
     assetGenerationHistory: vi.fn(),
+    deleteFailedAssetGeneration: vi.fn(),
     assetVariants: vi.fn(),
     createAssetVariant: vi.fn(),
     updateAssetVariant: vi.fn(),
@@ -1118,4 +1121,43 @@ it('opens the requested variant with its own prompt without requiring a manual s
   expect(wrapper.getComponent(MaterialMentionInput).props('modelValue')).toBe(variant.base_traits)
   expect(wrapper.get('.asset-variant-item.is-selected').text()).toContain('雨衣形态')
   wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('deletes only failed history after confirmation and keeps errors retryable (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({ code: 0, message: '', data: [] })
+  vi.mocked(api.assetGenerationHistory).mockResolvedValue({ code: 0, message: '', data: [
+    { id: 'failed', status: TaskStatusEnum.FAILED, images: [], error_message: '失败', created_at: '2026-11-15T10:00:00Z' },
+    { id: 'done', status: TaskStatusEnum.COMPLETED, images: ['/media/old.png'], created_at: '2026-11-15T09:00:00Z' },
+    { id: 'running', status: TaskStatusEnum.PROCESSING, images: [], created_at: '2026-11-15T11:00:00Z' },
+  ] })
+  vi.mocked(api.deleteFailedAssetGeneration).mockClear()
+  const wrapper = mount(AssetCreateDialog, { props: { open: true, kind: 'character', novelId: 9, asset: editedAsset },
+    global: { components: { AppButton }, stubs: { Teleport: true } } })
+  try {
+    await flushPromises()
+    expect(wrapper.findAll('[aria-label="删除失败记录"]')).toHaveLength(1)
+    vi.mocked(appConfirm).mockResolvedValueOnce(false)
+    await wrapper.get('[aria-label="删除失败记录"]').trigger('click')
+    await flushPromises()
+    expect(api.deleteFailedAssetGeneration).not.toHaveBeenCalled()
+    vi.mocked(appConfirm).mockResolvedValue(true)
+    vi.mocked(api.deleteFailedAssetGeneration).mockRejectedValueOnce(new Error('删除失败'))
+    await wrapper.get('[aria-label="删除失败记录"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[aria-label="删除失败记录"]').exists()).toBe(true)
+    let finish!: (value: { code: number; message: string; data: null }) => void
+    vi.mocked(api.deleteFailedAssetGeneration).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await wrapper.get('[aria-label="删除失败记录"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[aria-label="删除失败记录"]').attributes('disabled')).toBeDefined()
+    finish({ code: 0, message: '', data: null })
+    await flushPromises()
+    expect(api.deleteFailedAssetGeneration).toHaveBeenLastCalledWith(editedAsset.id, 'failed')
+    expect(wrapper.find('[aria-label="删除失败记录"]').exists()).toBe(false)
+    expect(wrapper.get('.asset-generation-history > header').text()).toContain('2 次')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
 })

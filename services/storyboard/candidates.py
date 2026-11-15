@@ -55,10 +55,13 @@ class StoryboardCandidateValidator:
                 errors.append(str(error))
         for shot in shots:
             try:
+                source_numbers = self.source_facts.get('source_scene_numbers', []) if isinstance(self.source_facts, dict) else []
+                if source_numbers and shot.source_scene_number not in source_numbers:
+                    raise ValueError('source_scene_number must match an original screenplay scene number')
                 validate_storyboard_duration(shot, self.duration_range)
                 if 'storyboard_contract' in self.snapshot.contents:
                     validate_skill_storyboard_timing(shot)
-                    if (isinstance(self.source_facts, dict) and self.source_facts.get('source_scene_number')
+                    if (isinstance(self.source_facts, dict) and (self.source_facts.get('source_scene_number') or source_numbers)
                             and shot.blocking_map is None):
                         # Model placement runs after segment order is final.
                         shot = shot.model_copy(update={'duration_split_part': None})

@@ -103,7 +103,7 @@ function handleTeamSwitch(teamId: string) {
 <template>
   <ElConfigProvider :locale="elementLocale">
   <div class="studio-frame">
-  <StudioReleaseBanner v-if="!platform" />
+  <StudioReleaseBanner v-if="!platform && !isFullscreen" />
   <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
       <RouterLink to="/" class="app-brand" :aria-label="tr('猫影首页')">

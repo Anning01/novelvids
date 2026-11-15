@@ -115,10 +115,13 @@ async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh(
         labels.append(options['activity_label'])
         if skill == 'storyboard':
             assert facts.get('generate_blocking_maps', True) is (blocking is not False)
-            count = 7 if facts['source_scene_number'] == '1-2' else 1
+            assert facts['source_scene_numbers'] == ['1-2', '1-3']
+            count = 8
             shots = []
             for index in range(count):
                 shot = _shot()
+                shot.source_scene_number = '1-2' if index < 7 else '1-3'
+                shot.sequence = index + 1
                 shot.visible_asset_names = ['展厅', '访客']
                 shot.transition = f'第{index+1}段走位落点'
                 shots.append(shot.model_dump(exclude={'prompt'}))
@@ -141,13 +144,11 @@ async def test_seven_parts_have_six_continuity_maps_and_next_scene_starts_fresh(
         assert len(result.shots) == 8
         assert all(shot.blocking_map is None and shot.duration_split_part is None for shot in result.shots)
         assert evidence == []
-        assert labels == ['生成场次 1-2 的分镜', '生成场次 1-3 的分镜']
+        assert labels == ['生成整集分镜']
         return
     assert [s.duration_split_part for s in result.shots] == [None, 2, 3, 4, 5, 6, 7, None]
     assert [bool(s.blocking_map) for s in result.shots] == [False, *([True]*6), False]
     assert [s['transition'] for s in evidence] == [f'第{i}段走位落点' for i in range(1,7)]
     assert evidence[0]['map'] is None and evidence[0]['spatial_relationships']
     assert all(s['map'] for s in evidence[1:])
-    assert labels == ['生成场次 1-2 的分镜',
-                      *[f'场次 1-2 · 补充第 {part}/7 镜空间定位图' for part in range(2, 8)],
-                      '生成场次 1-3 的分镜']
+    assert labels == ['生成整集分镜', *[f'补充第 {part} 镜空间定位图' for part in range(2, 8)]]

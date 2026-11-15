@@ -63,7 +63,7 @@ class NarrativeChunker:
                 "模型 max_context_characters 配置过小，无法容纳分镜规则、资产事实"
                 f"和至少 {MIN_NARRATIVE_CHUNK_CHARACTERS} 字的小说片段"
             )
-        return cls(min(DEFAULT_NARRATIVE_CHUNK_CHARACTERS, available))
+        return cls(available)
 
     def split(self, text: str) -> list[str]:
         normalized = text.strip()
