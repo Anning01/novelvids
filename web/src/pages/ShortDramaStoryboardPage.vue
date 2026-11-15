@@ -2626,7 +2626,6 @@ onBeforeUnmount(() => {
             <small>{{ tr('点击查看详情') }}</small>
           </button>
           <div class="chapter-actions">
-            <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton class="batch-skills-optimize" variant="secondary" size="sm" :loading="batchPromptProgress?.running"
               :disabled="loading || generatingStoryboard || waitingAnalysis || !selectedVideoModelConfig || !pendingModelPrompts.length || Boolean(promptOptimizations.size)"
               @click="optimizeChapterPrompts"><WandSparkles v-if="!batchPromptProgress?.running" :size="15" aria-hidden="true" />{{ tr('一键 Skills 优化') }}</AppButton>
@@ -2950,7 +2949,6 @@ onBeforeUnmount(() => {
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; color: var(--app-text, #303442); }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: var(--app-text-muted, #898f9e); font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-actions { display: flex; flex-wrap: wrap; min-width: 0; flex: 0 1 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
-.chapter-model-select { width: 300px; min-width: 300px; }
 .video-model-select { max-width: min(420px, 48vw); }
 .video-model-select :deep(.app-select__value) { overflow: visible; text-overflow: clip; }
 .workspace-view-switch { grid-column: 3; display: flex; justify-self: end; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: #f1f2f7; box-shadow: inset 0 0 0 1px #e5e7ef; }
@@ -3058,7 +3056,7 @@ onBeforeUnmount(() => {
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @container creation-workspace (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; padding-bottom: 4px; }.chapter-model-select { width: 100%; min-width: 0; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
 @container creation-workspace (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 .scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
