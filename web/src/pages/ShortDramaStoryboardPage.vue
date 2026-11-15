@@ -2626,10 +2626,10 @@ onBeforeUnmount(() => {
             <small>{{ tr('点击查看详情') }}</small>
           </button>
           <div class="chapter-actions">
+            <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
             <AppButton class="batch-skills-optimize" variant="secondary" size="sm" :loading="batchPromptProgress?.running"
               :disabled="loading || generatingStoryboard || waitingAnalysis || !selectedVideoModelConfig || !pendingModelPrompts.length || Boolean(promptOptimizations.size)"
               @click="optimizeChapterPrompts"><WandSparkles v-if="!batchPromptProgress?.running" :size="15" aria-hidden="true" />{{ tr('一键 Skills 优化') }}</AppButton>
-            <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
             <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
             <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
