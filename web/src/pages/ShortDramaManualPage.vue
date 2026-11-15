@@ -926,6 +926,7 @@ onBeforeUnmount(() => {
     </div>
 
     <AssetCreateDialog
+      :preview-assets="assets"
       :open="showAssetDialog"
       :kind="activeTab"
       :novel-id="projectId"

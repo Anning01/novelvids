@@ -51,3 +51,20 @@ it('retrieves a structured multi-camera plan from the existing endpoint', async 
     expect(release).toHaveBeenCalledWith('blob:map')
   } finally { wrapper.unmount(); create.mockRestore(); release.mockRestore() }
 })
+
+it('opens the chapter sheet gallery from a sheet, and local references from an upload', async () => {
+  const { computed } = await import('vue')
+  const { storyboardGalleryKey } = await import('@/shared/imageGallery')
+  const sheets = [{src:'/media/1.png',alt:'分镜 1'}, {src:'/media/5.png',alt:'分镜 5'}]
+  const wrapper = mount(SceneReferenceMediaBar, {props:{model:null, scene, media:[
+    {type:'image',name:'线稿故事版',url:'/media/5.png'},
+    {type:'image',name:'上传图',url:'/media/upload.png'},
+  ]},global:{provide:{[storyboardGalleryKey as symbol]:computed(() => sheets)}}})
+  await wrapper.findAll('.reference-image-preview')[0]!.trigger('click')
+  expect(wrapper.getComponent(ImageLightbox).props('images')).toEqual(sheets)
+  expect(wrapper.getComponent(ImageLightbox).props('src')).toBe('/media/5.png')
+  await wrapper.findAll('.reference-image-preview')[1]!.trigger('click')
+  expect(wrapper.getComponent(ImageLightbox).props('images')).toEqual([
+    {src:'/media/5.png',alt:'线稿故事版'},{src:'/media/upload.png',alt:'上传图'},
+  ])
+})

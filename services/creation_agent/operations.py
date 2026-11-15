@@ -308,7 +308,6 @@ class CreationOperations:
                 used = await self.objects.variant_references(target)
                 if any(scene.chapter.number not in numbers for scene in used):
                     raise ValueError(localized_message('形态仍被未包含的章节引用，不能直接移除适用关系'))
-                await self.objects.ensure_variant_chapters(target.asset_id, numbers, exclude_id=target.id)
                 updates['chapter_numbers'] = numbers
         # Keep canonical references resolvable during a rename; actual text
         # replacements are precise @{...} tokens, never arbitrary substrings.

@@ -500,8 +500,6 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
             if variant is None:
                 raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
-            if 'chapter_numbers' in data:
-                await CreationObjects(asset.novel_id).ensure_variant_chapters(asset_id, data['chapter_numbers'] or [], exclude_id=variant_id)
             if data.get('name', variant.name) != variant.name:
                 for scene in await Scene.filter(assets__id=asset.id):
                     values = CreationObjects.rename_reference_values(

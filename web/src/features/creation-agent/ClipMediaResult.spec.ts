@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import AppButton from '@/components/AppButton.vue'
 import ClipMediaResult from './ClipMediaResult.vue'
@@ -38,20 +38,22 @@ it.each(['light', 'dark'])('shows real queue/generation time, then final metadat
   expect(vi.getTimerCount()).toBe(0)
 })
 
-it('opens the original image, zooms it, closes with Escape and restores keyboard focus', async () => {
+it('opens the original image, zooms it, uses native modal focus and dismissal', async () => {
   const wrapper = mount(ClipMediaResult, { attachTo: document.body,
-    props: { ...props, src: '/media/original.png', status: 3 }, global: { components: { AppButton }, stubs: { Teleport: true } } })
+    props: { ...props, src: '/media/original.png', status: 3 }, global: { components: { AppButton } } })
   const viewer = wrapper.get<HTMLButtonElement>('[aria-label="放大查看当前图片"]')
   viewer.element.focus(); await viewer.trigger('click'); await flushPromises()
-  const dialog = wrapper.get('[role="dialog"]')
+  const dialog = new DOMWrapper(document.body).get<HTMLDialogElement>('dialog[open]')
   expect(dialog.get('img').attributes('src')).toContain('/media/original.png')
-  expect(document.activeElement?.getAttribute('aria-label')).toBe('关闭大图')
+  // Native autofocus and Escape/focus restoration are owned by the browser.
+  expect(dialog.get('[aria-label="关闭大图"]').attributes('autofocus')).toBeDefined()
   await dialog.get('[aria-label="放大图片"]').trigger('click')
   expect(dialog.get('output').text()).toBe('125%')
-  await dialog.trigger('keydown', { key: 'Escape' })
+  // jsdom does not perform the browser's default Escape dismissal.
+  dialog.element.close()
   await flushPromises()
-  expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
-  expect(document.activeElement).toBe(viewer.element)
+  expect(dialog.element.open).toBe(false)
+  expect(dialog.find('img').exists()).toBe(false)
   wrapper.unmount()
 })
 
@@ -84,13 +86,14 @@ it('shows video dimensions, runtime and settled generation cost without counting
 
 it('plays the original GIF and identifies an actual PNG fallback honestly', async () => {
   const wrapper = mount(ClipMediaResult, { props:{...props,status:3,src:'/media/animated.gif',requestedFormat:'gif'},
-    global:{components:{AppButton},stubs:{Teleport:true}} })
+    attachTo:document.body, global:{components:{AppButton}} })
   expect(wrapper.get('img').attributes('src')).toContain('/media/animated.gif')
   expect(wrapper.text()).toContain('文件格式')
   expect(wrapper.findAll('dd').some(item => item.text()==='GIF')).toBe(true)
   expect(wrapper.find('.clip-media-result__format-note').exists()).toBe(false)
   await wrapper.get('[aria-label="放大查看当前图片"]').trigger('click')
-  expect(wrapper.get('[role="dialog"] img').attributes('src')).toContain('/media/animated.gif')
+  await flushPromises()
+  expect(new DOMWrapper(document.body).get('dialog[open] img').attributes('src')).toContain('/media/animated.gif')
   await wrapper.setProps({src:'/media/actually-static.png?signature=test'})
   expect(wrapper.get('.clip-media-result__format-note').text()).toBe('当前文件为 PNG 静态图')
   expect(wrapper.findAll('dd').some(item => item.text()==='PNG')).toBe(true)

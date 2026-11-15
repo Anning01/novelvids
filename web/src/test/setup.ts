@@ -48,3 +48,20 @@ if (typeof globalThis.IntersectionObserver === 'undefined') {
 // Existing behavior tests exercise the Chinese interface explicitly.
 setLocale('zh')
 beforeEach(() => setLocale('zh'))
+
+// jsdom does not implement the native modal or layout observer APIs.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true }
+  HTMLDialogElement.prototype.close = function () {
+    if (!this.open) return
+    this.open = false
+    this.dispatchEvent(new Event('close'))
+  }
+}
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class implements ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}

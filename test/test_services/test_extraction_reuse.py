@@ -17,7 +17,7 @@ from test.test_services.test_asset_design_instructions import synthetic_snapshot
 from test.test_services.test_skill_workflow import enabled_project
 
 
-async def extraction_fixture(with_variant=False, repair_hook=None):
+async def extraction_fixture(with_variant=False, repair_hook=None, multiple_variants=False):
     novel, chapter, config = await enabled_project()
     await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': 'zh'})
     config.pricing = {'type': 'text', 'currency': 'CNY', 'input_price_per_1m': 1, 'output_price_per_1m': 2}
@@ -43,6 +43,11 @@ async def extraction_fixture(with_variant=False, repair_hook=None):
             if with_variant:
                 payload['persons'][0]['variant'] = {'name': '新外形', 'description': '本章形态',
                     'base_traits': fixed_asset_prompt(snapshot=snapshot), 'change_reason': '本章明确出现稳定外形变化'}
+            if multiple_variants:
+                base = payload['persons'][0]
+                payload['persons'] = [base, *[{'name': base['name'], 'variant': {
+                    'name': name, 'base_traits': fixed_asset_prompt(snapshot=snapshot),
+                    'change_reason': '剧本明确的闪回形象'}} for name in ('前世', '襁褓')]]
             if 'issues_to_fix' in info.instructions:
                 missing = 'persons' if '人物/角色甲' in info.instructions else 'items'
                 payload = {field: items if field == missing else [] for field, items in payload.items()}
@@ -309,3 +314,27 @@ def test_scope_filter_never_drops_a_required_person_sharing_a_scene_name():
         'scenes': [{'name': '同名', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}], 'items': []})
     merged = validator.merge(draft)
     assert len(merged.persons) == len(merged.scenes) == 1 and not validator.issues
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('legacy_receipt', [False, True])
+async def test_multiple_forms_survive_extraction_and_reuse_without_new_model_calls(legacy_receipt):
+    from models.asset_variant import AssetVariant
+    novel, _, _, counts, _, run = await extraction_fixture(multiple_variants=True)
+    first = await run()
+    asset = await Asset.get(novel=novel, canonical_name='角色甲')
+    variants = await AssetVariant.filter(asset=asset).order_by('id')
+    assert len(variants) == 2 and all(v.chapter_numbers == [1] for v in variants)
+    if legacy_receipt:
+        from models.agent_operation import AgentOperation
+        receipt = await AgentOperation.get(task_id=first.id, key='persist:assets')
+        for row in receipt.result['persons']:
+            row.pop('variant_name', None)
+        await receipt.save(update_fields=['result'])
+    before = await ModelUsageRecord.all().count()
+    second = await run()
+    assert counts['design'] == 1
+    assert await ModelUsageRecord.all().count() == before
+    assert second.response_data['preserved_existing']
+    assert second.response_data['variant_ids'] == first.response_data['variant_ids']
+    assert {row.get('variant_name') for row in second.response_data['persons']} == {None, '前世', '襁褓'}

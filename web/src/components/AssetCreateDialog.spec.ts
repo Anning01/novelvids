@@ -990,10 +990,10 @@ it('renders as a right drawer and lists previous generation images', async () =>
   await wrapper.get('.asset-generated-preview__viewer').trigger('click')
   await wrapper.vm.$nextTick()
   expect(wrapper.get('.image-lightbox').attributes('aria-label')).toBe('图片放大查看')
-  expect(wrapper.get<HTMLImageElement>('.image-lightbox img').attributes('src')).toBe('/media/history.png')
+  expect(wrapper.get<HTMLImageElement>('.image-lightbox__stage:not([inert]) img').attributes('src')).toBe('/media/history.png')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   await wrapper.vm.$nextTick()
-  expect(wrapper.find('.image-lightbox').exists()).toBe(false)
+  expect(wrapper.get<HTMLDialogElement>('.image-lightbox').element.open).toBe(false)
   expect(wrapper.emitted('close')).toBeUndefined()
   wrapper.unmount()
 })
@@ -1160,4 +1160,23 @@ it.each(['light', 'dark'])('deletes only failed history after confirmation and k
     wrapper.unmount()
     delete document.documentElement.dataset.appTheme
   }
+})
+
+it.each(['light', 'dark'])('browses the asset list with one image per form instead of generation history (%s)', async theme => {
+  const { default: ImageLightbox } = await import('./ImageLightbox.vue')
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.imageGenerationModels).mockResolvedValue({code:0,message:'',data:[]})
+  vi.mocked(api.digitalHumans).mockResolvedValue(digitalHumanPage)
+  vi.mocked(api.assetLibrary).mockResolvedValue({code:0,message:'',data:{items:[],pagination:{page:1,pages:0,page_size:24,total:0}}})
+  const form = {id:70,asset_id:editedAsset.id,name:'前世',images:['/past.png','/past-2.png'],chapter_numbers:[1],created_at:'',updated_at:''}
+  const first = {...editedAsset, main_image:'/base.png',angle_image_1:'/alternate.png',variants:[form]}
+  const second = {...editedAsset,id:999,canonical_name:'小伙伴',main_image:'/friend.png',variants:[]}
+  vi.mocked(api.assetVariants).mockResolvedValue({code:0,message:'',data:[form]})
+  const wrapper = mount(AssetCreateDialog,{props:{open:true,kind:'character',novelId:9,asset:first,previewAssets:[first,second]},global:{components:{AppButton},stubs:{Teleport:true}}})
+  await flushPromises()
+  await wrapper.get('.asset-generated-preview__viewer').trigger('click')
+  const viewer = wrapper.getComponent(ImageLightbox)
+  expect(viewer.props('images')!.map((image: {src:string}) => image.src)).toEqual(['/base.png','/past.png','/friend.png'])
+  expect(viewer.props('src')).toBe('/base.png')
+  delete document.documentElement.dataset.appTheme
 })
