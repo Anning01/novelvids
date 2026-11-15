@@ -38,6 +38,16 @@
     ],
     "source": "https://arkdocs.tos-cn-beijing.volces.com/skills/"
   },
+  "seedance_2_5_flash": {
+    "skill": "sd25-pe",
+    "aliases": [
+      "Seedance 2.5 Flash",
+      "Doubao Seedance 2.5 Flash",
+      "seedance-2.5-flash",
+      "doubao-seedance-2-5-flash-261115"
+    ],
+    "source": "https://arkdocs.tos-cn-beijing.volces.com/skills/"
+  },
   "minimax_h3": {
     "skill": "h3-prompt-writing",
     "aliases": [

@@ -873,3 +873,33 @@ it.each(['dark', 'light'])('previews channel pixel prices before saving a synced
     delete document.documentElement.dataset.appTheme
   }
 })
+
+it.each(['light', 'dark'])('selects the Flash preset with only its supported resolution tiers (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  vi.mocked(api.enums).mockResolvedValue({ data: {
+    ai_task_type: [{ value: 4, label: '视频生成' }], image_model_type: [],
+    video_model_type: [{ value: 'seedance_2_5_flash', name: 'seedance_2_5_flash', label: 'Doubao Seedance 2.5 Flash' }],
+  } } as never)
+  vi.mocked(api.generationCapabilities).mockResolvedValue({ data: {
+    image: {}, video: { seedance_2_5_flash: ['480p', '720p'] },
+  } } as never)
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mountPage(pinia)
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-video').trigger('click')
+  await wrapper.get('.model-config-section button').trigger('click')
+  wrapper.findAllComponents(AppSelect).find(item => item.props('ariaLabel') === '视频模型类型')!
+    .vm.$emit('update:modelValue', 'seedance_2_5_flash')
+  await flushPromises()
+  expect((wrapper.get('input[name="model-id"]').element as HTMLInputElement).value).toBe('doubao-seedance-2-5-flash-261115')
+  expect((wrapper.get('input[name="model-service-base-url"]').element as HTMLInputElement).value).toBe('https://ark.cn-beijing.volces.com/api/v3')
+  expect(wrapper.get('[aria-label="视频接口协议"]').text()).toContain('火山方舟')
+  expect(wrapper.get('.pricing-editor').text()).toContain('480p')
+  expect(wrapper.get('.pricing-editor').text()).toContain('720p')
+  expect(wrapper.get('.pricing-editor').text()).not.toContain('1080p')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})

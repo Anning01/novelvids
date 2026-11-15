@@ -86,6 +86,9 @@ video_generator_factory = VideoGeneratorFactory({
     VideoGenerationModelTypeEnum.seedance_2_5: VideoGeneratorAdapterSpec(
         SeedanceGenerator, VideoModelTypeEnum.seedance
     ),
+    VideoGenerationModelTypeEnum.seedance_2_5_flash: VideoGeneratorAdapterSpec(
+        SeedanceGenerator, VideoModelTypeEnum.seedance
+    ),
     VideoGenerationModelTypeEnum.minimax_h3: VideoGeneratorAdapterSpec(
         MiniMaxH3Generator, VideoModelTypeEnum.minimax
     ),
