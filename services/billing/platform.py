@@ -69,7 +69,7 @@ async def capture_platform_response(row, response):
     if response.headers.get("X-Request-Id"):
         # Provider trace (or legacy unlabelled receipt): reconcile using our original request key.
         return None
-    if response.status_code in {400, 401, 402, 403, 404, 413, 422}:
+    if response.status_code in {400, 401, 402, 403, 404, 413, 415, 422, 429}:
         async with in_transaction() as db:
             rejected = await StudioCall.filter(id=row.id, state="pending", platform_request_id=None).using_db(db).update(state="rejected")
             if rejected:
@@ -175,6 +175,9 @@ async def settle_platform_call(row_id: int, receipt: PlatformReceiptOut) -> None
             elif ledger.billing_type == "video":
                 local_cost = compute_video_cost(usage.get("seconds", 0), usage.get("resolution"), pricing,
                     usage.get("input_video_seconds", 0), usage.get("has_video_reference", False), usage.get("input_image_count", 0))
+            elif ledger.billing_type == "media_processing":
+                from services.video_enhancement.contract import enhancement_cost
+                local_cost = enhancement_cost(usage.get("seconds"), usage.get("short_side"), usage.get("fps"), pricing)
         charge = local_cost if ledger.team_id is not None else Decimal(0)
         if charge:
             from services.balance import consume, accumulate_member_cost

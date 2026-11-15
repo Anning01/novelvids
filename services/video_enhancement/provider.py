@@ -30,20 +30,24 @@ class MediaKitClient:
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.http = http
+        self.headers = {'Authorization': 'Bearer ' + api_key}
         self.last_request_id: str | None = None
 
     @classmethod
-    def for_snapshot(cls, snapshot, config, *, http):
+    def for_snapshot(cls, snapshot, config, *, http, task_id=None):
         if any(str(getattr(config, key)).rstrip('/') != str(snapshot[key]).rstrip('/')
                for key in ('base_url', 'api_protocol', 'model')):
             raise MediaKitError(localized_message('增强服务地址或协议已变化，请恢复该任务原配置后继续'), definite_rejection=True)
+        if snapshot['api_protocol'] == 'novelvids':
+            from services.video_enhancement.platform import PlatformMediaKitClient
+            return PlatformMediaKitClient(snapshot, config, http=http, task_id=task_id)
         return cls(snapshot['base_url'], config.api_key, http=http)
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
         try:
             response = await self.http.request(method, self.base_url + path,
-                headers={'Authorization': 'Bearer ' + self.api_key}, **kwargs)
-            if response.status_code in {400, 401, 403, 404, 410, 413, 415, 422, 429}:
+                headers=self.headers, **kwargs)
+            if response.status_code in {400, 401, 402, 403, 404, 410, 413, 415, 422, 429}:
                 raise MediaKitError(localized_message('MediaKit 拒绝请求（HTTP {p0}）',p0=response.status_code), definite_rejection=True, status_code=response.status_code)
             response.raise_for_status()
             payload = response.json()
