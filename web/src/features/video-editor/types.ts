@@ -12,7 +12,7 @@ export interface EditorMedia {
   url?: string | null; poster?: string | null; duration?: number; width?: number; height?: number; fps?: number
   library_kind?: string; has_audio?: boolean; missing?: boolean; sequence?: number; scene_id?: number
 }
-export interface EditorDraft { revision: number; document: EditDocument; media: EditorMedia[]; updated_at: string | null }
+export interface EditorDraft { revision: number; document: EditDocument; media: EditorMedia[]; updated_at: string | null; needs_save?: boolean }
 export interface SubtitlePreset { id: string; name: string; color: string; stroke_color: string; stroke_width: number; shadow: number; bold: boolean }
 export interface EditorCapabilities { subtitle_styles?: SubtitlePreset[]; formats: Record<string, string[]>; max_size_mb: number; max_duration: number; max_overlays: number; max_audio_tracks: number; fps: number[]; resolutions: number[]; fonts: Array<{ value: string; label: string }> }
 export interface EditorExport { id: number; task_id: string; status: number; stage: string; progress: number; error: string | null; revision: number; url: string | null; created_at: string }

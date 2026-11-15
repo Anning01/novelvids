@@ -4,7 +4,8 @@ from auth.deps import ensure_novel_access, require_roles
 from models.chapter import Chapter
 from models.novel import Novel
 from models.video_edit import ChapterEditDraft
-from schemas.video_edit import EditDocument
+from models.scene import Scene
+from schemas.video_edit import EditDocument, EditSource, VideoClip
 from services.creation_objects import project_write
 from services.video_editor.sources import EditSources, public_media
 from utils.messages import localized_message as msg
@@ -66,6 +67,9 @@ async def read_draft(chapter_id, ctx):
     catalog = await resolver.catalog()
     draft = await ChapterEditDraft.get_or_none(chapter_id=chapter.id)
     document = EditDocument.model_validate(draft.document) if draft else await initial_document(chapter, catalog)
+    original = document.model_dump(mode='json')
+    if draft:
+        await reconcile_scene_videos(document, catalog, chapter.id, draft.updated_at)
     compact_video_track(document)
     known = {item['key'] for item in catalog}
     for clip in document.clips:
@@ -80,7 +84,39 @@ async def read_draft(chapter_id, ctx):
                                 'kind': clip.type, 'name': clip.name, 'missing': True})
             known.add(f'{source.kind}:{source.id}')
     return {'revision': draft.revision if draft else 0, 'document': document.model_dump(mode='json'),
+            'needs_save': bool(draft and document.model_dump(mode='json') != original),
             'media': [public_media(item) for item in catalog], 'updated_at': draft.updated_at.isoformat() if draft else None}
+
+
+async def reconcile_scene_videos(document, catalog, chapter_id, saved_at):
+    """Fill pending scene slots without replacing pinned takes or rebuilding edits."""
+    scene_media = {item['scene_id']: item for item in catalog if 'sequence' in item}
+    for clip in document.clips:
+        if clip.type != 'video' or clip.source.kind != 'missing':
+            continue
+        item = scene_media.get(clip.source.id)
+        if not item or item.get('missing') or not item.get('url'):
+            continue
+        clip.source = EditSource.model_validate(item['source'])
+        if clip.trim_in == 0 and clip.trim_out is None and clip.speed == 1:
+            clip.duration = max(1, round(float(item['duration']) * document.fps)) / document.fps
+    # A scene absent from an older saved edit may have been deliberately removed.
+    # Only scenes created after that save are automatically appended.
+    new_ids = set(await Scene.filter(chapter_id=chapter_id, created_at__gt=saved_at).values_list('id', flat=True))
+    used_ids = {clip.id for clip in document.clips}
+    used_sources = {(clip.source.kind, clip.source.id) for clip in document.clips if clip.type == 'video'}
+    end = max((clip.start + clip.duration for clip in document.clips if clip.type == 'video'), default=0)
+    for item in scene_media.values():
+        identifier = f"scene-{item['scene_id']}"
+        source = EditSource.model_validate(item['source'])
+        if item['scene_id'] not in new_ids or identifier in used_ids or (source.kind, source.id) in used_sources:
+            continue
+        if len(document.clips) >= 500:
+            break  # Keep excess material in the library; respect the editor's clip limit.
+        duration = max(1, round(float(item.get('duration') or 4) * document.fps)) / document.fps
+        document.clips.append(VideoClip(id=identifier, name=item['name'], type='video',
+                                        start=end, duration=duration, source=source))
+        end += duration
 
 
 async def save_draft(chapter_id, request, ctx):

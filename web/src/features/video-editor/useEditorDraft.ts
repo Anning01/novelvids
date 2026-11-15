@@ -10,12 +10,13 @@ export function useEditorDraft(identity: () => string) {
   const media = ref<EditorMedia[]>([]), selectedId = ref(''), revision = ref(0)
   const loading = ref(false), saving = ref(false), error = ref(''), saveError = ref(''), conflict = ref(false)
   const baseline = ref(''), recovery = shallowRef<EditDocument | null>(null)
+  const pendingSync = ref(false)
   const undoStack = ref<string[]>([]), redoStack = ref<string[]>([])
   let chapterId = 0, scope = 0, disposed = false, timer: ReturnType<typeof setTimeout> | undefined
   let inFlight: Promise<boolean> | null = null, controller: AbortController | null = null
   const editing = ref(false)
   let editBaseline: string | null = null
-  const dirty = computed(() => document.value !== null && JSON.stringify(document.value) !== baseline.value)
+  const dirty = computed(() => document.value !== null && (pendingSync.value || JSON.stringify(document.value) !== baseline.value))
   const selected = computed(() => document.value?.clips.find(clip => clip.id === selectedId.value) || null)
   const storageKey = () => `novelvids-editor-v1:${identity()}:${chapterId}`
   function bounds(value: EditDocument) {
@@ -24,21 +25,22 @@ export function useEditorDraft(identity: () => string) {
   }
 
   function backup() {
-    if (!document.value) return
+    if (!document.value || recovery.value) return
     try {
       if (dirty.value) sessionStorage.setItem(storageKey(), JSON.stringify({ revision: revision.value, document: document.value }))
       else sessionStorage.removeItem(storageKey())
     } catch { /* Keep unsaved edits in memory if browser storage is full or unavailable. */ }
   }
-  async function load(id: number) {
+  async function load(id: number, writable = true) {
     editBaseline = null; editing.value = false
     const version = ++scope; chapterId = id; controller?.abort(); clearTimeout(timer); inFlight = null
     controller = new AbortController(); loading.value = true; error.value = ''; saveError.value = ''; conflict.value = false
-    document.value = null; media.value = []; saving.value = false; undoStack.value = []; redoStack.value = []; recovery.value = null
+    document.value = null; media.value = []; saving.value = false; undoStack.value = []; redoStack.value = []; recovery.value = null; pendingSync.value = false
     try {
       const response = await editorApi.get(id, controller.signal)
       if (version !== scope || disposed) return
       install(response.data)
+      pendingSync.value = writable && Boolean(response.data.needs_save)
       try {
         const raw = sessionStorage.getItem(storageKey())
         if (raw) {
@@ -47,6 +49,7 @@ export function useEditorDraft(identity: () => string) {
           if (JSON.stringify(local.document) !== baseline.value) recovery.value = local.document
         }
       } catch { /* Invalid old browser drafts must not prevent reading the saved version. */ }
+      if (pendingSync.value) await save()
     } catch (reason) { if (version === scope && !disposed && !(reason instanceof DOMException && reason.name === 'AbortError')) error.value = reason instanceof Error ? reason.message : tr('剪辑工作区读取失败') }
     finally { if (version === scope && !disposed) loading.value = false }
   }
@@ -106,6 +109,7 @@ export function useEditorDraft(identity: () => string) {
         const response = await editorApi.save(id, revision.value, value)
         if (version !== scope || disposed) return false
         revision.value = response.data.revision
+        pendingSync.value = false
         baseline.value = JSON.stringify(response.data.document || value)
         if (JSON.stringify(document.value) === serialized) document.value = cloneDocument(response.data.document || value)
         backup(); return true

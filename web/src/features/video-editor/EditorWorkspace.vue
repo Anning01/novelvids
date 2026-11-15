@@ -268,7 +268,7 @@ async function load() {
   endProperties(); selectedIds.value = []; splittingSubtitles.value = false
   recognizingSubtitles.value = false
   const version = ++scope; copiedClip.value = null; playing.value = false; time.value = 0; browsing.value = null; uploading.value = false; exportError.value = ''; clearTimeout(polling)
-  await draft.load(props.chapterId)
+  await draft.load(props.chapterId, !readOnly.value)
   if (version !== scope || disposed) return
   try { capabilities.value = (await editorApi.capabilities()).data } catch (reason) { if (version === scope) showError(reason) }
   await refreshExports(version)
