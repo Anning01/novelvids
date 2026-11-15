@@ -99,14 +99,18 @@ class EditRenderer:
         if clip.scale != 1 or clip.rotation:
             video += (f",crop=w='min(iw,{width})':h='min(ih,{height})',"
                       f'pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black')
-        video += f',setsar=1,fps={fps}'
+        # Source audio/video can end before the frame-aligned timeline boundary.
+        # Equal segment lengths prevent concat timestamps drifting at every cut.
+        video += (f',setsar=1,fps={fps},tpad=stop_mode=clone:stop_duration={duration:.8f},'
+                  f'trim=duration={duration:.8f}')
         args = ['-ss', str(clip.trim_in), '-threads', '1', '-i', str(path)]
         audio_index = 0
         if not info.get('has_audio'):
             args += ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']
             audio_index = 1
         audio = (f'atrim=duration={source_duration:.8f},asetpts=PTS-STARTPTS,'
-                 f'{tempo(speed)},volume={clip.volume},aresample=48000')
+                 f'{tempo(speed)},volume={clip.volume},aresample=48000,'
+                 f'apad=whole_dur={duration:.8f},atrim=duration={duration:.8f}')
         args += ['-filter_complex', f'[0:v]{video}[v];[{audio_index}:a]{audio}[a]',
                  '-map', '[v]', '-map', '[a]', '-t', f'{duration:.8f}',
                  *self.encoding(document, 'pcm_s16le'), '-bf', '0', str(target)]
