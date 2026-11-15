@@ -34,7 +34,11 @@ class Original:
 
 @contextmanager
 def open_source(source):
-    if source.startswith("data:"):
+    if isinstance(source, Path):
+        # Internal callers may upload private exports without publishing them under /media/.
+        mime = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        file = source.open("rb")
+    elif source.startswith("data:"):
         header, separator, encoded = source.partition(",")
         if not separator or not header.endswith(";base64"):
             raise VideoProviderError("参考素材编码无效")

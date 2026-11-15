@@ -17,6 +17,9 @@ async def settle_enhancement(task, export) -> ModelUsageRecord | None:
     from services.billing.recorder import _consume_team_balance
 
     snapshot = task.request_params['config_snapshot']
+    if snapshot['api_protocol'] == 'novelvids':
+        from services.video_enhancement.platform import settle_platform_enhancement
+        return await settle_platform_enhancement(task, export)
     config = AiModelConfig(**snapshot)
     values = result.get('result') or {}
     known = result['status'] == 'failed'

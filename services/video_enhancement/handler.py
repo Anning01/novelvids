@@ -75,7 +75,7 @@ class EnhanceExportHandler(BaseTaskHandler):
                 await execution.before_request()
             current_config = await ai_model_config_controller.get_active(8, snapshot['id'], team_id=request_params.get('team_id'))
             async with httpx.AsyncClient(timeout=60) as http:
-                client = MediaKitClient.for_snapshot(snapshot, current_config, http=http)
+                client = MediaKitClient.for_snapshot(snapshot, current_config, http=http, task_id=request_params['task_id'])
                 started = True
                 try:
                     task_id = await client.submit(url, request_params.get('provider_client_token') or export.identity_key,
