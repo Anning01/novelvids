@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -527,3 +528,30 @@ async def test_opening_editor_never_downloads_or_probes_uncached_legacy_videos(m
     value = await read_draft(chapter.id, AuthContext())
     assert value['document']['clips'][0]['duration'] == 158 / 24
     probe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_preserves_frame_aligned_segments_with_shorter_source_streams(tmp_path):
+    from services.video_editor.render import EditRenderer
+    from services.video_enhancement.media import inspect_media
+
+    source = tmp_path / 'source.mp4'
+    # Generated clips can have 30 fps video and slightly longer audio/container duration.
+    ffmpeg('-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=30:d=2',
+           '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=2.03',
+           '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source)
+    duration = 49 / 24
+    document = EditDocument(width=320, height=180, fps=24, clips=[
+        video_clip(1, id=f'v{i}', start=i * duration, duration=duration)
+        for i in range(9)
+    ])
+    renderer = EditRenderer(cancelled=AsyncMock(return_value=False), progress=AsyncMock())
+    output = await renderer.render(document, {'video:1': (source, {'has_audio': True})}, tmp_path)
+    actual = inspect_media(output)
+    assert float(actual.duration) == pytest.approx(9 * duration, abs=1 / 24)
+    assert float(actual.fps) == pytest.approx(24, abs=.01)
+    raw = json.loads(subprocess.check_output([
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+        'stream=nb_frames', '-of', 'json', str(output),
+    ]))
+    assert int(raw['streams'][0]['nb_frames']) == 9 * 49
