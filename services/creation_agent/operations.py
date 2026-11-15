@@ -95,6 +95,9 @@ class CreationOperations:
         validate_image_prompt_edit(operation.prompt, '')
         if isinstance(operation, CreateAssetSetting):
             asset_type, layout = operation.asset_type, operation.reference_layout
+            if asset_type == 3:
+                from prompts.reference import PROP_SINGLE_VIEW
+                layout = PROP_SINGLE_VIEW
         else:
             parent = await self.objects.get('asset', parent_id)
             asset_type = parent.asset_type

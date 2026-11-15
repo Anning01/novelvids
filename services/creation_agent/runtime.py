@@ -426,7 +426,7 @@ def project_read_items(ctx, items, fields=None, prompt_offset=0):
 async def get_creation_prompt_rules(
     ctx: RunContext[CreationAgentDeps], kind: Literal['person', 'scene', 'item', 'storyboard'],
     target: AgentTarget | None = None,
-    reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround',
+    reference_layout: Literal['character_turnaround', 'group_portrait', 'prop_single_view'] = 'character_turnaround',
 ) -> dict:
     """新建或整篇重写前读取对应类型的系统规范；指定 target 时同时读取实际对象，类型以对象为准。"""
     service = crud_service(ctx)
@@ -534,7 +534,7 @@ async def create_creation_setting(
     asset_type: Literal[1, 2, 3], description: Annotated[str, Field(min_length=1, max_length=8000)],
     prompt: Annotated[str, Field(min_length=1, max_length=32000)],
     chapter_id: Annotated[int | None, Field(gt=0)] = None,
-    reference_layout: Literal['character_turnaround', 'group_portrait'] = 'character_turnaround',
+    reference_layout: Literal['character_turnaround', 'group_portrait', 'prop_single_view'] = 'character_turnaround',
 ) -> dict:
     """创建人物(1)、场景(2)或道具(3)；先读取 get_creation_prompt_rules，提交符合本轮资产输出协议的完整提示词，服务端校验后原样保存。"""
     service = crud_service(ctx)
