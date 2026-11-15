@@ -46,6 +46,7 @@ const emit = defineEmits<{
 }>()
 
 const editor = ref<HTMLElement | null>(null)
+const mentionList = ref<HTMLElement | null>(null)
 const menuOpen = ref(false)
 const query = ref('')
 const activeIndex = ref(0)
@@ -670,6 +671,17 @@ watch(filteredOptions, items => {
   if (activeIndex.value >= items.length) activeIndex.value = 0
 })
 
+watch([menuOpen, activeOption, filteredOptions], () => {
+  const list = mentionList.value
+  const selected = list?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')
+  if (!menuOpen.value || !list || !selected) return
+  const top = list.getBoundingClientRect().top + list.clientTop
+  const bounds = selected.getBoundingClientRect()
+  // Scroll only the menu; scrollIntoView can also move the editor and page.
+  if (bounds.top < top) list.scrollTop += bounds.top - top
+  else if (bounds.bottom > top + list.clientHeight) list.scrollTop += bounds.bottom - top - list.clientHeight
+}, { flush: 'post' })
+
 onMounted(() => {
   renderValue()
   document.addEventListener('pointerdown', closeMenuFromOutside)
@@ -727,7 +739,7 @@ onBeforeUnmount(() => {
       <Transition name="scene-prompt-menu">
         <section v-if="menuOpen" class="scene-prompt-mentions" :style="menuStyle" role="listbox" :aria-label="tr('选择提示词引用')" @pointerdown.stop>
           <header><AtSign :size="14" /><span>{{ tr('选择引用') }}</span><small>{{ tr('输入名称筛选') }}</small></header>
-          <div v-if="filteredOptions.length" class="scene-prompt-mentions__groups">
+          <div v-if="filteredOptions.length" ref="mentionList" class="scene-prompt-mentions__groups">
             <section v-for="group in groupedOptions" :key="group.label">
               <h3>{{ group.label }}</h3>
               <button

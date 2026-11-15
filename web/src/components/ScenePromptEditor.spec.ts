@@ -450,3 +450,41 @@ it('keeps Seedance tokens exact on edit and leaves an unbound longer number unto
   expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([prompt+'继续'])
   wrapper.unmount()
 })
+
+it.each(['light', 'dark'])('keeps keyboard selection visible inside the mention list in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const wrapper = mount(ScenePromptEditor, {
+    props: {modelValue: '', options}, attachTo: document.body,
+    global: {components: {AppButton}, stubs: {Teleport: true}},
+  })
+  const editor = wrapper.get<HTMLElement>('.scene-prompt-editor__input')
+  editor.element.focus()
+  editor.element.textContent = '@'
+  const range = document.createRange()
+  range.setStart(editor.element.firstChild!, 1); range.collapse(true)
+  window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  await editor.trigger('input')
+  const list = wrapper.get<HTMLElement>('.scene-prompt-mentions__groups').element
+  Object.defineProperty(list, 'clientHeight', {value: 120})
+  list.getBoundingClientRect = () => ({top: 100, bottom: 220} as DOMRect)
+  const items = wrapper.findAll<HTMLElement>('[role="option"]')
+  for (const [index, item] of items.entries()) {
+    item.element.getBoundingClientRect = () => ({top: 100 + index * 70 - list.scrollTop,
+      bottom: 150 + index * 70 - list.scrollTop} as DOMRect)
+  }
+  const pageScroll = window.scrollY
+  await editor.trigger('keydown', {key: 'ArrowDown'})
+  expect(list.scrollTop).toBe(0) // Already visible: do not move the list unnecessarily.
+  for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp']) {
+    await editor.trigger('keydown', {key})
+    const selected = wrapper.get<HTMLElement>('[role="option"][aria-selected="true"]').element.getBoundingClientRect()
+    expect(selected.top).toBeGreaterThanOrEqual(100)
+    expect(selected.bottom).toBeLessThanOrEqual(220)
+    expect(window.scrollY).toBe(pageScroll)
+    expect(document.activeElement).toBe(editor.element)
+  }
+  await editor.trigger('keydown', {key: 'Escape'})
+  expect(wrapper.find('[role="listbox"]').exists()).toBe(false)
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
