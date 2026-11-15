@@ -161,7 +161,7 @@ async def test_restoring_asset_restores_only_variants_removed_with_it():
 
 
 @pytest.mark.asyncio
-async def test_variant_restore_cannot_replace_a_new_chapter_assignment():
+async def test_variant_restore_preserves_other_forms_in_the_same_chapter():
     novel, _, asset, _ = await objects()
     service = CreationObjects(novel.id)
     old = await AssetVariant.create(asset=asset, name='旧雨衣', chapter_numbers=[1])
@@ -169,9 +169,8 @@ async def test_variant_restore_cannot_replace_a_new_chapter_assignment():
         recovery = await service.archive('variant', old.id)
         current = await service.create_variant(asset.id, {'name': '新雨衣', 'chapter_numbers': [1]})
     async with project_write(novel.id):
-        with pytest.raises(ValueError, match='已有形态'):
-            await service.restore('variant', old.id, recovery)
-    assert not await AssetVariant.filter(id=old.id).exists()
+        await service.restore('variant', old.id, recovery)
+    assert (await AssetVariant.get(id=old.id)).chapter_numbers == [1]
     assert (await AssetVariant.get(id=current.id)).chapter_numbers == [1]
 
 

@@ -199,7 +199,7 @@ class AssetUpsertService:
         ).using_db(connection)
         batch_names = {_identity_key(item.name) for item in items}
 
-        for item in items:
+        for item in sorted(items, key=lambda entry: entry.variant is not None):
             item_metadata: dict[str, str] = {}
             if asset_type == AssetTypeEnum.person:
                 item_metadata = _person_metadata(item)
@@ -267,7 +267,7 @@ class AssetUpsertService:
                 saved.append({"name": item.name,
                     "action": "updated" if needs_base_design or variant or not preserve_existing else "preserved",
                     **({'asset_id': existing.id} if include_ids else {}),
-                    **({'variant_id': variant.id} if variant else {})})
+                    **({'variant_id': variant.id, 'variant_name': variant.name} if variant else {})})
                 continue
 
             created = await Asset.create(
@@ -285,7 +285,7 @@ class AssetUpsertService:
             existing_assets.append(created)
             variant = await self._save_variant(created, item, chapter_number, connection, repair_variant_ids)
             saved.append({"name": item.name, "action": "created", **({'asset_id': created.id} if include_ids else {}),
-                **({'variant_id': variant.id} if variant else {})})
+                **({'variant_id': variant.id, 'variant_name': variant.name} if variant else {})})
 
         return saved
 
@@ -313,7 +313,6 @@ class AssetUpsertService:
                 variant.base_traits = incoming.base_traits
                 variant.description = incoming.description
             chapters = list(normalize_source_chapters([*(variant.chapter_numbers or []), chapter_number]))
-            await objects.ensure_variant_chapters(asset.id, chapters, exclude_id=variant.id)
             variant.chapter_numbers = chapters
             await variant.save(using_db=connection, update_fields=['chapter_numbers', 'base_traits', 'description', 'updated_at'])
             return variant
