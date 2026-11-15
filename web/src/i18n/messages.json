@@ -1,5 +1,11 @@
 {
   "common": {
+    "一键 Skills 优化": "Optimize all with Skills",
+    "Skills 优化进度": "Skills optimization progress",
+    "Skills 优化进度：{p0}/{p1} 镜": "Skills optimization: {p0}/{p1} shots",
+    "Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜": "Skills optimization finished: {p0} succeeded, {p1} failed",
+    "未完成的镜头可再次一键优化": "Run again to optimize the remaining shots",
+
     "已同步 {p0} 个平台模型，当前版本尚不支持：{p1}": "Synced {p0} platform models. This version does not support: {p1}",
     "等待后台任务完成": "Waiting for active tasks to finish",
     "工作台更新": "Studio updates",

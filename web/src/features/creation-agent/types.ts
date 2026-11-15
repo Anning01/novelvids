@@ -127,6 +127,7 @@ export interface AgentRun extends AgentProgress {
 }
 
 export interface AgentCapabilities {
+  production_concurrency?: number
   enabled: boolean
   can_write: boolean
   max_targets: number

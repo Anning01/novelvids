@@ -197,7 +197,8 @@ class ChapterExports:
     async def configs(self, ctx):
         from services.model_resolution import resolve_scope_configs
         return await resolve_scope_configs(8, ctx.team_id,
-            capability_filter=lambda row: row.api_protocol == 'volcengine_mediakit' and row.model == 'enhance-video-generative')
+            capability_filter=lambda row: row.api_protocol == 'novelvids' or (
+                row.api_protocol == 'volcengine_mediakit' and row.model == 'enhance-video-generative'))
 
     async def apply_video(self, export_id: int, ctx: AuthContext):
         await require_roles('admin', 'creator')(ctx)
