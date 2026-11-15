@@ -212,8 +212,9 @@ class RemakeVideoAnalysisGateway:
             request["extra_body"] = {"thinking": {"type": thinking}}
             if thinking == "enabled":
                 request["reasoning_effort"] = "minimal"
-        if getattr(self.config, "max_tokens", None) is not None:
-            request["max_tokens"] = self.config.max_tokens
+        from utils.model_limits import DEFAULT_OUTPUT_TOKENS
+        output_limit = getattr(self.config, "max_tokens", None)
+        request["max_tokens"] = output_limit if output_limit is not None else DEFAULT_OUTPUT_TOKENS
 
         attempts = len(self.retry_delays) + 1
         for attempt in range(attempts):
