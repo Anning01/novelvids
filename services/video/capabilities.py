@@ -312,6 +312,15 @@ CAPABILITIES: dict[VideoGenerationModelTypeEnum, VideoModelCapabilities] = {
 }
 
 
+# Flash 沿用 2.5 协议，仅分辨率和参考素材数量不同。
+CAPABILITIES[VideoGenerationModelTypeEnum.seedance_2_5_flash] = replace(
+    CAPABILITIES[VideoGenerationModelTypeEnum.seedance_2_5],
+    resolutions=("480p", "720p"),
+    max_reference_images=10,
+    max_reference_videos=5,
+    max_reference_audios=5,
+)
+
 # 独立渠道能力，避免向 AutoDL 暴露官方接口专属参数。
 CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3_autodl] = replace(
     CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3],

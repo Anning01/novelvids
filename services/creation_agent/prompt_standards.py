@@ -7,7 +7,7 @@ from models.asset_variant import AssetVariant
 from services.language import generation_language
 from models.novel import Novel
 from prompts.creation_standards import ASSET_PROMPT_KINDS, visual_contract
-from prompts.reference import CHARACTER_TURNAROUND, GROUP_PORTRAIT
+from prompts.reference import CHARACTER_TURNAROUND, GROUP_PORTRAIT, PROP_SINGLE_VIEW
 from prompts.styles import image_project_style_suffix, video_project_style_suffix
 from services.storyboard.strategies import storyboard_strategy_factory
 
@@ -23,6 +23,8 @@ class CreationPromptStandards:
                 'strategy': storyboard_strategy_factory.resolve(project.storyboard_strategy)}
 
     async def contract(self, kind: str, layout: str = CHARACTER_TURNAROUND) -> dict:
+        if kind == 'item':
+            layout = PROP_SINGLE_VIEW
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
@@ -46,6 +48,9 @@ class CreationPromptStandards:
 
     async def asset_kind(self, target) -> tuple[str, str]:
         asset = await Asset.get(id=target.asset_id, novel_id=self.novel_id) if isinstance(target, AssetVariant) else target
+        if asset.asset_type == 3:
+            # Historical generic defaults are character layouts, not prop instructions.
+            return 'item', PROP_SINGLE_VIEW
         metadata = {**(asset.metadata or {}), **(target.metadata or {})}
         return ASSET_PROMPT_KINDS[asset.asset_type], metadata.get('reference_layout') or CHARACTER_TURNAROUND
 

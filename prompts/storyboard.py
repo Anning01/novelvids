@@ -296,6 +296,8 @@ def build_storyboard_messages(
     introduction_descriptions=None, shot_duration_range=None,
 ):
     system_prompt = render_skill("storyboard", prompt_language)
+    if batch_count == 1:
+        system_prompt += "\n" + episode_storyboard_instruction(prompt_language)
     requirement = asset_introduction_requirement(entities, previously_seen_assets, prompt_language, introduction_descriptions)
     if requirement:
         system_prompt += "\n" + requirement
@@ -598,6 +600,17 @@ def format_storyboard_prompt(
     for placeholder, voice in protected_voices:
         prompt = prompt.replace(placeholder, voice)
     return prompt
+
+
+def episode_storyboard_instruction(language: str) -> str:
+    if language == "en":
+        return ("Generate all storyboard shots for the complete episode in this response. Plan pacing, continuity "
+                "and asset introductions across all screenplay scenes together; do not stop after the first scene. "
+                "Number shots continuously from 1. Set each shot's source_scene_number to its original screenplay "
+                "scene number (use source_scene_numbers when provided); leave it null only for an unnumbered screenplay.")
+    return ("本次一次性生成完整一集的全部分镜，统一安排所有场次的节奏、接戏和资产首次出场，不要只返回第一场。"
+            "sequence 从 1 开始全局连续编号；每条分镜的 source_scene_number 填写对应的原剧本场号"
+            "（提供 source_scene_numbers 时从中选择），只有无场号剧本才留空。")
 
 
 def scene_continuity_instruction(language: str) -> str:

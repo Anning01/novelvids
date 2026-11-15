@@ -373,6 +373,7 @@ export const api = {
   projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
   publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/resource-library/catalog/project-assets${qs({ asset_type: assetType, page, page_size: pageSize, search })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
+  deleteFailedAssetGeneration: (assetId: number, taskId: string) => request<SingleResponse<null>>(`/asset/${assetId}/generation-history/${taskId}`, { method: 'DELETE' }),
   assetGenerationHistory: (id: number) => request<SingleResponse<AssetGenerationRecord[]>>(`/asset/${id}/generation-history`),
   recordAssetImageEdit: (id: number, data: { image_url: string; source_image_url?: string; output_format?: string }) => request<SingleResponse<Asset>>(`/asset/${id}/generation-history/edit`, { method: 'POST', body: JSON.stringify(data) }),
   restoreAssetGeneration: (assetId: number, taskId: string) => request<SingleResponse<Asset>>(`/asset/${assetId}/generation-history/${taskId}/restore`, { method: 'POST' }),

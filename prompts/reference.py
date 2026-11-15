@@ -3,6 +3,7 @@
 
 CHARACTER_TURNAROUND = "character_turnaround"
 GROUP_PORTRAIT = "group_portrait"
+PROP_SINGLE_VIEW = "prop_single_view"
 REFERENCE_OUTPUT_GUARD_ZH = "禁止生成任何文字、标签、Logo 或水印。"
 REFERENCE_OUTPUT_GUARD_EN = "Do not generate text, labels, logos, or watermarks."
 
@@ -18,7 +19,8 @@ REFERENCE_PROMPT_MARKERS_BY_KIND = {
         "生成四宫格画面，展示同一个场景",
         "Create a four-panel environment reference sheet",
     ),
-    "item": ("【道具描述】", "[Prop description]"),
+    "item": ("任务：生成道具单体参考图", "Task: Create a single-object prop reference image",
+             "【道具描述】", "[Prop description]"),
 }
 COMPLETE_REFERENCE_PROMPT_MARKERS = tuple(
     marker

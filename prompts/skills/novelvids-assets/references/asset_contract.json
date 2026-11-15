@@ -50,10 +50,19 @@
       "suffix": "四格都是空场景：只保留环境与固定陈设。包括远景、门窗及反射在内，画面中没有人物、动物、剪影或角色倒影。"
     },
     "item": {
-      "task": "",
+      "task": "任务：生成道具单体参考图，画幅为{aspect_ratio}。普通道具默认一件物体、一个视角：在一个连续画面中完整展示同一件道具，使用最能辨认其外形和关键结构的单一机位，不自动生成三视图、四视图、拼贴、正反面并排、重复实例或局部放大插图。牌匾、墓牌、信件、符纸等以主要信息面正面展示；立体器物可用一个三分之四视角，自然露出的侧面和厚度仍属于同一个物体，不能另画一件侧视物体。保持项目已选画风，使用中性浅灰白无缝背景和柔和均匀照明，只保留浅接触阴影；完整轮廓清晰，关键部件不裁切，无持有人、手部、使用动作、剧情环境或展示支架。",
       "heading": "【道具描述】",
-      "fields": [],
-      "suffix": "禁止生成任何文字、标签、Logo 或水印。"
+      "fields": [
+        "道具身份与数量",
+        "外形与比例",
+        "材质与配色",
+        "结构与连接",
+        "表面状态",
+        "识别特征与文字",
+        "展示视角",
+        "构图与背景"
+      ],
+      "suffix": "仅保留剧本或用户明确给出的剧情必需文字，准确说明字样、位置和书写方式，不自行添加铭文；无文字要求时保持无字。禁止额外说明文字、视角标签、尺寸标注、Logo 和水印。成套道具仅按明确设定的件数和组成展示，不将不同视角画成多个实例。只有用户明确要求设定审阅用多视图时才单独制作多视图资料，不自动作为视频用道具主图。"
     }
   },
   "en": {
@@ -107,10 +116,19 @@
       "suffix": "All four views are unoccupied environment plates with fixed furnishings only. Keep people, animals, silhouettes and character reflections out of every view, including the distance, doorways, windows and reflective surfaces."
     },
     "item": {
-      "task": "",
+      "task": "Task: Create a single-object prop reference image in a {aspect_ratio} frame. An ordinary prop defaults to one physical object and one view: show the complete prop in a single continuous image from one camera angle that reveals its identifying shape and key structure. Do not automatically create three-view or four-view sheets, collages, side-by-side front and back views, duplicate instances, or inset close-ups. Show plaques, grave markers, letters and talismans from the front of their information-bearing surface. A volumetric object may use one three-quarter view; its naturally visible side and thickness belong to the same object, not a second side-view object. Preserve the selected project style. Use a seamless neutral light gray-white background, soft even lighting and only subtle contact shadows. Keep the full silhouette and key parts visible, without cropping, holders, hands, usage actions, story environments or display stands.",
       "heading": "[Prop description]",
-      "fields": [],
-      "suffix": "Do not generate text, labels, logos, or watermarks."
+      "fields": [
+        "Prop identity and count",
+        "Shape and proportions",
+        "Materials and colors",
+        "Structure and connections",
+        "Surface condition",
+        "Identifying features and text",
+        "Viewing angle",
+        "Composition and background"
+      ],
+      "suffix": "Retain only story-essential text explicitly supplied by the screenplay or user; specify its exact wording, placement and lettering without inventing inscriptions. Leave the object unlettered when no text is required. No extra explanatory text, view labels, dimension annotations, logos or watermarks. For a set, show only its explicitly established count and components; never turn different views into multiple instances. Produce separate multi-view design-review material only when explicitly requested by the user, and never automatically use it as the prop main image for video."
     }
   }
 }

@@ -4,7 +4,7 @@ import re
 import json
 
 from prompts.labels import prompt_label
-from prompts.reference import CHARACTER_TURNAROUND
+from prompts.reference import CHARACTER_TURNAROUND, PROP_SINGLE_VIEW
 from prompts.storyboard_strategies import StoryboardStrategyPrompt
 
 
@@ -51,7 +51,7 @@ def visual_contract(
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     return {
         "kind": kind, "language": language, "aspect_ratio": aspect_ratio,
-        "reference_layout": layout, "required_fields": [],
+        "reference_layout": PROP_SINGLE_VIEW if kind == 'item' else layout, "required_fields": [],
         "writing_rules": instructions(snapshot, language, "storyboard" if kind == "storyboard" else "image"),
         "revision": snapshot.revision,
     }

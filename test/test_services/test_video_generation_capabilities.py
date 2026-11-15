@@ -170,6 +170,7 @@ def test_every_video_model_type_has_capabilities_and_factory_registration():
         ("seedance_2_fast", SeedanceGenerator, VideoModelTypeEnum.seedance),
         ("seedance_2_mini", SeedanceGenerator, VideoModelTypeEnum.seedance),
         ("seedance_2_5", SeedanceGenerator, VideoModelTypeEnum.seedance),
+        ("seedance_2_5_flash", SeedanceGenerator, VideoModelTypeEnum.seedance),
         ("minimax_h3", MiniMaxH3Generator, VideoModelTypeEnum.minimax),
         ("wan_3", Wan3Generator, VideoModelTypeEnum.wan),
     ],
@@ -532,8 +533,9 @@ async def test_minimax_h3_structured_error_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_seedance_2_5_outbound_request_uses_documented_task_protocol(monkeypatch):
-    config = await _video_config("seedance_2_5")
+@pytest.mark.parametrize("model_type", ["seedance_2_5", "seedance_2_5_flash"])
+async def test_seedance_2_5_outbound_request_uses_documented_task_protocol(monkeypatch, model_type):
+    config = await _video_config(model_type)
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
@@ -541,7 +543,7 @@ async def test_seedance_2_5_outbound_request_uses_documented_task_protocol(monke
         assert request.headers["authorization"] == "Bearer secret"
         payload = json.loads(request.content)
         assert payload == {
-            "model": "configured-seedance_2_5-endpoint",
+            "model": f"configured-{model_type}-endpoint",
             "content": [
                 {"type": "text", "text": "[图1] 在雨中奔跑"},
                 {
