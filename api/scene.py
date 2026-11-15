@@ -70,6 +70,9 @@ async def generate_scene(
     task = await scene_controller.generate(
         generate_data.chapter_id,
         replace_existing=generate_data.replace_existing,
+        assistant_model_config_id=generate_data.assistant_model_config_id,
+        sheet_model_config_id=generate_data.sheet_model_config_id,
+        generate_blocking_maps=generate_data.generate_blocking_maps if 'generate_blocking_maps' in generate_data.model_fields_set else None,
         team_id=ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
     )
@@ -201,6 +204,19 @@ async def delete_scene(
 ):
     await scene_controller.remove(scene_id)
     return ResponseSchema()
+
+
+@router.post('/chapter/{chapter_id}/storyboard-sheets', summary='整集补齐线稿故事版', response_model=ResponseSchema[list[str]])
+async def generate_chapter_sheets(chapter_id: int, model_config_id: int = Query(gt=0),
+                                  ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    from uuid import uuid4
+    from services.creation_agent.submissions import submission
+    from services.storyboard.sheets import enqueue_chapter_sheets
+    await _ensure_chapter_team_access(chapter_id, ctx)
+    batch_id = (submission.get() or {}).get("submission_id") or uuid4()
+    ids = await enqueue_chapter_sheets(chapter_id, None, model_config_id, ctx.team_id,
+                                       ctx.user.id if ctx.user else None, batch_id=batch_id)
+    return ResponseSchema(data=ids)
 
 
 @router.post('/{scene_id}/storyboard-sheet', response_model=ResponseSchema[AiTaskOut], summary='生成本镜线稿故事版')

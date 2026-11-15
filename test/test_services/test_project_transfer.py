@@ -196,7 +196,7 @@ async def test_completed_episode_is_playable_after_import_and_keeps_private_stor
     novel = await Novel.create(name="完成的片子")
     chapter = await Chapter.create(novel=novel, number=1, name="第一集", content="原文")
     old_task = await AiTask.create(task_type=4, status=3, request_params={"api_key": "not portable"})
-    source = await ChapterExport.create(novel_id=novel.id, chapter_id=chapter.id, task=old_task,
+    source = await ChapterExport.create(parent_export_id=987654, novel_id=novel.id, chapter_id=chapter.id, task=old_task,
         identity_key="first-export", source_version="first", collection_complete=True, recipe={"kind":"editor_render","revision":1},
         media_ref="/media/exports/movie.mp4")
     await FinishedEpisodePublication.create(chapter=chapter, export=source)
@@ -204,13 +204,17 @@ async def test_completed_episode_is_playable_after_import_and_keeps_private_stor
     private.mkdir()
     (private/"movie.mp4").write_bytes(b"finished episode")
     bundle = tmp_path/"finished.zip"
-    pack_local_snapshot(await project_snapshot(novel.id),bundle,media_root=tmp_path/"old-media",exports_root=private)
+    snapshot = await project_snapshot(novel.id)
+    assert snapshot["exports"][0]["parent_export_id"] is None
+    snapshot["exports"][0]["parent_export_id"] = 987654  # Older archives included this missing render.
+    pack_local_snapshot(snapshot,bundle,media_root=tmp_path/"old-media",exports_root=private)
     with bundle.open("rb") as file:
         imported = await install_project(file, media_root=tmp_path/"media",exports_root=tmp_path/"new-private",team_id=None,user_id=None)
     episode = await Chapter.get(novel=imported)
     finished, = await completed_edit_rows([episode.id])
     version = await ChapterExport.get(id=finished["id"]).select_related("task")
     assert version.id != source.id and version.task_id != old_task.id and version.task.stage == "project_import"
+    assert version.parent_export_id is None
     assert version.media_ref.startswith("/media/exports/imports/")
     assert (tmp_path/"new-private"/version.media_ref.removeprefix("/media/exports/")).read_bytes() == b"finished episode"
     assert not (tmp_path/"media").exists()
@@ -349,3 +353,27 @@ def test_legacy_generated_assets_in_shared_zero_directory_remain_exportable(monk
     work["novel"]["cover"]="uploads/8/other-team.png"
     with pytest.raises(ArchiveError,match="团队"):
         export_plan(work,7)
+
+
+@pytest.mark.asyncio
+async def test_unbound_video_defaults_open_existing_and_imported_projects(client):
+    from models.novel import Novel
+    from models.chapter import Chapter
+    from services.project_transfer.restore import restore_graph
+    from services.project_transfer.snapshot import project_snapshot
+
+    preferences = {'resolution':'480p', 'aspect_ratio':'16:9', 'return_last_frame':True}
+    original = await Novel.create(name='迁移默认参数', video_generation_defaults=preferences)
+    await Chapter.create(novel=original, number=1, name='第一章', content='正文')
+    graph = await project_snapshot(original.id)
+    graph['novel']['video_generation_defaults'].update(model_config_id=999, auto_enhancement={'model_config_id':33,'resolution':'1080p'})
+    imported = await restore_graph(graph, team_id=None, user_id=None)
+    for project in (original, imported):
+        for suffix in ('/meta', ''):
+            r = await client.get(f'/api/novel/{project.id}{suffix}')
+            assert r.status_code == 200 and r.json()['code'] == 0
+            data = r.json()['data']
+            assert data['video_model_config_id'] is None
+            assert data['video_generation_defaults'] == {**preferences,'model_config_id':None,'auto_enhancement':None}
+        assert await Chapter.filter(novel=project).count() == 1
+    assert imported.video_generation_defaults == preferences

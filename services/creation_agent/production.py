@@ -31,6 +31,7 @@ async def conversation_for_task(task):
     digest = hashlib.sha256(str(task.id).encode()).hexdigest()
     operation = params.get("operation") or SKILLS.get(task.task_type, "editing")
     labels = {
+        "blocking_maps": ("补齐本集空间定位图", "Complete shot blocking diagrams"),
         "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
         "image": ("生成图片", "Generate image"),
         "assets": ("提取资产", "Extract assets"),
@@ -122,6 +123,12 @@ async def conversation_for_task(task):
     return message
 
 
+async def _queue_selected_sheets(params, result):
+    from services.storyboard.sheets import enqueue_chapter_sheets
+    return await enqueue_chapter_sheets(params['chapter_id'], result['scene_ids'], params['sheet_model_config_id'],
+        params.get('team_id'), params.get('user_id'), batch_id=params['task_id'])
+
+
 async def run_production(task, handler):
     from services.creation_agent.handler import authorize_run
 
@@ -195,6 +202,8 @@ async def run_production(task, handler):
             if kept is not None:
                 from services.creation_agent.creative_checks import check_preserved_result
                 await check_preserved_result(execution, plan.steps[0], plan.steps[0].target_id, kept)
+                if task.task_type == AiTaskTypeEnum.storyboard and params.get('sheet_model_config_id'):
+                    kept['storyboard_sheet_task_ids'] = await _queue_selected_sheets(params, kept)
                 return {**kept, 'preserved_existing': True, 'conversation_id': message.conversation_id}
         if task.task_type == AiTaskTypeEnum.reference_image.value:
             from services.creation_agent.media_execution import run_image_handler
@@ -202,6 +211,8 @@ async def run_production(task, handler):
             result = await run_image_handler(handler, params)
         else:
             result = await handler.execute(params)
+        if task.task_type == AiTaskTypeEnum.storyboard and params.get('sheet_model_config_id'):
+            result['storyboard_sheet_task_ids'] = await _queue_selected_sheets(params, result)
         result = {
             **result,
             "conversation_id": message.conversation_id,
@@ -279,3 +290,8 @@ async def finish_production_message(task):
     await AgentConversation.filter(
         id=message.conversation_id, active_task_id=task.id
     ).update(active_task_id=None)
+    if task.request_params.get('resume_count'):
+        from services.creation_agent.event_log import agent_event_log
+        event = ({'type': 'RUN_FINISHED', 'runId': str(task.id), 'threadId': str(message.conversation_id)}
+            if task.status == 3 else {'type': 'RUN_ERROR', 'message': task.error_message or text})
+        await agent_event_log.append(message.id, [event], await agent_event_log.start(message))

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Scene } from '@/types'
+import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { tr } from '@/i18n'
 
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
@@ -22,12 +24,14 @@ export interface ScenePromptMentionOption {
   fallbackUrl?: string
   description?: string
   displayOnly?: boolean
+  blockingPreview?: boolean
   aliases?: string[]
 }
 
 const props = withDefaults(defineProps<{
   modelValue: string
   options: ScenePromptMentionOption[]
+  scene?: Scene
   placeholder?: string
   embedded?: boolean
   focusMode?: boolean
@@ -60,6 +64,11 @@ const playingAudioMentionId = ref('')
 let playingAudio: HTMLAudioElement | null = null
 
 const DURATION_MENTION_PATTERN = new RegExp(DURATION_MENTION_SOURCE, 'g')
+
+const { image: blockingImage } = useSceneBlockingMap(() =>
+  props.options.some(option => option.blockingPreview) ? props.scene : undefined)
+const renderedOptions = computed(() => props.options.map(option => option.blockingPreview && blockingImage.value
+  ? { ...option, previewUrl: blockingImage.value } : option))
 
 const filteredOptions = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase()
@@ -165,7 +174,7 @@ function createMentionNode(option: ScenePromptMentionOption) {
 
 function findNextMention(value: string, start: number) {
   let match: { option: ScenePromptMentionOption; index: number; length: number } | null = null
-  for (const option of props.options.filter(item => item.kind !== 'duration')) {
+  for (const option of renderedOptions.value.filter(item => item.kind !== 'duration')) {
     const assetReference = option.syntax.match(/^@\{([^{}:#]+)(#[^{}]+)?\}$/)
     const qualifiedNames = assetReference
       ? [assetReference[1]! + (assetReference[2] || ''), ...(option.aliases || []).map(name =>
@@ -360,7 +369,7 @@ function placeHoverPreview(anchor: HTMLElement) {
 
 function showHoverPreview(mention: HTMLElement) {
   if (!props.focusMode) return
-  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
   if (!option || option.kind === 'audio' || option.kind === 'duration' || !(option.previewUrl || option.thumbnailUrl)) return
   placeHoverPreview(mention)
   hoverPreviewOption.value = option
@@ -496,7 +505,7 @@ function handleEditorClick(event: MouseEvent) {
     openDurationEditor(mention)
     return
   }
-  const option = props.options.find(item => item.id === mention.dataset.mentionId)
+  const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
   if (option) activateMention(option)
 }
 
@@ -586,7 +595,7 @@ function handleEditorKeydown(event: KeyboardEvent) {
         openDurationEditor(mention)
         return
       }
-      const option = props.options.find(item => item.id === mention.dataset.mentionId)
+      const option = renderedOptions.value.find(item => item.id === mention.dataset.mentionId)
       if (option) activateMention(option)
       return
     }
@@ -643,7 +652,7 @@ watch(() => props.modelValue, () => {
   renderValue()
 })
 
-watch(() => props.options.map(option => [
+watch(() => renderedOptions.value.map(option => [
   option.id,
   option.kind,
   option.label,

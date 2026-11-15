@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { api, ApiRequestError } from '@/api'
+import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { setLocale } from '@/i18n'
 import { useAuthStore } from '@/features/auth/authStore'
 import { appConfirm } from '@/shared/confirmDialog'
@@ -11,7 +11,7 @@ import DashboardPage from './DashboardPage.vue'
 
 vi.mock('@/api', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/api')>()
-  return { ...original, api: { ...original.api, projectOverview: vi.fn(), billingProjects: vi.fn(), deleteNovel: vi.fn() } }
+  return { ...original, exportDiagnostics: vi.fn(), api: { ...original.api, projectOverview: vi.fn(), billingProjects: vi.fn(), deleteNovel: vi.fn() } }
 })
 vi.mock('@/shared/confirmDialog', () => ({ appConfirm: vi.fn() }))
 vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn(), success:vi.fn() } }))
@@ -431,4 +431,18 @@ it.each(['light','dark'])('lets users cancel, retry, and download an old platfor
     click.mockRestore()
     delete document.documentElement.dataset.appTheme
   }
+})
+
+it('keeps diagnostic export in the collapsed support disclosure even if project loading fails', async () => {
+  vi.mocked(api.projectOverview).mockRejectedValueOnce(new Error('offline'))
+  vi.mocked(exportDiagnostics).mockResolvedValue(true)
+  const wrapper = render()
+  await flushPromises()
+  const support = wrapper.get('details.projects-support')
+  expect(support.attributes('open')).toBeUndefined()
+  await support.get('summary').trigger('click')
+  await support.get('button').trigger('click')
+  await flushPromises()
+  expect(exportDiagnostics).toHaveBeenCalledOnce()
+  wrapper.unmount()
 })

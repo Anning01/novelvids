@@ -1,5 +1,6 @@
 from services.image_generation import generate_images
-from prompts.image_references import render_image_reference_mentions
+from services.image_generation.gateway import ImageGenerationError
+from prompts.image_references import render_image_reference_mentions, render_identity_references
 
 
 def build_sora_compatible_prompt(data: dict, prompt_language: str = "en") -> str:
@@ -33,6 +34,9 @@ async def generate_for_sora_consistency(
         prompt_language,
     )
     final_prompt = render_image_reference_mentions(final_prompt, len(reference_images or []), prompt_language)
+    identity = render_identity_references(data.get('image_reference_bindings', []), prompt_language)
+    if identity:
+        final_prompt = f'{final_prompt}\n\n{identity}'
     if style_prompt:
         final_prompt = f"{final_prompt}\n\n{style_prompt}".strip()
     if output_format == "gif":
@@ -52,18 +56,24 @@ async def generate_for_sora_consistency(
         execution = current_execution.get()
         if execution:
             await execution.before_request()
-        result.extend(await generate_images(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            prompt=final_prompt,
-            api_protocol=api_protocol,
-            resolution=resolution,
-            aspect_ratio=aspect_ratio,
-            count=1,
-            output_format=output_format,
-            quality=quality,
-            extra_body=extra_body,
-            **({'timeout': None} if execution else {}),
-        ))
+        try:
+            result.extend(await generate_images(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                prompt=final_prompt,
+                api_protocol=api_protocol,
+                resolution=resolution,
+                aspect_ratio=aspect_ratio,
+                count=1,
+                output_format=output_format,
+                quality=quality,
+                extra_body=extra_body,
+                **({'timeout': None} if execution else {}),
+            ))
+        except ImageGenerationError as error:
+            if result:
+                error.submission_uncertain = True
+            raise
+
     return result

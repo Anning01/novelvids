@@ -6,9 +6,9 @@ import pytest
 from fastapi import HTTPException
 
 from models.agent_operation import AgentOperation
-from schemas.ai_task import TaskReviewResolution
+from test.legacy_review_fixture import TaskReviewResolution
 from services.creation_agent.operation_receipts import SubmissionUncertain, execute_step
-from services.creation_agent.review import close_uncertain_task
+from test.legacy_review_fixture import close_uncertain_task
 from services.video_enhancement.settlement import settle_enhancement
 from test.test_services.test_skill_workflow import enabled_project
 from test.test_services.test_video_enhancement_billing import completed_export

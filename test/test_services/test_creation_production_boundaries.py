@@ -322,48 +322,22 @@ async def test_video_settlement_is_unique_across_callers_and_retries_without_que
 
 
 @pytest.mark.asyncio
-async def test_uncertain_task_has_audited_terminal_path_without_replaying_external_step(
-    client,
-):
-    from schemas.ai_task import TaskReviewResolution
-    from services.creation_agent.review import close_uncertain_task
-    from services.creation_agent.operation_receipts import (
-        execute_step,
-        SubmissionUncertain,
-    )
-
+async def test_failed_image_task_has_one_click_retry_without_manual_resolution(client):
+    from models.creation_agent import AgentConversation, AgentMessage
     novel, _, _ = await enabled_project()
-    task = await AiTask.create(
-        task_type=2,
-        status=4,
-        stage="needs_review",
-        request_params={"novel_id": novel.id, "workflow_version": "agent-skills-v1"},
-    )
-    await AgentOperation.create(
-        task=task, key="media:image", state="uncertain", external=True
-    )
-    resolution = {
-        "outcome": "completed_unrecoverable",
-        "note": "Provider support confirmed completion, but no downloadable output remains.",
-    }
-    response = await client.post(f"/api/task/{task.id}/review", json=resolution)
-    assert response.json()["code"] == 0, response.text
-    assert response.json()["data"]["stage"] == "review_closed"
-    again = await close_uncertain_task(task.id, TaskReviewResolution(**resolution))
-    assert again.status == 4
-    assert await AgentOperation.filter(task=task, key="review:closure").count() == 1
-    from services.billing.recorder import record_ai_task_usage
-    from models.usage_record import ModelUsageRecord
-    await record_ai_task_usage(again, {})
-    ledger = await ModelUsageRecord.get(ai_task_id=task.id)
-    assert ledger.usage['missing_usage'] is True
-    assert ledger.usage['submission_uncertain'] is True
-    # Even a manual requeue cannot claim the uncertain receipt again.
-    await AiTask.filter(id=task.id).update(status=2)
-    call = AsyncMock()
-    with pytest.raises(SubmissionUncertain):
-        await execute_step(task.id, "media:image", call, external=True)
-    call.assert_not_awaited()
+    task = await AiTask.create(task_type=2, status=4, stage='needs_review',
+        request_params={'novel_id': novel.id, 'workflow_version': 'agent-skills-v1'})
+    conversation = await AgentConversation.create(novel=novel)
+    await AgentMessage.create(task=task, conversation=conversation, role='assistant', request_id=task.id, request_hash='retry')
+    operation = await AgentOperation.create(task=task, key='media:image', state='uncertain', external=True)
+    response = await client.post(f'/api/task/{task.id}/retry')
+    assert response.json()['code'] == 0, response.text
+    assert response.json()['data']['status'] == 6
+    await operation.refresh_from_db()
+    assert operation.state == 'pending'
+    again = await client.post(f'/api/task/{task.id}/retry')
+    assert again.json()['data']['id'] == str(task.id)
+    assert (await client.post(f'/api/task/{task.id}/review', json={})).json()['code'] == 404
 
 
 @pytest.mark.asyncio

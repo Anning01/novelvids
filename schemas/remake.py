@@ -52,5 +52,6 @@ class RemakeProjectCreate(BaseModel):
     resolution: str = Field(..., min_length=1, max_length=32)
     style_key: str | None = Field(None, max_length=64)
     custom_style_prompt: str | None = Field(None, max_length=2000)
+    model_config_id: int | None = Field(None, ge=1)
     idempotency_key: UUID
     sources: list[RemakeProjectSourceIn] = Field(..., min_length=1)

@@ -17,7 +17,7 @@ const emit = defineEmits<{ close: []; applied: [id: number] }>()
 const {
   rows, models, modelId, resolution, source, run, model, size, shortSide, resolutions, target, locked,
   loadingModels, loadingHistory, preparing, submitting, quoting, uncertain, submittedId, quote, error, quoteError,
-  canWrite, resultVideo, sourceReady, submittedQuote, fetchQuote, refresh, submit, apply, restoreOriginal, download,
+  canWrite, resultVideo, sourceReady, submittedQuote, fetchQuote, refresh, retry, submit, apply, restoreOriginal, download,
 } = useVideoEnhancement(toRef(props, 'video'), toRef(props, 'visible'), id => emit('applied', id), toRef(props, 'pixelSize'))
 const playing = ref(false), playbackError = ref(false)
 const preview = computed(() => resultVideo.value || props.video)
@@ -25,7 +25,7 @@ watch(() => props.visible, value => { if (!value) playing.value = false })
 watch(() => preview.value.id, () => { playing.value = false; playbackError.value = false })
 const probe = computed(() => resultVideo.value && run.value?.output_probe.width ? run.value.output_probe : source.value?.source_probe)
 const displayedSize = computed(() => probe.value?.width && probe.value.height ? `${probe.value.width} × ${probe.value.height}`
-  : (size.value || props.pixelSize) ? `${(size.value || props.pixelSize)!.width} × ${(size.value || props.pixelSize)!.height}` : tr('尺寸待核对'))
+  : (size.value || props.pixelSize) ? `${(size.value || props.pixelSize)!.width} × ${(size.value || props.pixelSize)!.height}` : tr('尺寸读取中'))
 const resolutionLabel = computed(() => String(run.value?.recipe.resolution || resolution.value).toUpperCase())
 const phase = computed(() => {
   if (uncertain.value || run.value?.stage === 'needs_review') return 'review'
@@ -41,7 +41,7 @@ const phase = computed(() => {
   return 'ready'
 })
 const statusText = computed(() => {
-  if (phase.value === 'review') return tr('提交结果待核对')
+  if (phase.value === 'review') return tr('增强未完成')
   if (phase.value === 'completed') return run.value?.applied_to_scene ? tr('已设为当前视频') : tr('高清版已完成')
   if (phase.value === 'failed') return tr('增强未完成')
   if (phase.value === 'error') return tr('暂时无法继续')
@@ -49,10 +49,10 @@ const statusText = computed(() => {
   if (phase.value === 'max') return tr('没有更高的可用清晰度')
   if (phase.value === 'unsupported') return tr('所选服务不支持当前视频尺寸')
   if (phase.value === 'processing') return run.value?.stage === 'billing_pending' ? tr('用量正在结算') : run.value?.stage === 'saving_result' ? tr('正在保存高清成片') : tr('画质增强中')
-  return tr('正在核对视频与费用')
+  return tr('正在读取视频信息和费用')
 })
 const statusDetail = computed(() => {
-  if (phase.value === 'review') return tr('请勿重复提交，可关闭弹窗继续创作。')
+  if (phase.value === 'review') return tr('原视频已保留，可以重置后重新生成。')
   if (phase.value === 'completed') return tr('原片保留，可在版本记录中找回。')
   if (phase.value === 'processing') return tr('可关闭弹窗继续创作，完成后自动更新。')
   if (phase.value === 'unavailable') return tr('请联系团队管理员添加可用服务。')
@@ -62,9 +62,9 @@ const statusDetail = computed(() => {
   return error.value || source.value?.error || tr('视频仍可预览，确认前不会提交付费增强。')
 })
 const primaryLabel = computed(() => phase.value === 'completed' ? (run.value?.applied_to_scene ? tr('下载高清版') : tr('使用此版本'))
-  : ['processing', 'failed', 'review'].includes(phase.value) ? tr('返回创作')
+  : ['failed', 'review'].includes(phase.value) ? tr('重置并重试') : phase.value === 'processing' ? tr('返回创作')
   : phase.value === 'error' ? tr('重新读取') : phase.value === 'ready' ? quote.value?.reused_export_id ? tr('使用已有高清版') : tr('确认增强到 {p0}', { p0: resolutionLabel.value })
-  : phase.value === 'unavailable' ? tr('暂无可用服务') : phase.value === 'max' ? tr('无需增强') : phase.value === 'unsupported' ? tr('当前尺寸不可用') : tr('正在核对…'))
+  : phase.value === 'unavailable' ? tr('暂无可用服务') : phase.value === 'max' ? tr('无需增强') : phase.value === 'unsupported' ? tr('当前尺寸不可用') : tr('正在读取…'))
 const amount = computed(() => {
   const value = locked.value ? submittedQuote.value : quote.value
   return value ? money(Number(value.amount), value.currency) : '—'
@@ -75,6 +75,7 @@ function historyLabel(row: ChapterExport) {
 }
 async function primary() {
   if (phase.value === 'ready') await submit()
+  else if (['failed', 'review'].includes(phase.value)) await retry()
   else if (phase.value === 'completed' && run.value) {
     if (run.value.applied_to_scene) await download(run.value)
     else await apply(run.value)
@@ -129,7 +130,7 @@ function moveTarget(event: KeyboardEvent) {
     <div v-if="!rows.length" class="enhancement-history-empty">{{ loadingHistory ? tr('正在读取…') : tr('暂无版本记录') }}</div>
     <div v-for="row in rows" :key="row.id" class="enhancement-version"><div><strong>{{ historyLabel(row) }}</strong><small>{{ row.applied_to_scene ? tr('当前使用') : row.status === 3 ? tr('已完成') : row.status === 4 ? tr('增强未完成') : tr('处理中') }}</small></div><div><AppButton v-if="row.parent_export_id && row.status === 3 && !row.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="apply(row)">{{ tr('使用此版本') }}</AppButton><AppButton v-if="!row.parent_export_id && phase === 'completed' && run?.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="restoreOriginal">{{ tr('恢复原视频') }}</AppButton><AppButton v-if="row.url && row.status === 3" variant="ghost" icon-only size="sm" :aria-label="tr('下载{p0}', { p0: historyLabel(row) })" @click="download(row)"><Download :size="14" aria-hidden="true" /></AppButton></div></div>
   </details>
-  <footer class="enhancement-footer"><div class="enhancement-cost"><p><span>{{ tr('预计费用') }}</span><strong>{{ phase === 'checking' ? tr('核对中') : amount }}</strong></p><small>{{ quote?.reused_export_id && phase === 'ready' ? tr('使用已有结果，不产生新增增强费用') : phase === 'ready' ? tr('确认后开始计费') : ['processing', 'completed', 'review', 'failed'].includes(phase) ? tr('实际费用以账单记录为准') : tr('获取有效报价后才可确认') }}</small></div>
+  <footer class="enhancement-footer"><div class="enhancement-cost"><p><span>{{ tr('预计费用') }}</span><strong>{{ phase === 'checking' ? tr('准备中') : amount }}</strong></p><small>{{ quote?.reused_export_id && phase === 'ready' ? tr('使用已有结果，不产生新增增强费用') : phase === 'ready' ? tr('确认后开始计费') : ['processing', 'completed', 'review', 'failed'].includes(phase) ? tr('实际费用以账单记录为准') : tr('获取有效报价后才可确认') }}</small></div>
     <AppButton class="enhancement-primary" variant="primary" :disabled="['checking', 'unavailable', 'max', 'unsupported'].includes(phase) || !canWrite || submitting" @click="primary"><Download v-if="phase === 'completed' && run?.applied_to_scene" :size="16" aria-hidden="true" /><ArrowRight v-else-if="['processing', 'review', 'failed'].includes(phase)" :size="16" aria-hidden="true" /><Sparkles v-else :size="16" aria-hidden="true" />{{ primaryLabel }}</AppButton>
   </footer>
 </template>

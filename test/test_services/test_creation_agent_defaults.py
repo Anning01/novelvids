@@ -66,7 +66,9 @@ def test_only_explicit_model_or_assistant_character_caps_apply(assistant_limit, 
     assert AgentConfiguration(max_context_characters=assistant_limit).context_character_limit(model_limit) == expected
 
 
-def test_unconfigured_output_does_not_send_an_artificial_provider_cap():
-    assert AgentConfiguration().output_model_settings() == {}
+def test_unconfigured_output_sends_default_without_overriding_explicit_limits():
+    assert AgentConfiguration().output_model_settings() == {'max_tokens': 128000}
+    assert AgentConfiguration(max_output_tokens=None).output_model_settings() == {'max_tokens': 128000}
+    assert AgentConfiguration().output_model_settings(262144) == {'max_tokens': 262144}
     assert AgentConfiguration().output_model_settings(12000) == {'max_tokens': 12000}
     assert AgentConfiguration(max_output_tokens=4000).output_model_settings(12000) == {'max_tokens': 4000}

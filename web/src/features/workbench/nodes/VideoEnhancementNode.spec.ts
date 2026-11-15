@@ -121,7 +121,7 @@ it('shows a persisted failed task without replaying its paid operation', async (
   vi.mocked(exportApi.get).mockResolvedValue({ data: { ...output, status: 4, stage: 'needs_review', error: '待核对', url: null } })
   const wrapper = await render()
   expect(wrapper.get('[data-media]').attributes('data-failed')).toBe('true')
-  expect(wrapper.text()).toContain('需要核对')
+  expect(wrapper.text()).toContain('未完成，可重试')
   expect(exportApi.enhance).not.toHaveBeenCalled()
 })
 

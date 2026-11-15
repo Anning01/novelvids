@@ -34,6 +34,9 @@ class UsagePreservingStreamedResponse(OpenAIStreamedResponse):
 class UsagePreservingChatModel(OpenAIChatModel):
     """Use the SDK's documented response hooks without replacing its tool loop."""
 
+    async def _map_video_url_item(self, item):
+        return {"type": "video_url", "video_url": {"url": item.url, **(item.vendor_metadata or {})}}
+
     async def _map_binary_content_item(self, item):
         if item.media_type.startswith("video/"):
             # Preserve the existing OpenAI-compatible video-input contract.

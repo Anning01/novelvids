@@ -11,7 +11,7 @@ from tortoise.exceptions import (
 )
 
 from config import settings
-from utils.messages import localized_message
+from utils.messages import localized_message, public_generation_error
 from utils.response_format import ResponseSchema
 
 
@@ -23,7 +23,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     response_data = ResponseSchema(
         code=exc.status_code,
         data=None,
-        message=exc.detail or localized_message("请求错误"),
+        message=public_generation_error(exc.detail) if isinstance(exc.detail, str) else exc.detail or localized_message("请求错误"),
     )
     # 兼容现有 HTTP 200 + body.code 协议；限流必须保留标准 429，供浏览器、
     # 反向代理与监控正确识别，并透传 Retry-After。

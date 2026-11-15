@@ -96,14 +96,15 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             await Novel.filter(id=chapter.novel_id).using_db(db).update(episodes_managed=True, total_chapters=count)
 
     async def extract(
-        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None
+        self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None,
+        *, assistant_model_config_id: int | None = None,
     ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
 
         # 1. 获取提取任务的启用配置（团队自定义优先，官方兜底）
         from services.creation_agent.skill_execution import require_agent
-        config, _ = await require_agent(team_id)
+        config, _ = await require_agent(team_id, assistant_model_config_id)
         prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
@@ -113,6 +114,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         request_params = {
             "chapter_id": chapter.id,
             "novel_id": chapter.novel_id,
+            "assistant_model_config_id": config.id,
             "model_config_id": config.id,
             "base_url": config.base_url,
             "api_key": config.api_key,
@@ -138,6 +140,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('chapter_id') == chapter_id:
+                    if assistant_model_config_id is not None and existing.request_params.get("assistant_model_config_id") != assistant_model_config_id:
+                        raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
                     return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             return await ai_task_executor.submit(AiTaskTypeEnum.extraction, request_params, db_connection=connection)
 
@@ -148,7 +152,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         tasks = await AiTask.filter(
             task_type=AiTaskTypeEnum.extraction.value,
         ).order_by("-created_at")
-        return next(
+        latest = next(
             (
                 task
                 for task in tasks
@@ -156,6 +160,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             ),
             None,
         )
+        from services.extraction.errors import describe_extraction_failure
+        return await describe_extraction_failure(latest)
 
 
 chapter_controller = ChapterController()

@@ -63,7 +63,7 @@ it('keeps platform connection unavailable without a super administrator session'
 it('opens platform connection and account in dialogs outside the model layout', async () => {
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
-  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ code: 0, message: '', data: { connected: false } })
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ code: 0, message: '', data: { connected: false, key_management_url: 'https://platform.example/#/platform/keys' } })
   const connect = vi.spyOn(api, 'connectStudioPlatform').mockRejectedValueOnce(new Error('连接失败'))
     .mockResolvedValueOnce({ code: 0, message: '', data: { synced: 1 } })
   const pinia = createPinia()
@@ -77,7 +77,11 @@ it('opens platform connection and account in dialogs outside the model layout', 
     await click('连接开放平台')
     await flushPromises()
     const form = document.body.querySelector<HTMLFormElement>('.platform-connection')!
+    const help = form.querySelector('#studio-platform-key-help')!
+    expect(help.textContent).toContain('猫影工作台')
+    expect(help.querySelector('a')?.getAttribute('href')).toBe('https://platform.example/#/platform/keys')
     const key = form.querySelector('input')!
+    expect(key.getAttribute('aria-describedby')).toBe(help.id)
     key.value = 'nv_test'
     key.dispatchEvent(new Event('input', { bubbles: true }))
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -829,4 +833,43 @@ it('creates ASR configuration with server-provided defaults and minute pricing',
   await wrapper.get('form.model-modal').trigger('submit');await flushPromises()
   expect(create).toHaveBeenCalledWith(expect.objectContaining({task_type:9,model:'volc.seedasr.auc',api_protocol:'volcengine_openspeech',pricing:expect.objectContaining({type:'asr',price_per_minute:.031,billing_unit:'minute'})}))
   wrapper.unmount()
+})
+
+it.each(['dark', 'light'])('previews channel pixel prices before saving a synced image model (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).$patch({ deploymentRole: 'studio' })
+  useAuthStore(pinia).user!.is_super_admin = true
+  const current = { id: 55, name: 'Pro', scope: 'studio_platform', task_type: 2, task_types: [2],
+    image_model_type: 'seedream_5_pro', api_protocol: 'novelvids', model: 'nv-55', concurrency: 1,
+    is_active: true, pricing: { type: 'image', prices: { '2K': 1 } } }
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [current] } } as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: false } } as never)
+  vi.spyOn(api, 'generationCapabilities').mockResolvedValue({ data: { image: { seedream_5_pro: ['2K'] }, video: {} } } as never)
+  const tariff = { type: 'image', currency: 'CNY', billing_unit: 'pixel_tier',
+    prices: { single_low: .3, single_high: .6, layer_low: .15, layer_high: .3 },
+    input_image: { first_free: 1, price_per_image: .02 } }
+  const read = vi.spyOn(api, 'platformImageTariff').mockResolvedValue({ data: tariff } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: current } as never)
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-image').trigger('click')
+    const click = async (label: string) => {
+      await wrapper.findAll('button').find(button => button.text() === label)!.trigger('click')
+      await flushPromises()
+    }
+    await click('编辑本地价格')
+    await click('填入该渠道的平台价')
+    expect(read).toHaveBeenCalledWith(55)
+    expect(update).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('图层 · 超过 261 万像素')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(55, { pricing: expect.objectContaining(tariff) })
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
 })

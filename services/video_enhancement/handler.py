@@ -78,7 +78,8 @@ class EnhanceExportHandler(BaseTaskHandler):
                 client = MediaKitClient.for_snapshot(snapshot, current_config, http=http)
                 started = True
                 try:
-                    task_id = await client.submit(url, export.identity_key, queue_id=options.queue_id, resolution=resolution)
+                    task_id = await client.submit(url, request_params.get('provider_client_token') or export.identity_key,
+                        queue_id=options.queue_id, resolution=resolution)
                 except MediaKitError as error:
                     if error.definite_rejection:
                         started = False

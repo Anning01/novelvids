@@ -59,7 +59,7 @@ def test_remake_uses_shared_eight_section_renderer_without_timing_precision_loss
         position = 0
         for heading in json.loads(snapshot.read('storyboard_contract'))['sections']:
             position = result['prompt'].index(prompt_label(heading, language), position) + len(prompt_label(heading, language))
-        assert result['duration_seconds'] == duration
+        assert result['duration_seconds'] == float(remake_shot(duration=duration)['duration'].removesuffix('s'))
         assert '@{将军}' in result['prompt']
 
 
@@ -69,18 +69,17 @@ def test_unknown_asset_reference_cannot_reach_persistence():
             [], synthetic_snapshot(), 'zh')
 
 
-def test_source_duration_controls_rounded_model_timeline_without_losing_content():
+def test_model_timing_is_preserved_even_when_source_timing_differs():
     raw = remake_shot(duration=4.27)
     raw['shot_index'] = 3
     raw['sequence'] = 1
     result = prepare_remake_prompt(raw, [{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
         synthetic_snapshot(), 'zh', duration_seconds=4.266667)
-    assert result['duration_seconds'] == 4.266667 and result['sequence'] == 3
-    assert '4.26667s' in result['actions'][0]
+    assert result['duration_seconds'] == 4.27 and result['sequence'] == 3
+    assert result['actions'] == ['0s-4.27s: @{将军}抬眼。']
     assert '抬眼' in result['actions'][0]
     raw['actions'] = ['0s-8s: @将军抬眼。']
-    with pytest.raises(ValueError, match='超出镜头时长'):
-        prepare_remake_prompt(raw, [{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
+    result = prepare_remake_prompt(raw, [{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
             synthetic_snapshot(), 'zh', duration_seconds=4.266667)
 
 
@@ -102,3 +101,51 @@ def test_validation_errors_remain_serializable_in_model_audit_history():
     }])])
     messages = _audit_messages([request])
     assert messages[0]['parts'][0]['content'][0]['ctx']['error'] == 'Segment durations must match'
+
+
+def test_remake_diagram_uses_a_single_orientation_for_shot_and_layout():
+    from schemas.agent_workflow import RemakeBlockingMap
+    from test.test_services.test_scene_blueprint import LAYOUT, SHOT
+    layout = {k:v for k,v in LAYOUT.items() if k != 'orientation'}
+    assert 'orientation' not in RemakeShot.model_json_schema()['$defs']['RemakeLayout']['properties']
+    plan = RemakeBlockingMap.model_validate({**SHOT,'layout':layout})
+    assert plan.layout.orientation == plan.orientation
+    duplicate = RemakeBlockingMap.model_validate({**SHOT, 'layout':{**layout, 'orientation':'图上方为北'}})
+    assert duplicate.layout.orientation == duplicate.orientation
+
+
+@pytest.mark.parametrize('issue', ['wording', 'axis', 'missing', 'coverage', 'valid'])
+def test_optional_remake_diagram_never_blocks_an_otherwise_valid_shot(issue):
+    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
+    raw = remake_shot()
+    raw['duration_split_part'] = 2
+    plan = {**SHOT, 'layout': dict(LAYOUT), 'assets': [*SHOT['assets'], {'name':'将军', 'x':45, 'y':50}]}
+    if issue == 'wording':
+        plan['layout']['orientation'] = '图上方为北'
+    elif issue == 'axis':
+        plan['axis'] = ['不存在的锚点','将军']
+    elif issue == 'coverage':
+        plan['assets'] = SHOT['assets']
+    if issue != 'missing':
+        raw['blocking_map'] = plan
+    result = prepare_remake_prompt(raw, [{'id':'character-001','name':'将军','type':'character','description':'黑甲'}],
+                                   synthetic_snapshot(), 'zh')
+    assert result['prompt'] and result['actions'] == ['0s-4.2s: @{将军}抬眼。']
+    assert result['duration_split_part'] == 2
+    assert bool(result['blocking_map']) == (issue in ('wording', 'coverage', 'valid'))
+
+
+def test_remake_keeps_model_total_when_segment_sum_differs():
+    raw = remake_shot(duration=4.73)
+    raw['description'] = '将军在帐内抬眼。'
+    raw['segments'] = [dict(duration=t, **{k:raw[k] for k in
+        ('description','shot_size_and_camera','visual_prose','actions','camera_movement')}) for t in (2, 2.733)]
+    data = {k:v for k,v in raw.items() if k in RemakeShot.model_fields}
+    assert RemakeShot.model_validate(data).duration == '4.73s'
+    assert RemakeShot.model_validate({**data, 'duration':'5s'}).duration == '5s'
+
+
+def test_remake_accepts_model_duration_above_thirty_seconds():
+    raw = remake_shot(duration=45)
+    data = {k:v for k,v in raw.items() if k in RemakeShot.model_fields}
+    assert RemakeShot.model_validate(data).duration == '45s'

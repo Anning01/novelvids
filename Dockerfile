@@ -18,7 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fontconf
 
 WORKDIR /app
 
-ENV PYTHONUNBUFFERED=1 \
+ENV CREATION_AGENT_OPTIONAL_SKILLS_PATH=/app/prompts/skills/video-optimizers \
+    PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 

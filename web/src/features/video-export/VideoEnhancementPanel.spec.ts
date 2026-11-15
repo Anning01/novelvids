@@ -114,14 +114,15 @@ it('keeps tracking a submitted job while hidden and reports the selected HD resu
   wrapper.unmount()
 })
 
-it('blocks repeat submission after an uncertain response and offers status refresh instead', async () => {
+it('offers a working retry after a failed response without a manual review flow', async () => {
   vi.mocked(exportApi.enhance).mockRejectedValue(new Error('Network disconnected'))
   const wrapper = render(); await flushPromises()
   await wrapper.get('.enhancement-primary').trigger('click'); await flushPromises()
-  expect(wrapper.text()).toContain('提交结果待核对')
+  expect(wrapper.text()).not.toContain('核对')
+  expect(wrapper.get('.enhancement-primary').text()).toBe('重置并重试')
   await wrapper.get('.enhancement-primary').trigger('click'); await flushPromises()
-  expect(exportApi.enhance).toHaveBeenCalledTimes(1)
-  expect(wrapper.emitted('close')).toBeTruthy()
+  expect(exportApi.enhance).toHaveBeenCalledTimes(2)
+  expect(wrapper.emitted('close')).toBeUndefined()
   wrapper.unmount()
 })
 
@@ -228,7 +229,7 @@ it.each(['light', 'dark'])('keeps provider, unsupported target and failure state
     applied_to_scene: true, error: 'Provider failed', recipe: { resolution: '1080p' } }, source] })
   window.dispatchEvent(new Event('focus')); await flushPromises()
   expect(wrapper.text()).toContain('Provider failed')
-  expect(wrapper.get('.enhancement-primary').text()).toBe('返回创作')
+  expect(wrapper.get('.enhancement-primary').text()).toBe('重置并重试')
   wrapper.unmount(); delete document.documentElement.dataset.appTheme
 })
 

@@ -134,6 +134,9 @@ async def test_model_chosen_introduction_is_preserved_through_serialization_and_
     shot = _shot(1, f'@{{{name}}} stands in the courtyard.')
     introduction = f'0s-2s: 旁白：{name}是从蓝星穿越而来的青年。' if language == 'zh' else f'0s-2s: Narrator: {name} is a time traveler.'
     shot.narration = [introduction]
+    from schemas.scene import BlockingMap
+    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
+    shot.blocking_map = BlockingMap.model_validate({**SHOT, 'layout':LAYOUT, 'assets':[*SHOT['assets'], {'name':name, 'x':40,'y':50}]})
     raw = StructuredSkillStoryboard.model_validate({'shots': [shot.model_dump()]})
     execution = SimpleNamespace(snapshot=snapshot(with_timing=False),
                                 params={'assistant_model_config_id': 1}, generate=AsyncMock(return_value=raw))
@@ -191,10 +194,11 @@ async def test_skill_generation_without_new_people_does_not_inject_instructions(
     from schemas.agent_workflow import StructuredSkillStoryboard
     from services.creation_agent.skill_execution import current_execution
 
-    execution = SimpleNamespace(snapshot=snapshot(with_timing=False),
-                                params={'assistant_model_config_id': 1},
-                                generate=AsyncMock(return_value=StructuredSkillStoryboard.model_validate(
-                                    {'shots': [_shot().model_dump()]})))
+    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
+    draft = {**_shot().model_dump(), 'blocking_map':{**SHOT, 'layout':LAYOUT,
+             'assets':[*SHOT['assets'], {'name':'张三', 'x':40,'y':50}]}}
+    execution = SimpleNamespace(snapshot=snapshot(with_timing=False), params={'assistant_model_config_id': 1},
+        generate=AsyncMock(return_value=StructuredSkillStoryboard.model_validate({'shots':[draft]})))
     token = current_execution.set(execution)
     try:
         await generate_storyboard(None, '张三再次出现', [person()], 'fake', previously_seen_assets=['张三'])

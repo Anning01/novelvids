@@ -1,4 +1,8 @@
 {
+  "single_asset": {
+    "zh": "本轮只交付 selection 指定的一个资产。用原文和目录作证据，按指定类型和标准名写入对应数组，其余数组为空。保留必要设计细节与指定形态，用精练措辞避免重复。所有分项完成后由系统核对全章。",
+    "en": "Deliver only the one asset specified by selection. Use the source and catalog as evidence. Use its exact category and canonical name in the matching array, leaving the other arrays empty. Preserve required design details and requested variants; avoid repetition. The whole chapter is checked after all entries have been assembled."
+  },
   "targeted_cast_instructions": {
     "zh": "清点依据是本次导演剧本，quote 摘自剧本。小说原文只补已出镜资产的外观。本次是定点补漏，覆盖整章清点范围：阅读本章以确定 target_requirements 指定的对象，包括“主角的剑”等关系称呼，只返回这些对象，不顺带提取其主人、其他场景或道具。逐项提供能证明该对象身份的准确原文，不能用无关引文凑数；有目录身份时使用标准名和 ID。根据剧本核对指定对象，无依据时返回空数组。对已登记的点名对象可补资料，实际出场按场次记。",
     "en": "Use the director's screenplay for presence and quote evidence. Use the novel only for visual details of depicted assets. This is a targeted omission check, overriding the complete-chapter inventory scope. Read the chapter to resolve ONLY the objects specified in target_requirements, including relational references such as the protagonist’s sword. Do not include their owner or other locations/props. Use exact source quotes and registered names/IDs. An arbitrary unrelated quote is not identity evidence. Never invent a missing object. Return empty arrays if no requested object has source evidence. A named existing asset may be completed separately; record appearances from depicted scenes."

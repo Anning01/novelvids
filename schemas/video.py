@@ -14,6 +14,9 @@ def _resolve_video_metadata(metadata: Any) -> None:
     """
     if not isinstance(metadata, dict):
         return
+    if isinstance(metadata.get('error'), str):
+        from utils.messages import public_generation_error
+        metadata['error'] = public_generation_error(metadata['error'])
     for key in (
         "first_frame_url",
         "last_frame_url",

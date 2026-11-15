@@ -12,7 +12,7 @@ from config import settings
 from controllers.config import ai_model_config_controller
 from prompts.experience import render_named_references, with_references
 from schemas.experience import ExperienceQuoteIn, ExperienceGenerateIn
-from services.billing.pricing import compute_image_cost, compute_input_image_cost, compute_video_cost, TOKENS_PER_SECOND
+from services.billing.pricing import image_price_tier, compute_image_cost, compute_input_image_cost, compute_video_cost, TOKENS_PER_SECOND
 from services.image_generation.capabilities import validate_selection as image_selection
 from services.video.capabilities import validate_selection as video_selection
 from services.video.reference_media import reference_mention_syntax, select_referenced_media
@@ -97,21 +97,23 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
         else:
             selected = image_selection(config.image_model_type, clarity=payload.resolution, aspect_ratio=payload.aspect_ratio,
                 output_format=payload.output_format, generation_count=1, frame_count=payload.frame_count, frame_duration_ms=payload.frame_duration_ms)
-            image_pricing = _price(config.pricing, 'image', selected.clarity)
+            tier = image_price_tier(config.pricing, selected)
+            image_pricing = _price(config.pricing, 'image', tier)
             references = _references(payload)
             input_image_count = sum(item.type == 'image' for item in references)
-            total = compute_image_cost(1, selected.clarity, image_pricing) + compute_input_image_cost(input_image_count, image_pricing)
+            total = compute_image_cost(1, tier, image_pricing) + compute_input_image_cost(input_image_count, image_pricing)
             pricing_undiscounted = {**image_pricing, 'discount': 1}
-            original_total = compute_image_cost(1, selected.clarity, pricing_undiscounted) + compute_input_image_cost(input_image_count, pricing_undiscounted)
+            original_total = compute_image_cost(1, tier, pricing_undiscounted) + compute_input_image_cost(input_image_count, pricing_undiscounted)
         if payload.mode == 'reference':
             reference_config = await ai_model_config_controller.get_active(2, reference_image_config_id, team_id=ctx.team_id)
             reference_selection = image_selection(reference_config.image_model_type, clarity=None, aspect_ratio=payload.aspect_ratio,
                 output_format='png', generation_count=1)
-            ref_pricing = _price(reference_config.pricing, 'image', reference_selection.clarity)
-            reference_total = compute_image_cost(1, reference_selection.clarity, ref_pricing)
+            ref_tier = image_price_tier(reference_config.pricing, reference_selection)
+            ref_pricing = _price(reference_config.pricing, 'image', ref_tier)
+            reference_total = compute_image_cost(1, ref_tier, ref_pricing)
             total += reference_total
             ref_undiscounted = {**ref_pricing, 'discount': 1}
-            reference_original = compute_image_cost(1, reference_selection.clarity, ref_undiscounted)
+            reference_original = compute_image_cost(1, ref_tier, ref_undiscounted)
             original_total += reference_original
         if not total.is_finite() or total < 0:
             raise ValueError(localized_message('无法确认预计价格，请联系管理员'))

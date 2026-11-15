@@ -64,7 +64,7 @@ async def test_repeated_invalid_tool_arguments_report_validation_failure_without
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.failed.value
     from utils.messages import localized_message
-    expected = localized_message('本次任务的增量修复已用完，候选和调用记录已保留，请核对失败步骤。', _language='en')
+    expected = localized_message('本次自动修复已结束，候选和调用记录已保留，可点击重置并重试。', _language='en')
     assert task.error_message == expected
     assert not await PromptChange.filter(task=task).exists()
     assistant = await AgentMessage.get(task=task, role='assistant')
@@ -160,8 +160,8 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
 
     def transport(outgoing):
         payload = json.loads(outgoing.content)
-        assert 'max_tokens' not in payload
-        reported_output = 2048  # The provider may end a response at its own default limit.
+        assert payload['max_tokens'] == 128000
+        reported_output = 128000
         envelope = {'id': 'truncated', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
         chunks = [
             {**envelope, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'reasoning_content': 'synthetic-reasoning'}, 'finish_reason': None}]},

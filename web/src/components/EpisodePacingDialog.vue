@@ -75,7 +75,7 @@ async function submit() {
 <template>
   <button ref="trigger" class="pacing-trigger" type="button" :disabled="disabled" aria-haspopup="dialog" @click="open">
     <Clock3 :size="16" aria-hidden="true" />
-    <span>{{ label }}<template v-if="pacing?.max_seconds"> · {{ tr('最多 {p0} 秒', { p0: pacing.max_seconds }) }}</template></span>
+    <span>{{ label }}<template v-if="pacing?.max_seconds"> · {{ tr('约 {p0} 秒', { p0: pacing.max_seconds }) }}</template></span>
     <ChevronDown :size="14" aria-hidden="true" />
   </button>
   <Teleport to="body">
@@ -95,7 +95,7 @@ async function submit() {
       </fieldset>
       <div class="limit">
         <div class="limit-row">
-          <label :for="durationId"><strong>{{ tr('时长上限') }}</strong> <small>{{ tr('可选') }}</small></label>
+          <label :for="durationId"><strong>{{ tr('参考时长') }}</strong> <small>{{ tr('可选') }}</small></label>
           <div class="stepper">
             <button type="button" class="icon-button" :aria-label="tr('减少 5 秒')" :disabled="saving || closing || invalid || !limit || limit <= 1"
               @click="seconds = Math.max(1, Number(seconds) - 5)"><Minus :size="16" /></button>
@@ -107,7 +107,7 @@ async function submit() {
           </div>
         </div>
         <small :id="`${durationId}-hint`" aria-live="polite" :class="{ error: invalid }">{{ invalid ? tr('请输入大于 0 的整数秒。') : limit
-          ? tr('剧本和分镜总时长上限为 {p0} 秒。', { p0: limit })
+          ? tr('本集参考时长约 {p0} 秒，可根据剧情和表现效果适度超出。', { p0: limit })
           : tr('留空，按所选节奏估算本集时长。') }}</small>
       </div>
       <p v-if="error" class="error" role="alert">{{ error }}</p>

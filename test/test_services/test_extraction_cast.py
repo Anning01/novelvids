@@ -221,3 +221,129 @@ async def test_extraction_persists_people_scenes_and_system_prop_without_false_c
     assert all(a.base_traits and a.source_chapters == [chapter.number] for a in assets)
     checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
     assert not checkpoint.result['issues']
+
+
+@pytest.mark.asyncio
+async def test_asset_workflow_persists_complete_chapter_after_truncation(monkeypatch):
+    from models.asset import Asset
+    from models.agent_operation import AgentOperation
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    from services.creation_agent.skill_execution import SkillExecution
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    chapter.content = '甲推门。乙回头。'
+    await chapter.save()
+    snapshot = synthetic_snapshot()
+    original = SkillExecution._generate
+
+    async def truncate(self, skill, facts, output_type, **options):
+        if skill == 'assets' and isinstance(facts, list):
+            raise ModelOutputLimitError('length')
+        if skill == 'structured' and facts['chapter']['content'] == chapter.content:
+            raise ModelOutputLimitError('length')
+        return await original(self, skill, facts, output_type, **options)
+
+    def respond(messages, info):
+        tool = info.output_tools[0]
+        if 'characters' in tool.parameters_json_schema['properties']:
+            text = str(messages[-1].parts[0].content)
+            name = '甲' if '甲推门' in text else '乙'
+            payload = {'characters': [{'name': name, 'presence': 'present', 'quote': name}]}
+        else:
+            import json
+            facts = json.loads(messages[-1].parts[0].content)['untrusted_task_facts']['input']
+            name = facts['selection']['name']
+            payload = {'persons': [{'name': name, 'base_traits': fixed_asset_prompt('en', snapshot=snapshot)}],
+                       'items': [], 'scenes': []}
+        return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
+
+    monkeypatch.setattr(SkillExecution, '_generate', truncate)
+    model = streaming_model(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        task = await chapter_controller.extract(chapter.id)
+        task.request_params['skill_snapshot'] = snapshot.model_dump()
+        await task.save()
+        await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert await Asset.filter(novel=novel, canonical_name__in=['甲', '乙']).count() == 2
+    assert await AgentOperation.filter(task=task, state='completed', key__startswith='model:assets:AssetExtractionResult:entry:').count() == 2
+
+
+@pytest.mark.parametrize('language,phrase', [('zh', '一个资产'), ('en', 'one asset')])
+def test_single_asset_recovery_supports_queued_skill_snapshots(language, phrase):
+    import json
+    from prompts.extraction import single_asset_instructions
+    from prompts.skill_pack import snapshot_skills, use_skill_snapshot
+    snapshot = snapshot_skills()
+    old = json.loads(snapshot['contents']['asset_templates'])
+    old.pop('single_asset')
+    snapshot['contents']['asset_templates'] = json.dumps(old)
+    with use_skill_snapshot(snapshot):
+        assert phrase in single_asset_instructions(language)
+
+
+@pytest.mark.asyncio
+async def test_new_run_reuses_completed_entries_after_provider_rejection(monkeypatch):
+    from pydantic_ai.exceptions import ModelHTTPError
+    from models.asset import Asset
+    from controllers.chapter import chapter_controller
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.model_boundary import ModelOutputLimitError
+    from services.creation_agent.skill_execution import SkillExecution
+    from test.test_services.test_skill_workflow import enabled_project
+    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
+
+    novel, chapter, _ = await enabled_project()
+    chapter.content = '甲和乙走进书房。'
+    await chapter.save()
+    snapshot = synthetic_snapshot()
+    calls = []
+    original = SkillExecution._generate
+
+    async def simulate(self, skill, facts, output_type, **options):
+        if skill == 'assets' and isinstance(facts, list):
+            calls.append('whole')
+            from models.agent_operation import AgentOperation
+            from services.creation_agent.plan_sources import fingerprint
+            revision = fingerprint([skill, facts, self.snapshot.revision, self.language,
+                self.params['assistant_model_config_id'], output_type.model_json_schema(), ''])
+            await AgentOperation.create(task_id=self.params['task_id'], key='recovery:failure', state='completed',
+                result={'issues': [{'code':'output_length'}]})
+            await AgentOperation.create(task_id=self.params['task_id'], key='model-input:' + fingerprint('model:assets:AssetExtractionResult:'),
+                state='completed', result={'revision': revision})
+            raise ModelOutputLimitError('length')
+        if skill == 'assets':
+            name = facts['selection']['name']
+            calls.append(name)
+            if name == '乙' and calls.count(name) == 1:
+                raise ModelHTTPError(402, 'test')
+        return await original(self, skill, facts, output_type, **options)
+
+    def respond(messages, info):
+        tool = info.output_tools[0]
+        if 'characters' in tool.parameters_json_schema['properties']:
+            payload = {'characters': [{'name': n, 'presence': 'present', 'quote': n} for n in ('甲', '乙')]}
+        else:
+            payload = {'persons': [{'name': calls[-1], 'base_traits': fixed_asset_prompt('en', snapshot=snapshot)}],
+                       'items': [], 'scenes': []}
+        return ModelResponse(parts=[ToolCallPart(tool.name, payload)])
+
+    monkeypatch.setattr(SkillExecution, '_generate', simulate)
+    model = streaming_model(respond)
+    model.client = AsyncMock()
+    with patch('services.creation_agent.handler.configured_model', return_value=model):
+        for expected in (4, 3):
+            task = await chapter_controller.extract(chapter.id)
+            task.request_params['skill_snapshot'] = snapshot.model_dump()
+            await task.save()
+            await ai_task_executor.run(task)
+            await task.refresh_from_db()
+            assert task.status == expected, task.error_message
+    assert calls == ['whole', '甲', '乙', '乙']
+    assert await Asset.filter(novel=novel, canonical_name__in=['甲', '乙']).count() == 2

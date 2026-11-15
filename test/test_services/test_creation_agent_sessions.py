@@ -88,7 +88,21 @@ async def test_disabled_or_incapable_model_does_not_create_run():
         await agent_sessions.submit(conversation, request, AuthContext())
     assert error.value.status_code == 422
     assert await AgentMessage.all().count() == 0
-    await AgentSettings.filter(id=1).update(configuration=AgentConfiguration(enabled=False).model_dump())
-    with pytest.raises(HTTPException) as error:
-        await agent_sessions.submit(conversation, request, AuthContext())
-    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('saved', [False, None])
+async def test_assistant_model_enables_workflow_and_chat_without_global_activation(saved):
+    from services.creation_agent.skill_execution import require_agent
+    from controllers.creation_agent import creation_agent_controller
+
+    conversation, request, model = await session_fixture()
+    if saved is None:
+        await AgentSettings.filter(id=1).delete()
+    else:
+        await AgentSettings.filter(id=1).update(configuration={'enabled': saved})
+    capabilities = await creation_agent_controller.capabilities(conversation.novel_id, AuthContext())
+    assert capabilities['enabled']
+    assert (await require_agent(model_id=model.id))[0].id == model.id
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    assert task.request_params['model_config_id'] == model.id

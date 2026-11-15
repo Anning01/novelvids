@@ -259,7 +259,7 @@ async def test_生成视频_供应商提交失败时持久化异常记录():
 
 
 @pytest.mark.asyncio
-async def test_uncertain_video_submission_is_preserved_and_cannot_be_repeated(monkeypatch):
+async def test_failed_video_submission_is_preserved_and_user_can_start_a_new_attempt(monkeypatch):
     from services.creation_agent.video_jobs import submit_video
     from test.test_services.test_skill_workflow import enabled_project
 
@@ -272,9 +272,11 @@ async def test_uncertain_video_submission_is_preserved_and_cannot_be_repeated(mo
     video = await video_controller._submit_generation(request)
     assert video.status == TaskStatusEnum.failed.value
     assert video.metadata['submission_uncertain'] is True
-    assert '待核对' in video.metadata['error']
-    with pytest.raises(HTTPException, match='已有视频提交结果待核对'):
-        await submit_video(request)
+    assert '可以重新生成' in video.metadata['error']
+    retry = await submit_video(request)
+    assert retry.id != video.id
+    await video.refresh_from_db()
+    assert video.status == TaskStatusEnum.failed.value and video.metadata['submission_uncertain'] is True
     generator.submit.assert_awaited_once()
 
 

@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_serializer, Field, ConfigDict
+from pydantic import field_serializer, Field, ConfigDict
 
 from schemas._base import BaseResponse
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -12,6 +12,11 @@ class AiTaskOut(BaseResponse):
     """任务查询输出。"""
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer('error_message')
+    def public_error(self, value):
+        from utils.messages import public_generation_error
+        return public_generation_error(value)
 
     @field_serializer("request_params")
     def public_request_params(self, value):
@@ -43,12 +48,3 @@ class AiTaskOut(BaseResponse):
     progress: int = Field(0, description="任务进度", ge=0, le=100)
     started_at: Optional[datetime] = Field(None, description="开始执行时间")
     finished_at: Optional[datetime] = Field(None, description="执行完成时间")
-
-
-class TaskReviewResolution(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    outcome: Literal[
-        "not_submitted", "provider_failed", "completed_unrecoverable", "completed"
-    ]
-    evidence_id: str | None = Field(None, pattern=r"^[a-f0-9]{64}$")
-    note: str = Field(min_length=10, max_length=2000)

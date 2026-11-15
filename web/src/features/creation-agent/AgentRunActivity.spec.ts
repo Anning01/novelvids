@@ -4,9 +4,41 @@ import AgentRunActivity from './AgentRunActivity.vue'
 
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 16))
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
   vi.setSystemTime(new Date('2026-11-07T04:00:10Z'))
 })
-afterEach(() => { vi.useRealTimers() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+it.each(['light', 'dark'])('follows streaming thought text after rendering in %s mode', async theme => {
+  const { reactive, nextTick } = await import('vue')
+  document.documentElement.dataset.appTheme = theme
+  const steps = reactive<import('./types').AgentActivityStep[]>([
+    { id: 'thought', kind: 'thinking', label: '思考过程', status: 'running', detail: '开头' },
+  ])
+  const wrapper = mount(AgentRunActivity, { props: { status: 2, steps } })
+  await nextTick()
+  const body = wrapper.get('details p').element as HTMLParagraphElement
+  Object.defineProperty(body, 'scrollHeight', { configurable: true, get: () => body.textContent!.length * 20 })
+  body.scrollTop = 0
+  steps[0]!.detail += '不断追加的内容'
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(20)
+  expect(body.scrollTop).toBe(body.scrollHeight)
+  expect(wrapper.emitted('stream-update')?.length).toBeGreaterThan(0)
+  const count = wrapper.emitted('stream-update')!.length
+  steps[0]!.detail += '最后一段'
+  await nextTick()
+  await vi.advanceTimersByTimeAsync(20)
+  expect(body.scrollTop).toBe(body.scrollHeight)
+  expect(wrapper.emitted('stream-update')).toHaveLength(count + 1)
+  await wrapper.setProps({ status: 4 })
+  const ended = wrapper.emitted('stream-update')!.length
+  await wrapper.get('button[aria-label="执行过程"]').trigger('click')
+  expect(wrapper.emitted('stream-update')).toHaveLength(ended)
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
 
 it('shows real steps and a ticking elapsed time while the model is running', async () => {
   const wrapper = mount(AgentRunActivity, { props: {
@@ -40,6 +72,7 @@ it('freezes the recorded duration and retains an expandable reasoning summary af
   expect(wrapper.find('details').exists()).toBe(true)
   expect(wrapper.get('details').attributes('open')).toBeUndefined()
   expect(wrapper.find('.is-running').exists()).toBe(false)
+  await vi.advanceTimersByTimeAsync(20)
   expect(vi.getTimerCount()).toBe(0)
   wrapper.unmount()
 })

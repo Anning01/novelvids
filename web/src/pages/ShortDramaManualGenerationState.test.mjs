@@ -19,5 +19,5 @@ it('recovers in-flight asset generations after a page refresh', () => {
   expect(pageSource).toContain('async function resumeActiveGenerations')
   expect(pageSource).toContain('api.activeAssetGenerations')
   expect(pageSource).toContain('void resumeActiveGenerations()')
-  expect(pageSource).toContain('monitorAssetGeneration(item.asset_id, item.task_id)')
+  expect(pageSource).toContain('monitorAssetGeneration(item.asset_id, item.task_id, item.variant_id)')
 })

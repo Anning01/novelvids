@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from api.diagnostics import router as diagnostics_router
 from api.ai_task import router as ai_task_router
 from api.asset import router as asset_router
 from api.billing import router as billing_router
@@ -23,7 +24,11 @@ from api.portfolio import router as portfolio_router
 from api.finished_episode import router as finished_episode_router
 from api.experience import router as experience_router
 
+from api.release import router as release_router
+
 api_router = APIRouter()
+api_router.include_router(release_router, prefix="/release", tags=["工作台版本"])
+api_router.include_router(diagnostics_router, prefix="/diagnostics", tags=["诊断日志"])
 api_router.include_router(experience_router, prefix="/experience", tags=["模型体验与优秀作品"])
 api_router.include_router(portfolio_router, prefix="/portfolio", tags=["作品库"])
 api_router.include_router(finished_episode_router, prefix='/finished-episodes', tags=['作品库'])

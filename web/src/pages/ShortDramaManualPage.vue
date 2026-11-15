@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StageModelSelect from '@/components/StageModelSelect.vue'
 import { tr } from '@/i18n'
 
 import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
@@ -67,6 +68,7 @@ function readProjectMeta(): ManualProjectMeta {
 const route = useRoute()
 const router = useRouter()
 const agentStore = useCreationAgentStore()
+const stageModelId = ref('')
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
 const selectedChapterId = computed(() => Number(route.query.chapter))
@@ -101,8 +103,13 @@ let workspaceRefreshVersion = 0
 let refreshingWorkspace = false
 let discoveringGenerations = false
 let generationDiscoveryTimer: ReturnType<typeof setInterval> | undefined
-const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; result: Promise<boolean> }>())
+const generationMonitors = shallowReactive(new Map<string, { assetId: number; targetKey: string; stage?: string | null; result: Promise<boolean> }>())
 const generatingTargets = computed(() => new Set([...generationMonitors.values()].map(item => item.targetKey)))
+const waitingTargets = computed(() => new Set([...generationMonitors.values()].filter(item => item.stage === 'waiting_dependencies').map(item => item.targetKey)))
+const assetWaitingForReference = (assetId: number) => {
+  const tasks = [...generationMonitors.values()].filter(task => task.assetId === assetId)
+  return tasks.length > 0 && tasks.every(task => task.stage === 'waiting_dependencies')
+}
 const failedTargets = ref(new Set<string>())
 let mergeHoverTimer: ReturnType<typeof setTimeout> | null = null
 let suppressAssetClickUntil = 0
@@ -314,7 +321,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       assets.value = (await api.assets(projectId.value, 1, 100, chapterId)).data.items
       if (editingId && !assets.value.some(asset => asset.id === editingId)) {
         notice.info(tr('当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。'))
-      } else if (editingId && ids.has(editingId)) notice.info(tr('助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。'))
+      } else if (editingId && ids.has(editingId)) notice.info(tr('助手已保存设定调整。当前编辑草稿已保留，请检查后再保存。'))
       return
     }
     const updated = await Promise.all([...ids].map(async id => (await api.asset(id)).data))
@@ -367,12 +374,12 @@ async function monitorExtractionTask(taskId: string, notifyWhenComplete = false)
 
 async function extractSelectedChapterAssets() {
   const chapter = selectedChapter.value
-  if (!chapter || extractionBusy.value) return
+  if (!chapter || !stageModelId.value || extractionBusy.value) return
   submittingExtraction.value = true
   extractionSubmissionError.value = ''
   try {
     const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
-    const task = (await (conversationId ? api.extract(chapter.id, conversationId) : api.extract(chapter.id))).data
+    const task = (await api.extract(chapter.id, conversationId ?? undefined, Number(stageModelId.value))).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
@@ -615,6 +622,8 @@ async function monitorAssetGeneration(assetId: number, taskId: string, variantId
     try {
       let task = (await api.task(taskId)).data
       while (current() && !terminalTaskStatuses.has(task.status)) {
+        const monitor = generationMonitors.get(taskId)
+        if (monitor) generationMonitors.set(taskId, { ...monitor, stage: task.stage })
         await sleep(2000)
         if (!current()) return false
         task = (await api.task(task.id)).data
@@ -777,13 +786,14 @@ onBeforeUnmount(() => {
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">{{ tr('全部项目') }}</AppButton>
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">{{ tr('当前章节') }}</AppButton>
           </div>
+          <StageModelSelect v-if="project.creationMode === 'agent' && (visibleAssets.length || loading)" v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
           <AppButton
-            v-if="project.creationMode === 'agent'"
+            v-if="(visibleAssets.length || loading) && project.creationMode === 'agent'"
             type="button"
             variant="secondary"
             size="sm"
             :loading="extractionBusy"
-            :disabled="!selectedChapter || extractionBusy"
+            :disabled="!selectedChapter || !stageModelId || extractionBusy"
             :aria-label="tr('提取本章资产')"
             :title="selectedChapter ? tr('提取第 {p0} 章资产', { p0: selectedChapter.number }) : tr('请先在剧本阶段选择章节')"
             @click="extractSelectedChapterAssets"
@@ -825,7 +835,10 @@ onBeforeUnmount(() => {
         <span class="empty-icon"><component :is="activeTabConfig.icon" :size="32" /></span>
         <strong>{{ tr('暂无') }}{{ activeTabConfig.label }}</strong>
         <p>{{ project.creationMode === 'agent' ? tr('从本章正文提取角色、场景与道具，再和助手一起完善画面。') : tr('添加第一个{p0}，开始搭建你的短剧世界。', { p0: activeTabConfig.label }) }}</p>
-        <AppButton v-if="project.creationMode === 'agent'" type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        <div v-if="project.creationMode === 'agent'" class="stage-actions">
+          <StageModelSelect v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
+          <AppButton type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || !stageModelId || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
+        </div>
         <AppButton v-else type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
       </div>
       <div v-else class="asset-grid">
@@ -852,7 +865,7 @@ onBeforeUnmount(() => {
             <div class="asset-visual" :class="{ 'is-generating': generatingAssetIds.has(asset.id), 'is-empty': !asset.main_image }">
               <div v-if="generatingAssetIds.has(asset.id)" class="asset-generating-placeholder" role="status" aria-live="polite">
                 <span><LoaderCircle :size="24" /></span>
-                <strong>{{ tr('正在生成参考图') }}</strong>
+                <strong>{{ assetWaitingForReference(asset.id) ? tr('等待参考图') : tr('正在生成参考图') }}</strong>
                 <small>{{ tr('完成后将在这里自动显示') }}</small>
               </div>
               <img
@@ -864,7 +877,7 @@ onBeforeUnmount(() => {
                 @error="fallbackImage($event, asset.main_image)"
               />
               <component v-else :is="activeTabConfig.icon" :size="30" />
-              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ tr('生成中') }}</AppBadge>
+              <AppBadge v-if="generatingAssetIds.has(asset.id)" class="asset-state-badge is-running" tone="accent" size="sm"><LoaderCircle :size="12" />{{ assetWaitingForReference(asset.id) ? tr('等待参考图') : tr('生成中') }}</AppBadge>
               <AppBadge v-else-if="failedAssetIds.has(asset.id)" class="asset-state-badge" tone="danger" size="sm">{{ tr('生成失败') }}</AppBadge>
               <div v-if="!generatingAssetIds.has(asset.id)" class="asset-card-info">
                 <strong v-if="asset.main_image">{{ truncateText(asset.canonical_name, 16) }}</strong>
@@ -935,6 +948,7 @@ onBeforeUnmount(() => {
       :submitting="batchGenerating"
       :generating-targets="generatingTargets"
       :failed-targets="failedTargets"
+      :waiting-targets="waitingTargets"
       @close="showBatchDialog = false"
       @generate="batchGenerateAssets"
     />
@@ -943,6 +957,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .manual-page { min-height: 100%; color: #303442; background: #f8f9fc; }
 .project-name-line { display: flex; align-items: center; gap: 5px; min-height: 25px; }
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

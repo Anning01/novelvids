@@ -180,3 +180,25 @@ def test_compute_cost_multiplier_over_one():
 def test_compute_cost_no_discount_is_unchanged():
     image_pricing = {"type": "image", "currency": "CNY", "prices": {"1K": 0.30}}
     assert compute_image_cost(1, "1K", image_pricing) == Decimal("0.300000")
+
+
+@pytest.mark.parametrize("size,tier,amount", [
+    ("2610x1000", "low", "0.23"), ("2611x1000", "high_capped", "0.33"),
+])
+def test_seedream_pixel_boundary_and_references(size, tier, amount):
+    from types import SimpleNamespace
+    from services.billing.pricing import image_price_tier, pixel_receipt_cost
+    pricing = {"type": "image", "billing_unit": "pixel_tier", "prices": {"low": .13, "high_capped": .23},
+               "input_image": {"first_free": 0, "price_per_image": .05}}
+    assert image_price_tier(pricing, SimpleNamespace(provider_size=size)) == tier
+    assert pixel_receipt_cost({"output_tier_counts": {tier: 1}, "input_image_count": 2}, pricing) == Decimal(amount)
+
+
+def test_pro_layer_pixel_receipt_bills_references_once():
+    from services.billing.pricing import pixel_receipt_cost
+    pricing = {"type": "image", "discount": .5, "prices": {"layer_low": .15, "layer_high": .3},
+               "input_image": {"first_free": 1, "price_per_image": .02}}
+    assert pixel_receipt_cost({"output_tier_counts": {"layer_low": 1, "layer_high": 1},
+                              "input_image_count": 2}, pricing) == Decimal(".235")
+    with pytest.raises(ValueError):
+        pixel_receipt_cost({"image_count": 1, "input_image_count": 0}, pricing)

@@ -17,16 +17,14 @@ beforeEach(() => {
   vi.mocked(agentApi.updateConfiguration).mockImplementation(async value => ({ code: 0, message: '', data: value }))
 })
 
-it('keeps assistant activation and budgets backend managed', async () => {
+it('exposes budget controls without an activation switch', async () => {
   const wrapper = mount(AgentSettingsPanel)
   await flushPromises()
   expect(wrapper.text()).not.toContain('运行超时')
   expect(wrapper.text()).not.toContain('摘要等待时间')
   for (const label of ['模型调用上限', '工具调用上限', '每轮总用量上限']) expect(wrapper.text()).not.toContain(label)
-  const enabled = wrapper.get('[role="switch"]')
-  await enabled.trigger('click')
-  await wrapper.get('form').trigger('submit')
-  expect(agentApi.updateConfiguration).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, request_limit: null, max_targets: 32 }))
+  expect(wrapper.find('[role="switch"]').exists()).toBe(false)
+
 })
 
 it('keeps advanced controls collapsed and preserves edited ratios on save', async () => {

@@ -73,6 +73,8 @@ class AiTaskExecutor:
         self._task_locks: dict[str, asyncio.Lock] = {}
         self._production_condition = asyncio.Condition()
         self._production_active = 0
+        self._image_active: dict[int, int] = {}
+        self._image_capacity: dict[int, int] = {}
 
     def is_executing(self, task_id) -> bool:
         """An executor lease includes response persistence and usage settlement."""
@@ -187,13 +189,28 @@ class AiTaskExecutor:
                     return
                 from services.creation_agent.sessions import agent_configuration
                 capacity = (await agent_configuration()).production_concurrency
+                params = task.request_params
+                model_id = (params.get("model_config_id") if task.task_type == AiTaskTypeEnum.reference_image
+                            else params.get("cover_model_config_id") if params.get("include_cover") else None)
+                if model_id is not None:
+                    from models.config import AiModelConfig
+                    config = await AiModelConfig.filter(id=model_id).only("concurrency").first()
+                    if config:
+                        self._image_capacity[model_id] = max(1, config.concurrency)
+                    else:
+                        model_id = None
                 async with self._production_condition:
-                    await self._production_condition.wait_for(lambda: self._production_active < capacity)
+                    await self._production_condition.wait_for(lambda: self._production_active < capacity and
+                        (model_id is None or self._image_active.get(model_id, 0) < self._image_capacity[model_id]))
+                    if model_id is not None:
+                        self._image_active[model_id] = self._image_active.get(model_id, 0) + 1
                     self._production_active += 1
                 try:
                     await self._run_once(task)
                 finally:
                     async with self._production_condition:
+                        if model_id is not None:
+                            self._image_active[model_id] -= 1
                         self._production_active -= 1
                         self._production_condition.notify_all()
         finally:
@@ -251,6 +268,9 @@ class AiTaskExecutor:
         legacy_language = "zh" if task_type in {AiTaskTypeEnum.creation_agent, AiTaskTypeEnum.remake_decomposition} else "en"
         token = task_language.set(task.request_params.get("prompt_language", legacy_language))
         try:
+            if task_type == AiTaskTypeEnum.reference_image and task.request_params.get('asset_id'):
+                from services.reference.dependencies import bind_image_dependencies
+                await bind_image_dependencies(task.request_params)
             if timeout is None:
                 result = await self._execute_cancellable(task, handler)
             else:
@@ -260,6 +280,7 @@ class AiTaskExecutor:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
         except WaitingForDependencies:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
+            await task_signals.publish(str(task.id))
         except asyncio.CancelledError as error:
             # Preserve the existing uncertain-submission protection when a stop
             # interrupts an external request whose result has not arrived.
@@ -396,9 +417,13 @@ class AiTaskExecutor:
         task.status = TaskStatusEnum.failed.value
         task.error_message = error_message
         from models.agent_operation import AgentOperation
+        from services.creation_agent.operation_receipts import SubmissionUncertain
+        if isinstance(error, SubmissionUncertain):
+            task.stage = 'needs_review'
         if task.request_params.get('workflow_version') == 'agent-skills-v1' and await AgentOperation.filter(task_id=task.id, state='uncertain', external=True).exists():
             task.stage = 'needs_review'
-            task.error_message = localized_message('外部请求结果待核对，系统不会自动重试', _language=task.request_params.get('prompt_language', 'en'))
+            review = localized_message('本次生成未取得完整结果，可重新生成。', _language=task.request_params.get('prompt_language', 'en'))
+            task.error_message = f'{error_message}；{review}' if error_message and error_message != review else review
             # Cancellation cannot erase an uncertain external submission or make review impossible.
             await AiTask.filter(id=task.id, status=TaskStatusEnum.cancelled.value).update(
                 status=TaskStatusEnum.failed.value, stage=task.stage, error_message=task.error_message,
@@ -412,6 +437,13 @@ class AiTaskExecutor:
             **{field: getattr(task, field) for field in update_fields if field != "updated_at"},
             updated_at=datetime.now(timezone.utc),
         )
+        if error is not None:
+            from services.diagnostics import exception_site
+            try:
+                await AgentOperation.update_or_create(task=task, key='diagnostic:failure',
+                    defaults={'state':'completed', 'result':exception_site(error)})
+            except Exception:
+                logger.warning("Failed to record diagnostic site for task %s", task.id)
         await task.refresh_from_db()
         await task_signals.publish(str(task.id))
         partial_result = getattr(error, 'partial_result', None)

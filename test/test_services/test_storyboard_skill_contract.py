@@ -348,7 +348,7 @@ def test_continuous_rack_focus_renders_one_request_with_unbroken_dialogue(langua
     assert shot.camera_movement in prompt and all(line in prompt for line in shot.dialogue)
 
 
-def test_internal_cuts_do_not_need_a_map_but_duration_split_continuations_do():
+def test_supplied_internal_cut_maps_are_preserved_and_continuations_are_checked():
     from schemas.agent_workflow import StructuredSkillStoryboard
     from schemas.scene import BlockingMap
     from services.storyboard.validation import prepare_skill_storyboard
@@ -360,7 +360,7 @@ def test_internal_cuts_do_not_need_a_map_but_duration_split_continuations_do():
     independent = prepare_skill_storyboard(board, snapshot, 'zh', [heroine()], 'cinematic').shots[0]
     assert independent.prompt and independent.blocking_map is None
     with_map = StructuredSkillStoryboard(shots=[segmented_shot().model_dump(exclude={'prompt'})])
-    assert prepare_skill_storyboard(with_map, snapshot, 'zh', [heroine()], 'cinematic').shots[0].blocking_map is None
+    assert prepare_skill_storyboard(with_map, snapshot, 'zh', [heroine()], 'cinematic').shots[0].blocking_map == with_map.shots[0].blocking_map
 
     continuation = StructuredSkillStoryboard(shots=[{**value, 'duration_split_part': 2, 'segments': []}])
     with pytest.raises(ValueError, match='空间定位图'):
@@ -426,3 +426,74 @@ def test_visual_roster_uses_registered_asset_or_form_names():
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     with pytest.raises(ValueError, match='未登记的资产或形态'):
         validate_skill_storyboard_shot(shot, snapshot, 'zh', characters())
+
+
+@pytest.mark.asyncio
+async def test_numbered_screenplay_is_generated_and_saved_with_separate_source_scenes():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.creation_agent.skill_execution import current_execution
+    from services.storyboard.generator import generate_storyboard
+    from services.storyboard.handler import StoryboardTaskHandler
+    from services.storyboard.chunking import screenplay_sections
+    from models.novel import Novel
+    from models.chapter import Chapter
+
+    text = '第1集\n**1-1　前院　外　日**\n家丁引医。\n1－2　前院　外　日\n老者报信。\n### 1-3 卧房 内 日\n父亲哭求。'
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
+    prototype = {**_shot().model_dump(exclude={'prompt'}), 'blocking_map':{**SHOT, 'layout':LAYOUT}}
+    batch = StructuredSkillStoryboard.model_validate({'shots': [prototype]})
+    execution = SimpleNamespace(snapshot=snapshot, params={'assistant_model_config_id':1},
+                                generate=AsyncMock(return_value=batch))
+    token = current_execution.set(execution)
+    try:
+        result, metadata = await generate_storyboard(None, text, [], 'fake', shot_duration_range=[4, 30])
+    finally:
+        current_execution.reset(token)
+    calls = [call.args[1] for call in execution.generate.await_args_list]
+    assert [call['source_scene_number'] for call in calls] == ['1-1', '1-2', '1-3']
+    assert len({call['segment'] for call in calls}) == 3
+    for call, line in zip(calls, ['家丁引医。', '老者报信。', '父亲哭求。']):
+        assert line in call['chapter']
+        assert sum(key in call['chapter'] for key in ['家丁引医。', '老者报信。', '父亲哭求。']) == 1
+    assert [shot.sequence for shot in result.shots] == [1, 2, 3]
+    novel = await Novel.create(name='边界')
+    chapter = await Chapter.create(novel=novel, number=1, name='第一集', content=text, screenplay=text)
+    scenes = await StoryboardTaskHandler()._save_scenes(chapter.id, result, metadata, 0)
+    assert [s.prompt_params['source_scene_number'] for s in scenes] == ['1-1', '1-2', '1-3']
+    assert screenplay_sections('苏言：从1-1说到1-2。') == [(None, '苏言：从1-1说到1-2。')]
+
+
+def test_blocking_skill_only_requests_maps_for_duration_continuations():
+    import json
+
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    contract = json.loads(snapshot.read("storyboard_contract"))
+    assert contract["blocking_map_per_shot"] is False
+    guide = snapshot.read("blocking_guide")
+    assert "blocking_map 留空" in guide
+    assert "从第二段起填写 duration_split_part" in guide
+
+
+def test_episode_duration_is_guidance_but_each_video_segment_keeps_its_limit():
+    from prompts.skill_pack import instructions
+    text = instructions(SkillSnapshot.model_validate(snapshot_skills()), 'zh', 'storyboard')
+    assert '不是整集总时长的硬性上限' in text
+    assert '每段仍必须遵守所选视频模型支持的时长范围' in text
+
+
+def test_disabled_blocking_ignores_unused_diagram_payload_before_validation():
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.storyboard.candidates import StoryboardCandidateValidator
+    from prompts.skill_pack import instructions
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    validator = StoryboardCandidateValidator(StructuredSkillStoryboard, snapshot, 'zh', [4, 30],
+        {'generate_blocking_maps': False})
+    raw = _shot().model_dump(exclude={'prompt'})
+    raw.update(blocking_map={'invalid': 'unused diagram'}, duration_split_part=2)
+    result, checkpoint = validator.merge(validator.draft_type(shots=[raw]))
+    assert result is not None, checkpoint
+    assert result.shots[0].blocking_map is None and result.shots[0].duration_split_part is None
+    assert 'generate_blocking_maps 为 false' in instructions(snapshot, 'zh', 'storyboard')

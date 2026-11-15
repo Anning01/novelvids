@@ -100,6 +100,7 @@ const auth = useAuthStore()
 const platform = computed(() => auth.deploymentRole === 'platform')
 const canConnectPlatform = computed(() => !platform.value && auth.isSuperAdmin)
 const platformConnected = ref(false)
+const platformKeyManagementUrl = ref('')
 const platformKeyRevision = ref(0)
 const platformBusy = ref(false)
 const showPlatformKey = ref(false)
@@ -122,7 +123,10 @@ async function synchronizePlatform(key?: string, automatic = false) {
     }
     await initialLoad
     configs.value = (await api.configs()).data.items
-    if (!automatic) notice.success(tr('已同步 {p0} 个平台模型', { p0: data.synced }))
+    if (data.unsupported) {
+      const channels = Object.entries(data.unsupported).map(([id, type]) => `${id} (${type})`).join('、')
+      notice.info(tr('已同步 {p0} 个平台模型，当前版本尚不支持：{p1}', { p0: data.synced, p1: channels }))
+    } else if (!automatic) notice.success(tr('已同步 {p0} 个平台模型', { p0: data.synced }))
   } catch (error) {
     platformError.value = error instanceof Error ? error.message : tr('平台模型同步失败')
     if (!automatic && !showPlatformKey.value) notice.error(platformError.value)
@@ -140,7 +144,9 @@ function closePlatformDialog() {
 
 async function initializePlatform() {
   try {
-    platformConnected.value = (await api.studioPlatform()).data.connected
+    const { data } = await api.studioPlatform()
+    platformConnected.value = data.connected
+    platformKeyManagementUrl.value = data.key_management_url || ''
     if (platformConnected.value) await synchronizePlatform(undefined, true)
   } catch {
     platformError.value = tr('暂时无法读取平台连接状态')
@@ -158,7 +164,7 @@ const showCreate = ref(false)
 const creating = ref(false)
 const editingConfigId = ref<number | null>(null)
 const editingSyncedPricing = ref(false)
-const syncedVideoBillingUnit = ref<ModelPricing['billing_unit']>()
+const editedBillingUnit = ref<ModelPricing['billing_unit']>()
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
 const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_json_output: false, supports_tool_calls: false, max_context_characters: '' as number | '', thinking: '' as 'enabled' | 'disabled' | '', max_tokens: '' as number | '' })
@@ -226,7 +232,13 @@ const tierPrices = ref<Record<string, number>>({})
 const inputImagePricing = ref({ first_free: 1, price_per_image: 0 })
 const videoRefPrices = ref<Record<string, number>>({})
 const discountPricing = ref({ discount: 1, description: '' })
+const pixelTierLabels: Record<string, string> = {
+  low: '不超过 261 万像素', high_capped: '超过 261 万至 463 万像素',
+  single_low: '单图 · 不超过 261 万像素', single_high: '单图 · 超过 261 万像素',
+  layer_low: '图层 · 不超过 261 万像素', layer_high: '图层 · 超过 261 万像素',
+}
 const pricingTierOptions = computed<string[]>(() => {
+  if (selectedCategoryId.value === 'image' && editedBillingUnit.value === 'pixel_tier') return Object.keys(tierPrices.value)
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
   if (selectedCategoryId.value === 'video') return selectedVideoProtocol.value?.resolutions
     || generationCapabilities.value.video[form.value.video_model_type] || []
@@ -239,7 +251,7 @@ const selectedVideoPricingPreset = computed(() => (
 ))
 const isSecondBillingVideo = computed(() => (
   selectedCategoryId.value === 'video'
-  && (editingSyncedPricing.value ? syncedVideoBillingUnit.value : selectedVideoPricingPreset.value?.billing_unit) === 'second'
+  && (editingSyncedPricing.value ? editedBillingUnit.value : selectedVideoPricingPreset.value?.billing_unit) === 'second'
 ))
 
 function applyVideoPricingPreset() {
@@ -329,6 +341,7 @@ async function load() {
 }
 
 function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
+  editedBillingUnit.value = undefined
   editingSyncedPricing.value = false
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
@@ -360,7 +373,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
 
 function openEdit(item: AiModelConfig) {
   editingSyncedPricing.value = item.scope === 'studio_platform'
-  syncedVideoBillingUnit.value = item.pricing?.billing_unit
+  editedBillingUnit.value = item.pricing?.billing_unit
   const category = categories.find(value => value.taskTypes.includes(item.task_type)) ?? categories[0]
   selectedCategoryId.value = category.id
   editingConfigId.value = item.id
@@ -399,6 +412,21 @@ function openEdit(item: AiModelConfig) {
     description: item.pricing?.discount_description ?? '',
   }
   showCreate.value = true
+}
+
+async function importPlatformImageTariff() {
+  const id = editingConfigId.value
+  if (!id) return
+  try {
+    const { data } = await api.platformImageTariff(id)
+    if (!showCreate.value || editingConfigId.value !== id) return
+    editedBillingUnit.value = data.billing_unit
+    tierPrices.value = { ...data.prices }
+    inputImagePricing.value = data.input_image ?? { first_free: 0, price_per_image: 0 }
+    discountPricing.value = { discount: data.discount ?? 1, description: data.discount_description ?? '' }
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
 }
 
 function changeImageModelType() {
@@ -493,6 +521,7 @@ async function saveConfig() {
     } else if (selectedCategoryId.value === 'image') {
       pricing = {
         type: 'image',
+        ...(editedBillingUnit.value === 'pixel_tier' ? { billing_unit: 'pixel_tier' as const } : {}),
         currency: 'CNY',
         prices: tierPriceEntries(tierPrices.value),
         input_image: {
@@ -641,7 +670,10 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
         <form class="platform-connection" @submit.prevent="platformKey.trim() && synchronizePlatform(platformKey.trim())">
           <label for="studio-platform-key">{{ tr('平台 API Key') }}</label>
           <input id="studio-platform-key" v-model="platformKey" type="password" autocomplete="off" spellcheck="false"
-            maxlength="128" required :disabled="platformBusy" />
+            maxlength="128" name="platform-api-key" aria-describedby="studio-platform-key-help" required :disabled="platformBusy" />
+          <p id="studio-platform-key-help" class="platform-connection-help">{{ tr('在猫影开放平台登录后，进入「API Keys」，创建用途为「猫影工作台」的密钥，再复制到这里。') }}
+            <a v-if="platformKeyManagementUrl" :href="platformKeyManagementUrl" target="_blank" rel="noopener noreferrer">{{ tr('前往获取 API Key（新窗口）') }}</a>
+          </p>
           <p v-if="platformError" class="platform-connection-error" role="alert">{{ platformError }}</p>
           <footer>
             <AppButton variant="secondary" :disabled="platformBusy" @click="closePlatformDialog">{{ tr('取消') }}</AppButton>
@@ -884,9 +916,10 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
         </section>
         <section v-else-if="selectedCategoryId === 'image' && pricingTierOptions.length" class="pricing-editor">
           <span class="pricing-title">{{ tr('输出图费用（元 / 张）') }}</span>
+          <AppButton v-if="editingSyncedPricing" type="button" variant="secondary" size="sm" @click="importPlatformImageTariff">{{ tr('填入该渠道的平台价') }}</AppButton>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
-              <span>{{ tr('清晰度') }} {{ tier }}</span>
+              <span>{{ editedBillingUnit === 'pixel_tier' ? tr(pixelTierLabels[tier] ?? tier) : tr('清晰度') + ' ' + tier }}</span>
               <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" required />
             </label>
           </div>
@@ -948,6 +981,9 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
 .platform-connection input { width:100%; min-width:0; border:1px solid var(--app-border); border-radius:8px; background:var(--app-surface-muted); color:inherit; padding:10px 12px; }
 .platform-connection input:focus-visible { outline:2px solid var(--app-accent); outline-offset:2px; }
 .platform-connection footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:10px; }
+.platform-connection-help { margin:0; color:var(--app-text-muted); line-height:1.6; }
+.platform-connection-help a { color:var(--app-accent); text-decoration:underline; text-underline-offset:3px; }
+.platform-connection-help a:focus-visible { outline:2px solid var(--app-accent); outline-offset:3px; }
 .platform-connection-error { color:var(--app-danger); margin:0; }
 .model-settings-header span, .model-config-section > header > div > span { color: #686af0; font-size: 9px; font-weight: 750; letter-spacing: .16em; }
 .model-settings-header h1 { margin: 0; color: #252937; font-size: clamp(28px, 3vw, 38px); letter-spacing: -.035em; }

@@ -28,7 +28,7 @@ def public_tariff(raw):
     data["currency"] = "CNY"
     if raw.get("type") in {"text", "image", "video", "asr", "media_processing"}:
         data["type"] = raw["type"]
-    if raw.get("billing_unit") in {"token", "second", "minute"}:
+    if raw.get("billing_unit") in {"token", "second", "minute", "pixel_tier"}:
         data["billing_unit"] = raw["billing_unit"]
     for k in ("prices","video_reference_prices"):
         if isinstance(raw.get(k), dict):

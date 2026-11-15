@@ -628,6 +628,11 @@ async def test_reference_manual_retry_after_terminal_review_preserves_original_r
     token = submission.set(original_request)
     try:
         original = await asset_controller.reference(asset.id, variant_id)
+        prerequisites = [task for task in await AiTask.filter(task_type=2) if task.id != original.id]
+        assert len(prerequisites) == int(use_variant)
+        if prerequisites:
+            assert prerequisites[0].request_params['asset_id'] == asset.id
+            assert prerequisites[0].request_params.get('variant_id') is None
         await AiTask.filter(id=original.id).update(status=status, stage="needs_review",
             error_message="Original submission outcome unknown")
         receipt = await AgentOperation.create(task=original, key="media:image",
@@ -643,10 +648,10 @@ async def test_reference_manual_retry_after_terminal_review_preserves_original_r
         assert retry.id != original.id
         assert retry.request_params["variant_id"] == variant_id
 
-        # A further click joins the active retry instead of creating a third job.
+        # A further click joins the active retry and reuses the same prerequisite.
         submission.set({**original_request, "submission_id": str(uuid4())})
         assert (await asset_controller.reference(asset.id, variant_id)).id == retry.id
-        assert await AiTask.filter(task_type=2).count() == 2
+        assert await AiTask.filter(task_type=2).count() == 2 + len(prerequisites)
         await original.refresh_from_db()
         await receipt.refresh_from_db()
         await ledger.refresh_from_db()

@@ -7,7 +7,7 @@ import { reactive } from 'vue'
 
 vi.mock('./api', () => ({
   agentApi: { capabilities: vi.fn(), conversations: vi.fn(), resumeOrCreate: vi.fn(), create: vi.fn(), history: vi.fn(),
-    submit: vi.fn(), snapshot: vi.fn(), stop: vi.fn(), undo: vi.fn(), deleteConversation: vi.fn(), restoreConversation: vi.fn() },
+    submit: vi.fn(), snapshot: vi.fn(), stop: vi.fn(), resume: vi.fn(), undo: vi.fn(), deleteConversation: vi.fn(), restoreConversation: vi.fn() },
   runSubscription: vi.fn(),
 }))
 
@@ -29,6 +29,44 @@ beforeEach(() => {
 })
 
 describe('creation assistant store', () => {
+  it('shares a pending progress request instead of piling up polling requests', async () => {
+    const store = useCreationAgentStore()
+    store.messages = [{ id: 1, role: 'assistant', task_id: run.task_id, status: 2, content: '', changes: [], usage: {}, created_at: '' }]
+    let finish!: (value: { code: number; message: string; data: AgentRun }) => void
+    vi.mocked(agentApi.snapshot).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const first = store.refreshProduction()
+    const second = store.refreshProduction()
+    expect(agentApi.snapshot).toHaveBeenCalledTimes(1)
+    finish({ code: 0, message: '', data: { ...run, status: 2 } })
+    await Promise.all([first, second])
+    await store.refreshProduction()
+    expect(agentApi.snapshot).toHaveBeenCalledTimes(2)
+  })
+  it('resumes the original run once and never submits a new conversation request', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    store.currentRun = { ...run, status: 4 }
+    let finish!: (value: { code: number; message: string; data: AgentRun }) => void
+    vi.mocked(agentApi.resume).mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const pending = store.resume()
+    await store.resume()
+    expect(agentApi.resume).toHaveBeenCalledExactlyOnceWith('run-1')
+    finish({ code: 0, message: '', data: { ...run, status: 6 } })
+    await pending
+    expect(runSubscription).toHaveBeenCalledWith(1, 'run-1')
+    expect(agentApi.submit).not.toHaveBeenCalled()
+  })
+  it('keeps a paid missing result blocked instead of silently sending again', async () => {
+    const store = useCreationAgentStore()
+    store.currentRun = { ...run, status: 4 }
+    vi.mocked(agentApi.resume).mockRejectedValue(new Error('平台已完成中断请求，但本机缺少结果'))
+    await store.resume()
+    expect(store.error).toContain('本机缺少结果')
+    expect(store.currentRun.status).toBe(4)
+    expect(store.submitting).toBe(false)
+    expect(agentApi.submit).not.toHaveBeenCalled()
+    expect(runSubscription).not.toHaveBeenCalled()
+  })
   it('allows another message after the per-turn limit without discarding history', async () => {
     const store = useCreationAgentStore()
     await store.open(7)

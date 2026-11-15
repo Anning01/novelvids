@@ -29,3 +29,29 @@ async def test_legacy_projects_are_scoped_and_read_only():
             assert not (await client.get('/api/legacy-works/projects')).json()['data']['items']
             assert (await client.get(f'/api/legacy-works/projects/{project.id}/transfer')).json()['code']==404
     finally:app.dependency_overrides.clear()
+
+
+async def test_transfer_refreshes_unsigned_storage_cache_only(monkeypatch):
+    import archive_app
+
+    origin = 'https://media.example.org/'
+    async def snapshot(*args, **kwargs):
+        return {}
+
+    async def authorized(*args):
+        return PrincipalProject()
+
+    class PrincipalProject:
+        id = 1
+        team_id = 1
+
+    urls = [origin+'image.webp', origin+'signed.webp?signature=test', 'https://other.example.org/pic.png',
+            '/media/cover.png', '/api/video/exports/4/download?source=true']
+    monkeypatch.setattr(archive_app, 'project_snapshot', snapshot)
+    monkeypatch.setattr(archive_app, 'authorized_project', authorized)
+    monkeypatch.setattr(archive_app, 'resolve_media_url', lambda ref: origin+ref)
+    monkeypatch.setattr(archive_app, 'export_plan', lambda *_: {'files': [
+        {'url': url, 'authenticated': url.startswith('/api/')} for url in urls]})
+    result = await archive_app.transfer(1, Principal(id=1))
+    assert [item['url'] for item in result.data['files']] == [
+        origin+'image.webp?cat-migration=1', *urls[1:4], '/api/legacy-works/exports/4/download?source=true']

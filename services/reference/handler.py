@@ -287,6 +287,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         quality = request_params.get("quality")
         data = {
             "type": asset_type_name,
+            "image_reference_bindings": request_params.get('image_reference_bindings', []),
             "canonical_name": asset.canonical_name,
             "base_traits": (
                 variant.base_traits

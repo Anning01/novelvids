@@ -64,7 +64,7 @@ function opened() { search.value = ''; void nextTick(() => searchInput.value?.fo
         <label v-for="option in visibleOptions" :key="targetKey(option.target)" class="agent-target-row" :class="{ 'is-selected': modelValue.includes(targetKey(option.target)), 'is-variant': option.target.kind === 'variant' }">
           <input type="checkbox" :value="targetKey(option.target)" :checked="modelValue.includes(targetKey(option.target))" :disabled="disabled || (!modelValue.includes(targetKey(option.target)) && modelValue.length >= limit)" @change="toggle(targetKey(option.target))" />
           <span class="agent-target-row__icon"><component :is="icon(option)" :size="17" /></span>
-          <span class="agent-target-row__copy"><span :title="displayLabel(option)">{{ displayLabel(option) }}</span><small v-if="option.target.kind === 'variant'">{{ tr('衍生形象') }}</small><details v-if="pending[targetKey(option.target)]?.length" @click.stop><summary>{{ tr('待核对约束') }}</summary><p v-for="rule in pending[targetKey(option.target)]" :key="rule.id">{{ rule.content }}</p></details></span>
+          <span class="agent-target-row__copy"><span :title="displayLabel(option)">{{ displayLabel(option) }}</span><small v-if="option.target.kind === 'variant'">{{ tr('衍生形象') }}</small><details v-if="pending[targetKey(option.target)]?.length" @click.stop><summary>{{ tr('新增创作要求') }}</summary><p v-for="rule in pending[targetKey(option.target)]" :key="rule.id">{{ rule.content }}</p></details></span>
           <Check v-if="modelValue.includes(targetKey(option.target))" :size="17" class="agent-target-row__check" />
         </label>
         <p v-if="loading" class="agent-target-picker__empty">{{ tr('正在加载对象…') }}</p>

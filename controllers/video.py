@@ -649,7 +649,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             video.metadata = {**video_metadata, 'error': str(error)}
             if error.submission_uncertain:
                 video.metadata.update(submission_uncertain=True,
-                    error=localized_message('视频提交结果待核对，系统不会重复提交') + '：' + str(error))
+                    error=localized_message('视频生成未完成，可以重新生成') + '：' + str(error))
             await video.save(update_fields=['status', 'metadata', 'updated_at'])
             await self._set_scene_current_video(scene, video.id)
             logger.warning(
@@ -662,7 +662,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         except BaseException:
             video.status = TaskStatusEnum.failed.value
-            video.metadata = {**video_metadata, 'submission_uncertain': True, 'error': '视频提交结果待核对，系统不会重复提交'}
+            video.metadata = {**video_metadata, 'submission_uncertain': True, 'error': '视频生成未完成，可以重新生成'}
             await video.save(update_fields=['status', 'metadata', 'updated_at'])
             raise
 

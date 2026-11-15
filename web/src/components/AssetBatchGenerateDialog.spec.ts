@@ -131,8 +131,24 @@ describe('AssetBatchGenerateDialog', () => {
     expect(rows[1]!.get('input').attributes('disabled')).toBeDefined()
     expect(rows[2]!.text()).toContain('上次失败，可重试')
     await rows[0]!.get('input').setValue(false)
-    expect(wrapper.get('.batch-type input').element).toHaveProperty('indeterminate', true)
-    await wrapper.findAll('button').find(button => button.text().includes('生成 1 个'))!.trigger('click')
+    expect(rows[0]!.get('input').element).toHaveProperty('checked', true)
+    expect(wrapper.findAll('.batch-asset')[0]!.text()).toContain('自动加入的参考图')
+    await wrapper.findAll('button').find(button => button.text().includes('生成 2 个'))!.trigger('click')
     expect(wrapper.emitted('generate')?.[0]?.[0]).toMatchObject({ assetIds: [], variantIds: [12] })
   })
+  it('选择衍生形态时展示主图依赖，等待与生成状态分开', async () => {
+    const wrapper = await mountDialog()
+    await wrapper.setProps({ assets: [{ ...assets[0]!, variants: [
+      { id: 11, asset_id: 1, name: '十六年前', images: [], created_at: '', updated_at: '' },
+    ] }] })
+    await wrapper.findAll('.batch-asset input')[1]!.setValue(true)
+    expect(wrapper.findAll('.batch-asset.is-selected')).toHaveLength(2)
+    expect(wrapper.findAll('.batch-asset')[0]!.text()).toContain('自动加入的参考图')
+    await wrapper.findAll('button').find(button => button.text().includes('生成 2 个'))!.trigger('click')
+    expect(wrapper.emitted('generate')?.[0]?.[0]).toMatchObject({ assetIds: [], variantIds: [11] })
+    await wrapper.setProps({ generatingTargets: new Set(['variant:11']), waitingTargets: new Set(['variant:11']) })
+    expect(wrapper.findAll('.batch-asset')[1]!.text()).toContain('等待参考图')
+    expect(wrapper.findAll('button').find(button => button.text().includes('生成 0 个'))!.attributes('disabled')).toBeDefined()
+  })
+
 })

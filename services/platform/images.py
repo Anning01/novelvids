@@ -176,7 +176,7 @@ async def generate(ctx, request, key):
         raise
     except Exception:
         await PlatformCallReceipt.filter(id=receipt.id,state="submitted").update(state="review",provider_id=provider_id)
-        raise HTTPException(502, "未能确认图片生成结果，请凭请求编号核对", headers=headers) from None
+        raise HTTPException(502, "图片生成未完成，可以重新提交", headers=headers) from None
     finally:
         if upstream is not None:
             await upstream.aclose()

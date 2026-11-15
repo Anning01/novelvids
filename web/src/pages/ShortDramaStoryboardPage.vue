@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
+import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import { money } from '@/features/billing/recordDisplay'
@@ -40,6 +42,7 @@ import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModel
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
+import { modelImageMentions } from '@/shared/modelImageMentions'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -135,6 +138,36 @@ const terminalTaskStatuses = new Set([
 
 const route = useRoute()
 const router = useRouter()
+const stageModelId = ref('')
+const sheetModelId = ref('')
+const generateBlockingMaps = ref(false)
+const updatingSheetOptions = ref(false)
+const submittingSheets = ref(false)
+const missingGenerationOptions = computed(() => !stageModelId.value || updatingSheetOptions.value ||
+  (project.value?.storyboard_enabled && !sheetModelId.value))
+
+async function toggleSheets(enabled: boolean) {
+  if (!project.value || updatingSheetOptions.value) return
+  updatingSheetOptions.value = true
+  try {
+    await api.updateNovel(projectId.value, { storyboard_enabled: enabled })
+    project.value.storyboard_enabled = enabled
+  } catch (error) { notice.error((error as Error).message) }
+  finally { updatingSheetOptions.value = false }
+}
+
+async function fillChapterSheets() {
+  const chapterId = activeChapterId.value
+  if (!chapterId || !sheetModelId.value || submittingSheets.value) return
+  submittingSheets.value = true
+  try {
+    const {data} = await api.generateChapterSheets(chapterId, Number(sheetModelId.value))
+    const rows = await fetchChapterScenes(chapterId)
+    if (activeChapterId.value === chapterId) showChapterScenes(rows)
+    notice.success(data.length ? tr('已排队生成 {p0} 张故事版', {p0: data.length}) : tr('本集故事版已齐全'))
+  } catch (error) { notice.error((error as Error).message) }
+  finally { submittingSheets.value = false }
+}
 const projectId = computed(() => Number(route.params.projectId))
 const project = ref<ProjectView | null>(null)
 const chapters = ref<Chapter[]>([])
@@ -267,7 +300,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
       }
       assets.value = result.assets; scenes.value = result.scenes; videos.value = result.videos
       if (!scenes.value.some(scene => scene.id === activeSceneId.value)) activeSceneId.value = scenes.value[0]?.id || 0
-      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请核对后再保存。', { p0: conflicts.join('、') }))
+      if (conflicts.length) notice.info(tr('{p0} 的调整已保存，本地编辑草稿已保留，请检查后再保存。', { p0: conflicts.join('、') }))
       if (workspaceView.value === 'workflow') await workbenchStore.refreshAgentObjects()
       void nextTick(setupSceneTracking)
       return
@@ -281,7 +314,7 @@ async function refreshAgentChanges(changes: AgentChange[]) {
         const timer = sceneAutoSaveTimers.get(id)
         if (timer) clearTimeout(timer)
         sceneAutoSaveTimers.delete(id)
-        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请核对后再保存。', { p0: current.sequence }))
+        notice.info(tr('镜头 {p0} 的助手修改已保存。你的本地草稿已保留，请检查后再保存。', { p0: current.sequence }))
       } else if (draft) { draft.prompt = updated.prompt || ''; draft.basePrompt = updated.prompt ?? null }
       scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
     }
@@ -343,7 +376,14 @@ async function retryStoryboard() {
 function returnToScript() {
   void router.push({ name: 'short-drama-agent', params: { projectId: projectId.value }, query: { chapter: String(activeChapterId.value) } })
 }
-const videoModelOptions = computed(() => videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })))
+const fallbackVideoModel = computed(() => {
+  const defaults = project.value?.video_generation_defaults
+  return defaults && !defaults.model_config_id ? '' : videoModels.value[0]?.config_id ?? ''
+})
+const videoModelOptions = computed(() => [
+  ...(!selectedVideoModel.value ? [{ value: '', label: tr('未选择视频模型') }] : []),
+  ...videoModels.value.map(item => ({ value: String(item.config_id), label: item.name })),
+])
 const videoModelSelectWidth = computed(() => Math.min(420, Math.max(
   220,
   ...videoModelOptions.value.map(option => Math.ceil(Array.from(option.label).reduce(
@@ -407,7 +447,7 @@ async function persistVideoModelPreference(modelId: number) {
   } catch (error) {
     if (selectedVideoModel.value === String(modelId)) {
       const persisted = videoModels.value.find(item => item.config_id === persistedVideoModelId.value)
-      selectedVideoModel.value = String(persisted?.config_id || videoModels.value[0]?.config_id || '')
+      selectedVideoModel.value = String(persisted?.config_id || fallbackVideoModel.value)
     }
     notice.error(error instanceof Error ? error.message : tr('视频模型偏好保存失败'))
   }
@@ -674,7 +714,7 @@ function sceneEnhancementEstimate(scene: Scene) {
   const model = enhancementModels.value.find(item => item.id === setting?.model_config_id)
   const target = model?.resolutions.find(item => item.value === setting?.resolution)
   const estimate = target ? enhancementEstimate(model?.pricing, target.short_side, sceneDuration(scene)) : null
-  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待核对')
+  return estimate ? tr('另计高清化 {p0}–{p1}', { p0: money(estimate.min), p1: money(estimate.max) }) : tr('高清化费用待结算')
 }
 
 function selectedAssetsFor(scene: Scene, group: (typeof assetGroups.value)[number]) {
@@ -1186,8 +1226,18 @@ function promptMentionOptions(scene: Scene): ScenePromptMentionOption[] {
       description: tr('仅用于参考{p0}的音色，点击播放', { p0: subject }),
     }
   })
+  const draft = draftFor(scene)
+  const numbered: ScenePromptMentionOption[] = draft.promptModel && draft.videoGenerationMode === 'reference'
+    ? modelImageMentions(draft.prompt, videoInputImageReferences(scene)).map(({syntax, image}) => ({
+        id: `numbered-${syntax}`, kind: 'image', syntax, label: `${syntax.startsWith('<') ? syntax.slice(1, -1) : syntax} · ${image.label}`,
+        group: tr('参考图片'), displayOnly: true,
+        previewUrl: image.url.startsWith('/api/') ? undefined : mediaUrl(image.url),
+        blockingPreview: image.url === scene.blocking_reference?.url && image.url.startsWith('/api/'),
+      }))
+    : []
   return [
     ...assetOptions,
+    ...numbered,
     ...mediaOptions,
     ...audioOptions,
     {
@@ -1389,7 +1439,7 @@ function showChapterScenes(result: Awaited<ReturnType<typeof fetchChapterScenes>
   const chapterModelId = Number(result.scenes[0]?.metadata?.video_model_config_id)
   const chapterModel = videoModels.value.find(item => item.config_id === chapterModelId)
   const projectModel = videoModels.value.find(item => item.config_id === project.value?.video_model_config_id)
-  selectedVideoModel.value = String(chapterModel?.config_id || projectModel?.config_id || videoModels.value[0]?.config_id || '')
+  selectedVideoModel.value = String(chapterModel?.config_id || projectModel?.config_id || fallbackVideoModel.value)
   videoGenerationErrors.value = {}
   const requestedSceneId = Number(route.query.scene)
   const requestedScene = result.scenes.find(scene => scene.id === requestedSceneId)
@@ -1531,10 +1581,11 @@ async function generateChapterStoryboard(chapterId: number, replaceExisting = fa
   if (!chapterId || generatingChapterIds.value.has(chapterId)) return
   const pendingTask = readPersistedStoryboardTasks()[chapterId]
   if (pendingTask) { await pollStoryboardTask(chapterId, pendingTask); return }
+  if (missingGenerationOptions.value) return
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId, replaceExisting)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -1636,7 +1687,7 @@ async function load() {
     void exportApi.models().then(response => { if (alive) enhancementModels.value = response.data }).catch(() => { enhancementModels.value = [] })
     const savedVideoModel = videoModels.value.find(item => item.config_id === novelResponse.data.video_model_config_id)
     persistedVideoModelId.value = savedVideoModel?.config_id ?? null
-    selectedVideoModel.value = String(savedVideoModel?.config_id || videoModels.value[0]?.config_id || '')
+    selectedVideoModel.value = String(savedVideoModel?.config_id || fallbackVideoModel.value)
     const preferredChapter = Number(route.query.chapter)
     const firstChapter = chapters.value.find(item => item.id === preferredChapter) ?? chapters.value[0]
     if (firstChapter) {
@@ -1964,6 +2015,15 @@ async function saveScene(
   return saved
 }
 
+function guardReleaseRefresh(event: Event) {
+  if (sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
+    const draft = sceneDrafts.value[scene.id]
+    return draft && JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(scene))
+  })) event.preventDefault()
+}
+onMounted(() => window.addEventListener('studio-before-refresh', guardReleaseRefresh))
+onBeforeUnmount(() => window.removeEventListener('studio-before-refresh', guardReleaseRefresh))
+
 async function flushPendingSceneSaves() {
   const pendingScenes = [...sceneAutoSaveTimers.keys()]
     .map(sceneId => scenes.value.find(scene => scene.id === sceneId))
@@ -2256,7 +2316,7 @@ async function applyVideoDefaults(settings: VideoDefaults, remember: boolean) {
   try {
     // Drain existing autosaves before atomically merging parameters; prompts remain untouched.
     for (const scene of scenes.value.filter(item => sceneAutoSaveTimers.has(item.id))) {
-      if (!await saveScene(scene)) throw new Error(tr('请先保存或核对未保存的分镜修改'))
+      if (!await saveScene(scene)) throw new Error(tr('请先保存或检查未保存的分镜修改'))
     }
     await Promise.all([...sceneSaveQueues.values()])
     const response = await api.applyVideoDefaults(projectId.value, chapterId, settings, remember)
@@ -2505,16 +2565,21 @@ onBeforeUnmount(() => {
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
             <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
-            <AppButton v-if="isAgent" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
+            <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
+            <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
+            <AppButton v-if="isAgent && scenes.length && project?.storyboard_enabled" variant="secondary" size="sm" :disabled="!sheetModelId || generatingStoryboard || waitingAnalysis || updatingSheetOptions" :loading="submittingSheets" @click="fillChapterSheets">{{ tr('补齐本集故事版') }}</AppButton>
             <AppButton v-if="!isAgent" variant="secondary" size="sm" type="button" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建分镜') }}</AppButton>
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><AppButton variant="primary" size="sm" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
-        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><AppButton variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div>
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+            <StoryboardGenerationOptions v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
         </div>
@@ -2650,6 +2715,7 @@ onBeforeUnmount(() => {
                 <ScenePromptEditor
                   :model-value="draftFor(scene).prompt"
                   :options="promptMentionOptions(scene)"
+                  :scene="scene"
                   embedded
                   @update:model-value="updateScenePrompt(scene, $event)"
                 />
@@ -2776,6 +2842,7 @@ onBeforeUnmount(() => {
       :scene-sequence="focusedPromptScene?.sequence || 0"
       :model-value="focusedPromptValue"
       :options="focusedPromptOptions"
+      :scene="focusedPromptScene || undefined"
       @close="closePromptFocus"
       @update:model-value="updateFocusedPrompt"
     />
@@ -2783,6 +2850,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .prompt-panel > header .prompt-header-actions { display:flex; flex:0 0 auto; align-items:center; gap:6px; }
 .model-optimized-prompt { min-width: 0; color: var(--app-text); }
 .model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
@@ -2827,7 +2895,7 @@ onBeforeUnmount(() => {
 .storyboard-state strong { color: #454a59; font-size: 14px; }
 .storyboard-state p { max-width: 460px; margin: 0; color: #9297a6; font-size: 11px; }
 .storyboard-state.is-error svg { color: #bf6470; animation: none; }
-.storyboard-state button { margin-top: 8px; }
+.storyboard-state > button, .storyboard-state > .stage-actions { margin-top: 8px; }
 .shot-editor-list { display: grid; gap: 12px; }
 .shot-editor { overflow: hidden; scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px); border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px #e9ebf2; }
 .shot-editor.is-active { box-shadow: inset 0 0 0 1px #dfe1f5; }

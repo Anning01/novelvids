@@ -3,6 +3,16 @@
 from prompts.skill_pack import render_skill, template_text
 
 
+def single_asset_instructions(language: str) -> str:
+    from prompts.skill_pack import use_skill_snapshot
+    try:
+        return template_text("asset_templates", "single_asset", language)
+    except KeyError:
+        # Tasks queued before continuation shipped already have an immutable skill snapshot.
+        with use_skill_snapshot(None):
+            return template_text("asset_templates", "single_asset", language)
+
+
 def targeted_cast_instructions(language: str) -> str:
     return template_text("asset_templates", "targeted_cast_instructions", language)
 

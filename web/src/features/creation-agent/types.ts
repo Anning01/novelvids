@@ -74,6 +74,7 @@ export interface AgentProgress {
 }
 
 export interface AgentRecovery {
+  can_resume_production?: boolean
   failure_step: string | null
   error_code: string | null
   reusable_count: number

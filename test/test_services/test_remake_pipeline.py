@@ -247,3 +247,34 @@ async def test_unconfigured_worker_keeps_media_local(monkeypatch, tmp_path, auth
     probe.assert_called_once_with(source)
     assert len(detector.calls) == 1
     remote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_uses_saved_assets_and_scene_files_without_detecting_again(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from services.remake.checkpoints import write_scene_manifest
+    from services.creation_agent.skill_execution import current_execution
+    source = tmp_path/'source.mp4'
+    source.write_bytes(b'source')
+    cache = tmp_path/'clips'
+    cache.mkdir()
+    paths = [cache/'scene-001.mp4', cache/'scene-002.mp4']
+    for path in paths:
+        path.write_bytes(b'clip')
+    write_scene_manifest(cache, paths, [4.2, 4.2])
+    gateway = _Gateway()
+    assets = {'characters':[{'name':'将军','description':'黑甲'}], 'scenes':[], 'objects':[]}
+    monkeypatch.setattr('services.remake.pipeline.completed_outputs', AsyncMock(return_value={
+        'model:remake:RemakeAssets:1':assets, 'model:remake:RemakeShot:2':remake_shot(2)}))
+    monkeypatch.setattr('services.remake.pipeline.media_session', lambda: pytest.fail('unexpected media session'))
+    pipeline = RemakeDecompositionPipeline(gateway_factory=lambda _:gateway,
+        prepare_video=lambda *a, **kw:pytest.fail('unexpected prepare'), scene_detector=_Detector([]))
+    token = current_execution.set(SimpleNamespace(params={},snapshot=synthetic_snapshot(),language='zh'))
+    try:
+        result = await pipeline.run(source_path=source, model_config=SimpleNamespace(id=9,model='test',name='test'),
+                                    work_dir=tmp_path/'retry',scene_cache=cache)
+    finally:
+        current_execution.reset(token)
+    assert gateway.one_calls == [] and pipeline.scene_detector.calls == []
+    assert gateway.many_calls[0][1]['completed_results'] == {2:remake_shot(2)}
+    assert result.metadata['asset_call_count'] == 0 and result.metadata['prompt_call_count'] == 1

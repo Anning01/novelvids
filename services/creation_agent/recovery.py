@@ -43,7 +43,7 @@ class ProductionRecovery:
                     # Chat tool calls have no replay-safe continuation cursor.
                     # Keep their transcript rather than reauthoring paid writes.
                     await AiTask.filter(id=task.id).update(status=4, stage='needs_review',
-                        error_message=localized_message('提交结果待核对，系统不会重复提交',
+                        error_message=localized_message('本次生成未完成，可以重新生成',
                             _language=task.request_params.get('prompt_language', 'en')))
                     continue
             if await AgentOperation.filter(
@@ -53,7 +53,7 @@ class ProductionRecovery:
                     status=4,
                     stage="needs_review",
                     error_message=localized_message(
-                        "提交结果待核对，系统不会重复提交",
+                        "本次生成未完成，可以重新生成",
                         _language=task.request_params.get("prompt_language", "en"),
                     ),
                 )
@@ -62,7 +62,14 @@ class ProductionRecovery:
             await AgentOperation.filter(
                 task_id=task.id, state="running", external=False
             ).update(state="pending")
-            await AiTask.filter(id=task.id).update(status=6, stage="resuming")
+            if task.task_type == 6 and task.request_params.get("remake_source_id"):
+                from models.remake_source import RemakeSource
+                from services.remake.checkpoints import resume_position
+                source = await RemakeSource.get(id=task.request_params["remake_source_id"])
+                stage, progress, _, _ = await resume_position(task, source)
+                await AiTask.filter(id=task.id).update(status=6, stage=stage, progress=progress)
+            else:
+                await AiTask.filter(id=task.id).update(status=6, stage="resuming")
 
     async def start(self):
         from services.video_enhancement.automatic import automatic_enhancements
@@ -149,6 +156,16 @@ class ProductionRecovery:
                     if not value.done()
                 }
                 for waiting in await AiTask.filter(status=2, stage='waiting_dependencies'):
+                    if waiting.task_type == 2 and waiting.request_params.get('asset_id'):
+                        from services.reference.dependencies import image_dependencies_ready
+                        try:
+                            ready = await image_dependencies_ready(waiting.request_params)
+                        except ValueError as error:
+                            await ai_task_executor._fail(waiting, str(error), error=error, record_usage=False)
+                            continue
+                        if ready:
+                            await AiTask.filter(id=waiting.id, status=2, stage='waiting_dependencies').update(status=6, stage='resuming')
+                        continue
                     operations = await AgentOperation.filter(task=waiting, key__startswith='submit:', state='completed')
                     if waiting.request_params.get('operation') == 'video_batch':
                         # Continuity uses the original video/tail, not its independent HD follow-up.

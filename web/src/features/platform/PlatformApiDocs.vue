@@ -90,7 +90,7 @@ for part in stream:
       ['request_id', 'UUID', false, tr('用于断线后找回任务的唯一请求标识。')],
     ], notes: [
       tr('status 为 completed 时，使用 client.videos.download_content(id) 下载成片。原工作台的 duration、resolution、aspect_ratio 和 references 扩展继续兼容。'),
-      tr('按受理时价格结算。供应商返回计费 token 时按 token 结算；按时长结算时优先用供应商报告时长，固定时长订单缺少报告时沿用订购时长。参考视频缺少计费用量时进入核对。'),
+      tr('按受理时价格结算。供应商返回计费 token 时按 token 结算；按时长结算时优先用供应商报告时长，固定时长订单缺少报告时沿用订购时长。参考视频缺少计费用量时等待自动同步。'),
     ],
   },
   {

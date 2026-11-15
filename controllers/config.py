@@ -42,6 +42,11 @@ def _validate_image_pricing(pricing: dict, model_type) -> None:
     if not isinstance(prices, dict):
         raise HTTPException(status_code=400, detail=localized_message('生图费用需要 prices 档位对象'))
     allowed = set(image_capabilities_for(model_type).clarities)
+    if pricing.get("billing_unit") == "pixel_tier":
+        allowed = {"seedream_5_5": {"low", "high_capped"},
+                   "seedream_5_pro": {"single_low", "single_high", "layer_low", "layer_high"}}.get(model_type)
+        if not allowed or prices.keys() != allowed:
+            raise HTTPException(400, "请配置该模型的全部像素价格档位")
     for tier, value in prices.items():
         if tier not in allowed:
             raise HTTPException(status_code=400, detail=localized_message('生图费用包含不支持的清晰度档位：{p1}', p1=f'{tier}'))
@@ -141,6 +146,8 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         validate_image_protocol(model_type, str(protocol))
         pricing = data.get("pricing", instance.pricing if instance else None)
         if pricing is not None:
+            if pricing.get("billing_unit") == "pixel_tier" and str(protocol) != "novelvids":
+                raise HTTPException(400, "像素分档结算需要平台用量回执")
             _validate_image_pricing(pricing, model_type)
 
     @staticmethod

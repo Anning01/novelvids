@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: deploy-star-growth-card
@@ -45,13 +46,19 @@ jobs:
           STAR_CARD_URL: ${{ steps.deploy.outputs.deployment-url }}
         run: node deploy/star-history-worker/scripts/update-readme.mjs
 
-      - name: Commit README card URL
+      - name: Propose README card URL through a PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet -- README.md; then
             exit 0
           fi
+          branch="codex/star-history-card-${GITHUB_RUN_ID}"
+          git checkout -b "$branch"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
           git commit -m "docs(readme): 嵌入 Star 增长曲线"
-          git push
+          git push origin "HEAD:refs/heads/$branch"
+          printf '%s\n' 'Updates the README card URL to the verified Worker deployment. The main branch is updated only after this PR is reviewed and merged.' > "$RUNNER_TEMP/star-card-pr.md"
+          gh pr create --base main --head "$branch" --title 'docs(readme): 更新 Star 增长曲线地址' --body-file "$RUNNER_TEMP/star-card-pr.md"

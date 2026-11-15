@@ -1,3 +1,4 @@
+from utils.messages import public_generation_error
 """Public task receipts contain state and identifiers, never model credentials."""
 
 from models.ai_task import AiTask
@@ -20,7 +21,7 @@ def receipt_of(task) -> dict:
         "stage": task.stage,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
-        "error": task.error_message,
+        "error": public_generation_error(task.error_message),
     }
 
 

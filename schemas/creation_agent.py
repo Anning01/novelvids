@@ -1,12 +1,13 @@
 """Narrow contracts for creation-agent prompt edits."""
 
 from utils.messages import localized_message
+from utils.model_limits import DEFAULT_OUTPUT_TOKENS
 
 from typing import Literal
 from uuid import UUID
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator, field_serializer
 from pydantic.json_schema import SkipJsonSchema
 
 from schemas.scene import BlockingMap, ScenePromptSegment
@@ -34,6 +35,7 @@ LEGACY_AGENT_DEFAULTS = {
 class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Legacy configuration field retained for stored snapshots and older API clients.
     enabled: bool = False
     runtime: Literal["deepagents", "pydantic_ai"] = "deepagents"
     production_concurrency: int = Field(4, ge=1, le=20)
@@ -68,7 +70,7 @@ class AgentConfiguration(BaseModel):
 
     def output_model_settings(self, model_limit: int | None = None) -> dict:
         limits = [value for value in (self.max_output_tokens, model_limit) if value is not None]
-        return {'max_tokens': min(limits)} if limits else {}
+        return {'max_tokens': min(limits) if limits else DEFAULT_OUTPUT_TOKENS}
 
     def context_character_limit(self, model_limit: int | None) -> int | None:
         return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)
@@ -194,6 +196,11 @@ class AgentActivityOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    @field_serializer('error_message')
+    def public_error(self, value):
+        from utils.messages import public_generation_error
+        return public_generation_error(value)
+
     recovery: dict | None = None
     activity: list[AgentActivityOut] = Field(default_factory=list)
     started_at: datetime | None = None

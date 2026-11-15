@@ -12,6 +12,21 @@ class Identity(StrictModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class RemakeSourceFile(StrictModel):
+    path: str = Field(min_length=1)
+
+
+class SourceRange(StrictModel):
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode='after')
+    def check_order(self):
+        if self.end <= self.start:
+            raise ValueError('来源时间段结束必须晚于开始')
+        return self
+
+
 class Episode(StrictModel):
     format_version: Literal[1]
     work: Identity
@@ -27,6 +42,14 @@ class Episode(StrictModel):
     assets: str = 'assets.json'
     storyboard: str = 'storyboard.json'
     originals: list[str] = Field(default_factory=list)
+    workflow_kind: Literal['script', 'remake'] = 'script'
+    remake_source: RemakeSourceFile | None = None
+
+    @model_validator(mode='after')
+    def check_source(self):
+        if (self.workflow_kind == 'remake') != (self.remake_source is not None):
+            raise ValueError('重制作品必须提供来源视频；普通剧本不能携带重制来源')
+        return self
 
 
 class Media(StrictModel):
@@ -34,21 +57,22 @@ class Media(StrictModel):
     role: Literal['main', 'angle_1', 'angle_2', 'reference', 'video', 'audio', 'blocking', 'storyboard']
 
 
+class VisualReference(StrictModel):
+    asset_id: str
+    variant_id: str | None = None
+
+
 class Variant(Identity):
     description: str = ''
     prompt: str = Field(min_length=1)
     media: list[Media] = Field(default_factory=list)
+    image_references: list[VisualReference] = Field(default_factory=list)
 
 
 class PackageAsset(Variant):
     kind: Literal['person', 'group', 'scene', 'item']
     aliases: list[str] = Field(default_factory=list)
     variants: list[Variant] = Field(default_factory=list)
-
-
-class VisualReference(StrictModel):
-    asset_id: str
-    variant_id: str | None = None
 
 
 class Voice(StrictModel):
@@ -70,6 +94,7 @@ class Shot(Identity):
     visual: list[VisualReference] = Field(default_factory=list)
     voices: list[Voice] = Field(default_factory=list)
     media: list[Media] = Field(default_factory=list)
+    source_range: SourceRange | None = None
 
     @model_validator(mode='after')
     def check_timing(self):
@@ -90,6 +115,29 @@ class Shot(Identity):
 
 class Assets(StrictModel):
     assets: list[PackageAsset]
+
+    @model_validator(mode='after')
+    def check_image_dependencies(self):
+        nodes = {(asset.id, None): asset for asset in self.assets}
+        nodes.update({(asset.id, variant.id): variant for asset in self.assets for variant in asset.variants})
+        visiting, visited = set(), set()
+        def visit(key):
+            if key not in nodes:
+                raise ValueError('生图引用的资产或形态未登记')
+            if key in visiting:
+                raise ValueError('参考图片依赖不能形成循环')
+            if key in visited:
+                return
+            visiting.add(key)
+            dependencies = [(key[0], None)] if key[1] is not None else []
+            dependencies.extend((ref.asset_id, ref.variant_id) for ref in nodes[key].image_references)
+            for dependency in dependencies:
+                visit(dependency)
+            visiting.remove(key)
+            visited.add(key)
+        for key in nodes:
+            visit(key)
+        return self
 
 
 class Storyboard(StrictModel):

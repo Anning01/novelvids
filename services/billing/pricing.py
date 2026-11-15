@@ -74,6 +74,34 @@ def compute_text_cost(usage: dict | None, pricing: dict | None) -> Decimal:
     return _money(cost * _discount(pricing))
 
 
+def image_price_tier(pricing, selection):
+    if not pricing or pricing.get("billing_unit") != "pixel_tier":
+        return selection.clarity
+    width, height = map(int, selection.provider_size.split("x"))
+    pixels = width * height
+    prices = pricing.get("prices") or {}
+    if "single_low" in prices:
+        return "single_low" if pixels <= 2_610_000 else "single_high"
+    if pixels > 4_630_000:
+        raise ValueError("图片尺寸超出像素计价范围")
+    return "low" if pixels <= 2_610_000 else "high_capped"
+
+
+def pixel_receipt_cost(usage, pricing):
+    counts = usage.get("output_tier_counts")
+    inputs = usage.get("input_image_count")
+    if not isinstance(counts, dict) or not counts or type(inputs) is not int or inputs < 0:
+        raise ValueError("Incomplete pixel-tier image usage")
+    prices = pricing.get("prices") or {}
+    for tier, count in counts.items():
+        if tier not in prices or type(count) is not int or count < 0:
+            raise ValueError("Invalid output tier or count")
+    total_count = sum(counts.values())
+    if total_count < 1 or usage.get("image_count", total_count) != total_count:
+        raise ValueError("Inconsistent output image count")
+    return sum(compute_image_cost(count, tier, pricing) for tier, count in counts.items()) + compute_input_image_cost(inputs, pricing)
+
+
 def compute_image_cost(image_count: int, clarity: str | None, pricing: dict | None) -> Decimal:
     if not isinstance(pricing, dict) or pricing.get("type") != "image":
         return Decimal("0")

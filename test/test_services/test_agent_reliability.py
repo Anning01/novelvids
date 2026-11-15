@@ -235,9 +235,14 @@ async def test_resume_never_replays_changed_cancelled_or_uncertain_work(blocked_
         await AgentOperation.create(task=task, key='model:unknown', state='uncertain', external=True)
     elif blocked_by == 'repair_exhausted':
         await AgentOperation.create(task=task, key='recovery:repair', state='completed')
-    with pytest.raises(HTTPException):
-        await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
-    assert await AiTask.filter(task_type=7).count() == 1
+    if blocked_by == 'uncertain':
+        resumed = await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
+        assert resumed.id != task.id
+        assert await AgentOperation.filter(task=resumed, key='model:unknown', state='pending').exists()
+    else:
+        with pytest.raises(HTTPException):
+            await agent_sessions.submit(conversation, AgentRunRequest(request_id=uuid4(), message='继续', resume_from_task_id=task.id), AuthContext())
+        assert await AiTask.filter(task_type=7).count() == 1
 
 
 @pytest.mark.asyncio
@@ -469,7 +474,8 @@ async def test_storyboard_draft_renders_canonical_sections_with_default_strategy
 
 
 @pytest.mark.asyncio
-async def test_summary_output_limit_does_not_block_main_tool_repair():
+@pytest.mark.parametrize('remake_truncated', [False, True])
+async def test_summary_output_limit_does_not_block_main_tool_repair(remake_truncated):
     from pydantic_ai.messages import ModelRequest, RetryPromptPart
     from pydantic_ai.models.function import FunctionModel
     from services.creation_agent.model_boundary import RecordedAgentModel
@@ -480,6 +486,19 @@ async def test_summary_output_limit_does_not_block_main_tool_repair():
     message = await AgentMessage.create(conversation=conversation, task=task, request_id=task.id, request_hash='summary-limit', role='assistant')
     model = RecordedAgentModel(FunctionModel(lambda messages, info: None), message=message, before_request=AsyncMock(), max_characters=None, repair_root=str(task.id))
     model.calls = [{'phase': 'main', 'finish_reason': 'tool_call', 'usage_reported': True}, {'phase': 'summary', 'finish_reason': 'length', 'usage_reported': True}]
+    if remake_truncated:
+        model.stage = 'remake'
+        model.calls[0]['finish_reason'] = 'length'
     await model._begin([ModelRequest(parts=[RetryPromptPart('invalid tool arguments', tool_name='link_scene_references', tool_call_id='repair')])], ModelRequestParameters())
     repair = await AgentOperation.get(task=task, key='recovery:repair')
     assert repair.state == 'completed'
+
+
+@pytest.mark.asyncio
+async def test_remake_repairs_two_validation_failures_independently():
+    from services.creation_agent.reliability import claim_repair, RepairExhausted
+    task = await AiTask.create(task_type=7, status=2)
+    await claim_repair(task.id, [{'code': 'missing'}], attempts=2)
+    await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)
+    with pytest.raises(RepairExhausted):
+        await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)

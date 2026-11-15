@@ -41,6 +41,27 @@ it('recovers an active task after reload and exposes failure without retrying', 
   expect(api.generateStoryboardSheet).not.toHaveBeenCalled()
   wrapper.unmount()
 })
+
+it('restores the original model and offers one-click retry instead of a review dead end', async () => {
+  const saved = { ...scene, metadata: { storyboard_sheet: { status: 'completed', image_url: '/media/new.png' } } }
+  vi.mocked(api.task).mockResolvedValueOnce({ code: 0, message: '', data: {
+    id: 'failed', task_type: 2, status: 4, stage: 'needs_review', error_message: '外部请求结果待核对，系统不会自动重试',
+    request_params: { model_config_id: 23 }, created_at: '',
+  } }).mockResolvedValueOnce({ code: 0, message: '', data: { id: 'new', task_type: 2, status: 3, response_data: { saved: true }, created_at: '' } })
+  vi.mocked(api.generateStoryboardSheet).mockResolvedValue({ code: 0, message: '', data: { id: 'new', task_type: 2, status: 1, created_at: '' } })
+  vi.mocked(api.scene).mockResolvedValue({ code: 0, message: '', data: saved })
+  const wrapper = mount(StoryboardSheetCard, { props: { scene: { ...scene, metadata: { storyboard_sheet: { task_id: 'failed', status: 'pending', previous_image_url: '/media/old.png' } } }, enabled: true } })
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('核对')
+  const button = wrapper.get('[aria-label="重置并重试"]')
+  expect(button.attributes('disabled')).toBeUndefined()
+  expect(api.generateStoryboardSheet).not.toHaveBeenCalled()
+  await button.trigger('click')
+  await flushPromises()
+  expect(api.generateStoryboardSheet).toHaveBeenCalledExactlyOnceWith(scene.id, 23, true)
+  expect(wrapper.emitted('updated')?.at(-1)).toEqual([saved])
+  wrapper.unmount()
+})
 it('can restore an excluded reference without regenerating when generation is disabled', async () => {
   const wrapper = mount(StoryboardSheetCard, {props: {scene: {...scene, metadata: {storyboard_sheet: {image_url: '/media/old.png'}}}, enabled: false}})
   expect(wrapper.find('button').exists()).toBe(false)

@@ -15,7 +15,7 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.validation import episode_duration_limit, validate_episode_duration, validate_storyboard_duration
+from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
 from services.storyboard.appearances import existing_scene_layouts, previously_seen_assets
 from services.creation_agent.memory import creation_memory
@@ -36,6 +36,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
             model: str - 模型名称
             supports_json_output: bool - 是否支持 response_format=json_object
         """
+        if request_params.get("operation") == "blocking_maps":
+            from services.storyboard.blocking_plans import fill_saved_shots
+            return await fill_saved_shots(request_params)
         chapter_id = request_params["chapter_id"]
         base_url = request_params["base_url"]
         api_key = request_params["api_key"]
@@ -74,7 +77,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         creative_constraints.append({"scope": {"kind": "project"},
                                      "content": audiovisual_guidance(chapter.novel.audiovisual_guidance, prompt_language)})
         seen_assets = await previously_seen_assets(chapter, entities)
-        duration_limit = episode_duration_limit(chapter.production_text, chapter.episode_pacing)
+        duration_limit = (chapter.episode_pacing or {}).get("max_seconds")
         start_time = time.time()
 
         try:
@@ -100,7 +103,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 introduction_descriptions={asset.canonical_name: asset.description or "" for asset in assets},
             )
 
-            validate_episode_duration(storyboard, duration_limit)
             end_time = time.time()
             request_duration = end_time - start_time
 
@@ -111,12 +113,18 @@ class StoryboardTaskHandler(BaseTaskHandler):
             if optimizer.get('mode') == 'optimize':
                 from schemas.agent_workflow import CompletePrompt
                 from services.creation_agent.video_optimizer import optimizer_instructions
+                from prompts.video_optimizer import validate_asset_markers
                 for shot in storyboard.shots:
+                    async def validate_optimized(draft):
+                        validate_asset_markers(draft.prompt, shot.prompt)
                     result = await execution.generate('video', {'segment': f'optimizer:{shot.sequence}', 'generic_prompt': shot.prompt,
                         'submitted_media': [],
                         'duration': shot.duration, 'selected_model_type': optimizer['model_type'],
                         'reference_assets': [entity.model_dump() for entity in entities]}, CompletePrompt,
-                        additional_instructions=optimizer_instructions(optimizer))
+                        additional_instructions=optimizer_instructions(optimizer), output_validator=validate_optimized,
+                        activity_label=localized_message('优化第 {p0}/{p1} 镜视频提示词',
+                                                         p0=shot.sequence, p1=len(storyboard.shots)))
+                    await validate_optimized(result)
                     optimized[shot.sequence] = {'model_type': optimizer['model_type'], 'skill': optimizer['skill'], 'prompt': result.prompt}
 
             # 4. 保存分镜到数据库
@@ -193,7 +201,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                     if before is not None:
                         old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
                         if {str(row.id): await object_version(row) for row in old_scenes} != before:
-                            raise ValueError(localized_message('原分镜已有新修改，请核对后重新生成'))
+                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
                         objects = CreationObjects(chapter.novel_id)
                         snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
                         task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
@@ -211,8 +219,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                              prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None, optimized_prompts: dict | None = None) -> List[Scene]:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
-        await chapter.refresh_from_db(fields=["content", "screenplay", "episode_pacing"])
-        validate_episode_duration(storyboard, episode_duration_limit(chapter.production_text, chapter.episode_pacing))
+        await chapter.refresh_from_db(fields=["episode_pacing"])
         objects = CreationObjects(chapter.novel_id)
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
@@ -254,6 +261,9 @@ class StoryboardTaskHandler(BaseTaskHandler):
             }
 
             # 解析 duration 为浮点数
+            source_numbers = api_metadata.get("source_scene_numbers") or []
+            if source_numbers and source_numbers[shot.sequence - 1]:
+                prompt_params["source_scene_number"] = source_numbers[shot.sequence - 1]
             if shot.duration_split_part is not None:
                 prompt_params["duration_split_part"] = shot.duration_split_part
             if shot.blocking_map:

@@ -37,6 +37,15 @@ def activity_from_events(events: list[dict], status: int) -> list[dict]:
         elif kind == 'CUSTOM' and event.get('name') == 'agent_activity':
             item = event['value']
             items[item['id']] = dict(item)
+        elif kind == 'CUSTOM' and event.get('name') == 'agent_activity_delta':
+            value = event['value']
+            item = items.setdefault(value['id'], {key: data for key, data in value.items()
+                if key not in {'detail_delta', 'detail_offset'}})
+            detail = item.get('detail', '')
+            offset = value['detail_offset']
+            length = len(detail.encode('utf-16-le')) // 2
+            if offset <= length:
+                item['detail'] = detail + value['detail_delta'].encode('utf-16-le')[(length - offset) * 2:].decode('utf-16-le')
     if status in {3, 4, 5}:
         for item in items.values():
             if item['status'] == 'running':
@@ -61,7 +70,7 @@ async def activity_for_messages(messages, events, production):
     own_ids = {row.id for row in messages}
     related = [row for row in rows if row.id not in own_ids and (
         str(row.task_id) in owners or row.task.request_params.get('parent_task_id') in owners)]
-    child_events = await agent_event_log.load_many(related)
+    child_events = await agent_event_log.load_projection_many(related)
     for row in related:
         owner = str(row.task_id) if str(row.task_id) in owners else row.task.request_params['parent_task_id']
         for item in activity_from_events(child_events[row.id], row.task.status):

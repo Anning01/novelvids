@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerationError(RuntimeError):
-    pass
+    def __init__(self, message, *, submission_uncertain=True):
+        super().__init__(message)
+        self.submission_uncertain = submission_uncertain
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,24 @@ def _http_provider_error(response: httpx.Response) -> str | None:
         return _provider_error(response.json())
     except ValueError:
         return None
+
+
+def _capacity_retry_delay(response: httpx.Response) -> int | None:
+    # CAT admission rejects before creating a receipt. Forwarded provider errors carry a receipt.
+    if (response.status_code != 429 or _request_id(response) or response.headers.get("x-cat-request-id")
+            or response.headers.get("x-novelvids-request-id")):
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict) or error.get("code") != "rate_limit_exceeded":
+        return None
+    if error.get("message") != "模型并发已满，请稍后重试":
+        return None
+    delay = response.headers.get("retry-after", "")
+    return max(1, int(delay)) if delay.isascii() and delay.isdigit() and len(delay) < 10 else 2
 
 
 def _payload_error(payload: Any) -> tuple[str | None, int | None, str | None]:
@@ -176,6 +197,7 @@ async def generate_images(
             headers = {"Authorization": f"Bearer {api_key}"}
             if api_protocol == ImageApiProtocol.novelvids.value:
                 from uuid import uuid4
+                headers["X-NovelVids-Capabilities"] = "pixel_tier_images"
                 headers["Idempotency-Key"] = str(platform_call.request_key if platform_call else uuid4())
             if prepared.images:
                 try:
@@ -185,7 +207,12 @@ async def generate_images(
                 response = await client.post(endpoint, headers=headers,
                     data={key: str(value) for key, value in prepared.payload.items()}, files=files)
             else:
-                response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                while True:
+                    response = await client.post(endpoint, headers=headers, json=prepared.payload)
+                    delay = _capacity_retry_delay(response) if api_protocol == ImageApiProtocol.novelvids.value else None
+                    if delay is None:
+                        break
+                    await asyncio.sleep(delay)
             if platform_call:
                 from services.billing.platform import capture_platform_response
                 await capture_platform_response(platform_call, response)
@@ -201,6 +228,8 @@ async def generate_images(
     request_id = _request_id(response)
     if response.status_code >= 400:
         provider_error = _http_provider_error(response)
+        if provider_error and api_key:
+            provider_error = provider_error.replace(api_key, '[redacted]')
         logger.warning(
             "image_generation_http_error protocol=%s endpoint=%s status=%s request_id=%s has_provider_detail=%s",
             api_protocol,
@@ -210,12 +239,14 @@ async def generate_images(
             bool(provider_error),
         )
         suffix = f"，request_id={request_id}" if request_id else ""
+        uncertain = response.status_code not in {400, 401, 402, 403, 404, 413, 415, 422, 429}
         if provider_error:
             raise ImageGenerationError(
-                f"生图供应商请求失败：{provider_error}（HTTP {response.status_code}{suffix}）"
+                f"生图供应商请求失败：{provider_error}（HTTP {response.status_code}{suffix}）",
+                submission_uncertain=uncertain,
             )
         raise ImageGenerationError(
-            f"生图供应商请求失败（HTTP {response.status_code}{suffix}）"
+            f"生图供应商请求失败（HTTP {response.status_code}{suffix}）", submission_uncertain=uncertain,
         )
 
     try:

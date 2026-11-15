@@ -158,6 +158,32 @@ async def test_batch_requires_at_least_one_base_or_variant(client):
     assert response.json()['code'] == 422, response.text
 
 
+async def test_variant_only_batch_includes_missing_base_once_and_keeps_order(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    first = await AssetVariant.create(asset=assets[0], name='年轻')
+    second = await AssetVariant.create(asset=assets[0], name='老年')
+    response = await client.post('/api/asset/reference-batch', json={**payload, 'asset_ids': [],
+        'variant_ids': [first.id, second.id]})
+    assert response.json()['code'] == 0, response.text
+    tasks = response.json()['data']['tasks']
+    assert len(tasks) == 3
+    assert [task['request_params'].get('variant_id') for task in tasks] == [None, first.id, second.id]
+    assert await AiTask.all().count() == 3
+
+
+async def test_variant_batch_does_not_automatically_retry_failed_or_uncertain_base(client, configured_creation_agent):
+    assets, payload = await batch_fixture()
+    base = await AiTask.create(task_type=2, status=4, stage='needs_review', request_params={'asset_id': assets[0].id})
+    form = await AssetVariant.create(asset=assets[0], name='年轻')
+    response = await client.post('/api/asset/reference-batch', json={**payload, 'asset_ids': [], 'variant_ids': [form.id]})
+    assert response.json()['code'] == 0, response.text
+    assert len(response.json()['data']['tasks']) == 1
+    assert response.json()['data']['tasks'][0]['request_params']['variant_id'] == form.id
+    assert await AiTask.all().count() == 2
+    await base.refresh_from_db()
+    assert base.status == 4 and base.stage == 'needs_review'
+
+
 @pytest.mark.asyncio
 async def test_variant_admission_failure_rolls_back_base_queue_and_form_settings(client, configured_creation_agent):
     assets, payload = await batch_fixture()

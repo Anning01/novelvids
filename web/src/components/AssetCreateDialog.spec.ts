@@ -669,6 +669,15 @@ it('shows a live animated generation state immediately after regeneration starts
   expect(regenerateButton!.attributes('aria-busy')).toBe('true')
   expect(regenerateButton!.text()).toContain('生成中')
 
+  vi.mocked(api.task).mockResolvedValue({ code: 0, message: '', data: {
+    id: 'generation-pending', task_type: 2, status: TaskStatusEnum.PROCESSING,
+    stage: 'waiting_dependencies', created_at: '',
+  } })
+  await vi.advanceTimersByTimeAsync(2000)
+  await flushPromises()
+  expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('等待参考图')
+  expect(wrapper.get('.asset-generated-preview__generating').text()).toContain('上游失败时会保持等待')
+  expect(wrapper.get('.asset-generated-preview__generating').attributes('role')).toBe('status')
   wrapper.unmount()
   vi.useRealTimers()
 })

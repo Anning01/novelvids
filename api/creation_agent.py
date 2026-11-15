@@ -98,6 +98,13 @@ async def stop(task_id: UUID, ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(data=await creation_agent_controller.stop(task_id, ctx))
 
 
+@router.post('/runs/{task_id}/resume', response_model=ResponseSchema[AgentRunOut])
+async def resume(task_id: UUID, ctx: AuthContext = Depends(get_auth_context)):
+    from services.creation_agent.production_resume import resume_production
+    await resume_production(task_id, ctx)
+    return ResponseSchema(data=await creation_agent_controller.snapshot(task_id, ctx))
+
+
 @router.post('/changes/{change_id}/undo', response_model=ResponseSchema[PromptChangeOut])
 async def undo(change_id: int, ctx: AuthContext = Depends(get_auth_context)):
     return ResponseSchema(data=await creation_agent_controller.undo(change_id, ctx))

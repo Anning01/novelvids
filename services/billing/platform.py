@@ -19,7 +19,7 @@ from models.studio_call import StudioCall
 from models.usage_record import ModelUsageRecord
 from schemas.platform_billing import PlatformReceiptOut
 from services.balance import ensure_solvent
-from services.billing.pricing import compute_image_cost, compute_input_image_cost, compute_text_cost, compute_video_cost
+from services.billing.pricing import pixel_receipt_cost, compute_image_cost, compute_input_image_cost, compute_text_cost, compute_video_cost
 
 
 active_model_call = ContextVar("platform_model_call", default=None)
@@ -58,7 +58,7 @@ async def begin_platform_call(config, *, billing_type, task_id=None, video_id=No
 async def capture_platform_response(row, response):
     await ModelUsageRecord.filter(id=row.usage_record_id, billing_type="image").update(
         duration_seconds=max(0, (datetime.now(timezone.utc) - row.created_at).total_seconds()))
-    value = response.headers.get("X-Novelvids-Request-Id") or response.headers.get("X-Request-Id")
+    value = response.headers.get("X-Cat-Request-Id") or response.headers.get("X-Novelvids-Request-Id")
     if value:
         try:
             request_id = UUID(value)
@@ -66,6 +66,9 @@ async def capture_platform_response(row, response):
             return None
         await StudioCall.filter(id=row.id).update(platform_request_id=request_id)
         return request_id
+    if response.headers.get("X-Request-Id"):
+        # Provider trace (or legacy unlabelled receipt): reconcile using our original request key.
+        return None
     if response.status_code in {400, 401, 402, 403, 404, 413, 422}:
         async with in_transaction() as db:
             rejected = await StudioCall.filter(id=row.id, state="pending", platform_request_id=None).using_db(db).update(state="rejected")
@@ -88,6 +91,7 @@ async def begin_platform_image(base_url, model, api_key):
 
 
 def platform_text_client(config):
+    from services.remake.capacity_transport import PlatformCapacityTransport
     async def before_request(request):
         if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
             return
@@ -111,7 +115,7 @@ def platform_text_client(config):
         if request_id and active:
             active[1]["platform_request_id"] = str(request_id)
 
-    return AsyncClient(timeout=None, follow_redirects=False, trust_env=False,
+    return AsyncClient(timeout=None, follow_redirects=False, trust_env=False, transport=PlatformCapacityTransport(trust_env=False),
         event_hooks={"request": [before_request], "response": [after_response]})
 
 
@@ -158,6 +162,13 @@ async def settle_platform_call(row_id: int, receipt: PlatformReceiptOut) -> None
                     local_cost = (amount * row.multiplier).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
             elif ledger.billing_type == "text":
                 local_cost = compute_text_cost(usage, pricing)
+            elif ledger.billing_type == "image" and pricing.get("billing_unit") == "pixel_tier":
+                try:
+                    local_cost = pixel_receipt_cost(usage, pricing)
+                except ValueError:
+                    await ModelUsageRecord.filter(id=ledger.id).using_db(db).update(
+                        settlement_status="review", platform_cost=amount)
+                    return
             elif ledger.billing_type == "image":
                 local_cost = compute_image_cost(usage.get("image_count", 0), usage.get("clarity"), pricing)
                 local_cost += compute_input_image_cost(usage.get("input_image_count", 0), pricing)

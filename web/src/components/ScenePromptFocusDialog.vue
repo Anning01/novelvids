@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Scene } from '@/types'
 import { tr, dateLocale } from '@/i18n'
 
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
@@ -10,6 +11,7 @@ const props = withDefaults(defineProps<{
   open: boolean
   sceneSequence: number
   modelValue: string
+  scene?: Scene
   options: ScenePromptMentionOption[]
   placeholder?: string
 }>(), {
@@ -164,6 +166,7 @@ onBeforeUnmount(() => {
             <ScenePromptEditor
               :model-value="modelValue"
               :options="options"
+              :scene="scene"
               :placeholder="placeholder"
               focus-mode
               @update:model-value="emit('update:modelValue', $event)"

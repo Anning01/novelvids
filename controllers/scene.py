@@ -142,6 +142,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         replace_existing: bool = False,
         team_id: int | None = None,
         user_id: int | None = None,
+        *, assistant_model_config_id: int | None = None, sheet_model_config_id: int | None = None,
+        generate_blocking_maps: bool | None = None,
     ):
         """提交分镜生成任务，返回任务记录供前端轮询。
 
@@ -149,13 +151,19 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         在锁内检查活跃任务并创建，避免并发请求重复建任务浪费 token。
         """
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
+        if sheet_model_config_id is not None:
+            from services.video_enhancement.sources import require_generation_scope
+            await require_generation_scope(chapter.novel_id, team_id)
+            if not chapter.novel.storyboard_enabled:
+                raise HTTPException(409, localized_message('请先在剧本页开启逐镜线稿故事版'))
+            await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image, sheet_model_config_id, team_id=team_id)
         strategy = storyboard_strategy_factory.resolve(
             chapter.novel.storyboard_strategy
         )
 
         # 1. 获取分镜生成任务的启用配置（团队自定义优先，官方兜底）
         from services.creation_agent.skill_execution import require_agent
-        config, _ = await require_agent(team_id)
+        config, _ = await require_agent(team_id, assistant_model_config_id)
 
         # 2. 先清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.storyboard)
@@ -163,6 +171,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         request_params = {
             "chapter_id": chapter.id,
             "novel_id": chapter.novel_id,
+            "assistant_model_config_id": config.id,
             "model_config_id": config.id,
             "base_url": config.base_url,
             "api_key": config.api_key,
@@ -171,6 +180,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
             "max_context_characters": config.max_context_characters,
             "prompt_language": await general_config_controller.get_prompt_language(),
             "storyboard_strategy": strategy.key,
+            "sheet_model_config_id": sheet_model_config_id,
+            "generate_blocking_maps": generate_blocking_maps if generate_blocking_maps is not None else False,
         }
         if getattr(config, "thinking", None):
             request_params["thinking"] = config.thinking
@@ -206,6 +217,12 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 if t.request_params.get("chapter_id") == chapter_id:
                     # 已有进行中的任务：直接返回该任务，前端继续轮询，
                     # 避免离开页面再返回时重复提交被 400 拒绝
+                    if t.request_params.get("sheet_model_config_id") != sheet_model_config_id:
+                        raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
+                    if generate_blocking_maps is not None and t.request_params.get('generate_blocking_maps', True) != generate_blocking_maps:
+                        raise HTTPException(409, localized_message('请等待当前任务完成后再切换空间定位图设置'))
+                    if assistant_model_config_id is not None and t.request_params.get("assistant_model_config_id") != assistant_model_config_id:
+                        raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
                     return await bind_submission(t, {**request_params, "team_id": team_id, "user_id": user_id})
 
             if replace_existing:

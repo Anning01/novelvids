@@ -169,7 +169,7 @@ class SoraScenePromptConfig(BaseModel):
             "不得只写抽象情绪或剧情标题"
         ),
     )
-    duration: str = Field(..., description="镜头时长，格式如 3s、4s 或 8s，范围 1-30 秒")
+    duration: str = Field(..., description="本生成段的总时长，用秒数加 s 表示；按本场连续表演估时，并遵守 shot_duration_range")
     shot_size_and_camera: str = Field(
         ...,
         description="景别与机位，如‘中景正面机位’或‘过肩镜头’",
@@ -268,7 +268,7 @@ class SoraScenePromptConfig(BaseModel):
     )
 
     blocking_map: BlockingMap | None = Field(
-        default=None, description="仅用于因时长拆分的续段。用同一场景底图标出承接上一段结尾的站位与本段走位；左上 (0,0)，右下 (100,100)",
+        default=None, description="同一导演场号拆为多个生成段时，从第2段起提供本段承接图。依据上一段的结束状态描述人物与道具的位置、朝向、走位及当前机位；首段通过文字建立空间关系；左上 (0,0)，右下 (100,100)",
     )
 
     segments: list[ScenePromptSegment] = Field(
@@ -338,6 +338,9 @@ class SceneFullProperties(SceneProperties):
 
 
 class SceneGenerateCreate(BaseModel):
+    sheet_model_config_id: int | None = Field(None, gt=0)
+    generate_blocking_maps: bool = Field(False, strict=True)
+    assistant_model_config_id: int | None = Field(None, gt=0)
     replace_existing: bool = False
     """创建请求：chapter_id 必填"""
     chapter_id: int = Field(..., description="所属章节")

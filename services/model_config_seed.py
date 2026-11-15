@@ -117,6 +117,11 @@ DEFAULT_MODELS: list[dict] = [
 
 async def ensure_model_config_seed_data() -> int:
     """首次部署无模型时创建默认模型（未启动、空 key），按名称幂等。"""
+    from config import settings
+    from models.config import StudioPlatformConnection
+    connection = await StudioPlatformConnection.get_or_none(id=1)
+    if settings.STUDIO_PLATFORM_API_KEY or connection and connection.api_key:
+        return 0
     existing_names = {config.name for config in await AiModelConfig.all()}
     created = 0
     for spec in DEFAULT_MODELS:
@@ -134,3 +139,15 @@ async def ensure_model_config_seed_data() -> int:
     if created:
         logger.info("模型配置启动扫描: 已创建 %s 个默认模型（未启动）", created)
     return created
+
+
+async def remove_unused_seed_configs(db) -> int:
+    """Remove only untouched, unconfigured presets when switching to platform models."""
+    removed = 0
+    for spec in DEFAULT_MODELS:
+        row = await AiModelConfig.filter(name=spec["name"], scope="official", team_id=None,
+                                        is_active=False, api_key="").using_db(db).first()
+        if row and all(getattr(row, field) == value for field, value in spec.items()):
+            await row.delete(using_db=db)
+            removed += 1
+    return removed

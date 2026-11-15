@@ -12,10 +12,10 @@ from models.config import AiModelConfig
 from models.scene import Scene
 from models.video import Video
 from models.usage_record import ModelUsageRecord
-from schemas.ai_task import TaskReviewResolution
+from test.legacy_review_fixture import TaskReviewResolution
 from services.ai_task_executor import ai_task_executor
 from services.billing.recorder import record_ai_task_usage
-from services.creation_agent.review import close_uncertain_task
+from test.legacy_review_fixture import close_uncertain_task
 from services.creation_agent.video_settlement import settle_video
 from test.test_services.test_skill_workflow import enabled_project
 

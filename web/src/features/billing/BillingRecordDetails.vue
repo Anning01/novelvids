@@ -43,7 +43,7 @@ onBeforeUnmount(() => { epoch += 1 })
 
 <template>
   <section class="billing-record-details" :aria-label="tr('会话费用明细')" :aria-busy="loading">
-    <p>{{ tr('按原始计费记录核对，包含各轮模型调用与摘要消耗。') }}</p>
+    <p>{{ tr('按原始计费记录检查，包含各轮模型调用与摘要消耗。') }}</p>
     <p v-if="loading" role="status">{{ tr('正在读取明细…') }}</p>
     <p v-else-if="error" role="alert">{{ error }} <AppButton size="xs" @click="load(page)">{{ tr('重试') }}</AppButton></p>
     <template v-else>

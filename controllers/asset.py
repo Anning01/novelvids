@@ -747,10 +747,21 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             active = {(item['asset_id'], item['variant_id']) for item in await self.active_generations(payload.novel_id)}
             targets = [(assets[identifier], None) for identifier in identifiers]
             targets.extend((assets[variants[identifier].asset_id], variants[identifier]) for identifier in variant_ids)
+            from services.reference.dependencies import ReferenceGraph, dependency_has_failed
+            graph = await ReferenceGraph.load(payload.novel_id)
+            requested = {(asset.id, variant.id if variant else None) for asset, variant in targets}
+            for asset, variant in targets:
+                if graph.image((asset.id, variant.id if variant else None)):
+                    (skipped_variants if variant else skipped).append(variant.id if variant else asset.id)
+            ordered = graph.missing_ordered([(asset.id, variant.id if variant else None) for asset, variant in targets])
+            targets = [(graph.assets[asset_id], graph.variants.get(variant_id)) for asset_id, variant_id in ordered]
             settings = {'model_config_id': payload.model_config_id, 'clarity': payload.clarity,
                 'resolution': payload.clarity, 'aspect_ratio': payload.aspect_ratio,
                 'output_format': payload.output_format, 'generation_count': 1}
             for asset, variant in targets:
+                identity = (asset.id, variant.id if variant else None)
+                if identity not in requested and await dependency_has_failed(*identity):
+                    continue
                 target = variant or asset
                 target_key = f'variant:{variant.id}' if variant else f'asset:{asset.id}'
                 token = submission.set({**envelope, 'submission_id': str(uuid5(batch_id, target_key)),
@@ -875,6 +886,26 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             request_params["team_id"] = team_id
         if user_id is not None:
             request_params["user_id"] = user_id
+
+        from services.reference.dependencies import ReferenceGraph, dependency_has_failed
+        graph = await ReferenceGraph.load(asset.novel_id)
+        target_key = (asset.id, variant_id)
+        graph.ordered([target_key])
+        # Single-image and batch buttons share the same prerequisite admission.
+        # Worker resumptions never come here, so a failed prerequisite is not retried automatically.
+        from services.creation_agent.submissions import submission
+        from uuid import uuid5, NAMESPACE_URL
+        envelope = submission.get() or {}
+        for source_key in graph.references(target_key):
+            if graph.image(source_key) or await dependency_has_failed(*source_key):
+                continue
+            token = submission.set({**envelope, 'submission_id': str(uuid5(NAMESPACE_URL,
+                f"{envelope['submission_id']}:image-reference:{source_key}"))} if envelope else None)
+            try:
+                await self.reference(source_key[0], variant_id=source_key[1],
+                    media_model_config_id=config.id, team_id=team_id, user_id=user_id)
+            finally:
+                submission.reset(token)
 
         async with creation_write(asset.novel_id) as connection:
             from services.creation_agent.submissions import previous_submission, bind_submission

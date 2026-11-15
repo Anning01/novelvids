@@ -129,6 +129,7 @@ class ImageGenerationCapabilitiesOut(BaseModel):
     frame_duration_ms_max: int = 655350
     frame_duration_ms_step: int = 10
     default_frame_duration_ms: int = 200
+    sizes: dict[str, list[str]] = Field(default_factory=dict)
     clarities_by_format: dict[str, list[str]] = Field(default_factory=dict)
 
 

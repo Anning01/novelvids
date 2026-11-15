@@ -137,3 +137,27 @@ async def execute_sheet(params):
             await current.save(update_fields=['metadata', 'updated_at'])
             result['saved'] = True
     return result
+
+
+async def enqueue_chapter_sheets(chapter_id, scene_ids, model_id, team_id, user_id, *, batch_id):
+    """Publish the complete sheet queue in one transaction with stable per-shot receipts."""
+    from models.chapter import Chapter
+    from services.creation_agent.submissions import submission
+    chapter = await Chapter.get(id=chapter_id)
+    tasks = []
+    async with project_write(chapter.novel_id):
+        scenes = await Scene.filter(chapter_id=chapter_id).order_by("sequence")
+        selected = set(scene_ids) if scene_ids is not None else None
+        for scene in scenes:
+            if selected is not None and scene.id not in selected:
+                continue
+            sheet = (scene.metadata or {}).get("storyboard_sheet") or {}
+            if sheet.get("image_url") and sheet.get("status") == "completed" and sheet.get("scene_fingerprint") == scene_fingerprint(scene):
+                continue
+            token = submission.set({"submission_id": str(batch_id), "submission_hash": f"{batch_id}:{scene.id}:{model_id}"})
+            try:
+                task = await submit_sheet(scene.id, model_config_id=model_id, team_id=team_id, user_id=user_id)
+            finally:
+                submission.reset(token)
+            tasks.append(str(task.id))
+    return tasks

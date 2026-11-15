@@ -51,7 +51,7 @@ async def _collect_export(task: AiTask, export: ChapterExport):
                     export.collection_complete = True
                     await export.save(update_fields=['provider_result', 'collection_complete', 'updated_at'])
                     await AiTask.filter(id=task.id).update(status=5 if current.status == 5 else 4, stage='needs_review',
-                        error_message=localized_message('供应商任务已无法查询，请人工核对用量和结果'))
+                        error_message=localized_message('生成服务未返回可用结果，可以重新生成'))
                 return
             await AiTask.filter(id=task.id).exclude(status=5).update(error_message=None)
             if receipt.status in {'running', 'processing'}:
@@ -98,7 +98,7 @@ async def _collect_export(task: AiTask, export: ChapterExport):
             await AiTask.filter(id=task.id).update(stage='billing_pending')
             return
         if ledger is None or ledger.usage.get('missing_usage'):
-            await AiTask.filter(id=task.id).exclude(status=5).update(status=4, stage='needs_review', error_message=localized_message('增强结果已保存，实际用量待核对'))
+            await AiTask.filter(id=task.id).exclude(status=5).update(status=4, stage='needs_review', error_message=localized_message('增强结果已保存，费用正在结算'))
         else:
             await AiTask.filter(id=task.id).exclude(status=5).update(status=3, stage='completed', progress=100,
                 response_data={'export_id': export.id}, error_message=None, finished_at=datetime.now(timezone.utc))

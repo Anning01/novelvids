@@ -13,7 +13,7 @@ export function money(value: number, currency = 'CNY'): string {
 
 export function recordCost(item: BillingRecord): string {
   if (item.settlement_status === 'pending') return tr('待结算')
-  if (item.settlement_status === 'review') return tr('待核对')
+  if (item.settlement_status === 'review') return tr('待结算')
   return money(item.cost, item.currency)
 }
 
@@ -33,7 +33,7 @@ export function usageLabel(item: { billing_type: string; usage: Record<string, u
       : '—'
   }
   if (item.billing_type === 'media_processing') {
-    return usage.missing_usage ? tr('实际用量待核对') : tr('{p0}s · {p1} · {p2}fps', { p0: num(usage.seconds), p1: String(usage.resolution || '—'), p2: num(usage.fps) })
+    return usage.missing_usage ? tr('用量正在同步') : tr('{p0}s · {p1} · {p2}fps', { p0: num(usage.seconds), p1: String(usage.resolution || '—'), p2: num(usage.fps) })
   }
   if (item.billing_type === 'image') {
     const count = num(usage.image_count)
@@ -53,7 +53,7 @@ export function costSourceLabel(source?: string): string {
 }
 
 export function recordStatus(item: BillingRecord): string {
-  if (item.billing_type === 'media_processing' && (item.usage?.missing_usage || item.usage?.accounting_needs_review)) return tr('需要核对')
+  if (item.billing_type === 'media_processing' && (item.usage?.missing_usage || item.usage?.accounting_needs_review)) return tr('费用待结算')
   if (item.record_kind === 'agent_conversation') {
     if (item.statuses?.some(status => [1, 2, 6].includes(status))) return tr('处理中')
     if (item.statuses?.includes(4)) return tr('含失败记录')

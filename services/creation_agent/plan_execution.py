@@ -70,17 +70,28 @@ class CreationPlanRunner:
                         await plan_activity(self.execution, f'step:{step.id}', step.label, status='running')
         records = {row.key.removeprefix('plan-step:'): row for row in await AgentOperation.filter(
             task_id=self.params['task_id'], key__startswith='plan-step:')}
+        by_id = {step.id: step for step in plan.steps}
         for step in plan.steps:
             await self.execution.before_request()
             if step.id in records and records[step.id].state == 'completed':
+                if step.operation == 'image' and step.target_id and records[step.id].result.get('status') == 'failed':
+                    # An uploaded or separately regenerated reference can satisfy a
+                    # fill-missing dependency without retrying its failed submission.
+                    kept = await existing_result(step, step.target_id)
+                    if kept is not None:
+                        records[step.id] = await self.finish(step, {'status': 'skipped', 'outputs': [kept],
+                            'asset_ids': kept.get('asset_ids', []), 'task_ids': []})
                 if step.id not in groups or records[step.id].result.get('coalesced'):
                     continue
                 if records[step.id].result.get('status') in {'completed', 'skipped'}:
                     records[step.id] = await self.finish(step, {'status': 'failed', 'coalesced': True,
-                        'error': localized_message('旧分段任务已有保存结果，需核对完整章节后继续')})
+                        'error': localized_message('已有分段结果已保存，可重新生成本章以补齐内容')})
                     continue
                 records.pop(step.id)
             if any(records.get(key) and records[key].result.get('status') in {'failed', 'blocked'} for key in step.depends_on):
+                if step.operation == 'image' and all(by_id[key].operation == 'image' for key in step.depends_on
+                    if records.get(key) and records[key].result.get('status') in {'failed', 'blocked'}):
+                    continue
                 records[step.id] = await self.finish(step, {'status': 'blocked', 'error': localized_message('前置步骤未完成')})
                 continue
             if any(key not in records or records[key].state != 'completed' for key in step.depends_on):
@@ -212,11 +223,10 @@ class CreationPlanRunner:
 
 async def run_confirmed_plan(params, assistant):
     from services.creation_agent.handler import authorize_run
-    from services.creation_agent.sessions import agent_configuration
 
     async def before_request():
         await authorize_run(params)
-        if not (await agent_configuration()).enabled or not await AiTask.filter(id=params['task_id'], status=2).exists():
+        if not await AiTask.filter(id=params['task_id'], status=2).exists():
             raise ValueError(localized_message('任务已停止，不能继续执行'))
     execution = SkillExecution(params, assistant, before_request)
     if assistant.run_input.get('creation_run_id') != params['creation_run_id']:

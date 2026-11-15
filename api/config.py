@@ -108,6 +108,12 @@ async def set_studio_platform(payload: PlatformKeyInput, response: Response):
     return ResponseSchema(data=await sync_platform_models(payload.api_key.get_secret_value()))
 
 
+@router.get("/studio-platform/image-tariff/{config_id}", dependencies=[_STUDIO_OWNER])
+async def get_platform_image_tariff(config_id: int):
+    from services.studio_platform import platform_image_tariff
+    return ResponseSchema(data=await platform_image_tariff(config_id))
+
+
 @router.post("/studio-platform/sync", dependencies=[_STUDIO_OWNER])
 async def sync_studio_platform(response: Response):
     response.headers["Cache-Control"] = "no-store"

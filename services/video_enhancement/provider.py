@@ -55,7 +55,7 @@ class MediaKitClient:
         except MediaKitError:
             raise
         except (httpx.HTTPError, ValueError):
-            raise MediaKitError(localized_message('MediaKit 请求失败，请先核对任务回执')) from None
+            raise MediaKitError(localized_message('增强服务请求失败，可以重试')) from None
 
     async def submit(self, video_url: str, client_token: str, *, queue_id: str | None = None, resolution: str = '1080p') -> str:
         payload = {'video_url': video_url, 'resolution': resolution, 'client_token': client_token}
@@ -64,7 +64,7 @@ class MediaKitClient:
         result = await self._request('POST', '/api/v1/tools/enhance-video-generative', json=payload)
         task_id = result.get('task_id')
         if not isinstance(task_id, str) or not task_id:
-            raise MediaKitError(localized_message('MediaKit 回执缺少任务编号，请核对提交结果'))
+            raise MediaKitError(localized_message('增强服务未返回任务编号，可以重新生成'))
         return task_id
 
     async def query(self, task_id: str) -> MediaKitTask:

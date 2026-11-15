@@ -7,6 +7,7 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
+COPY release.json /app/release.json
 COPY web/ ./
 COPY prompts/home_inspirations.json /app/prompts/home_inspirations.json
 RUN npm run build

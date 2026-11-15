@@ -124,7 +124,9 @@ async def test_old_database_columns_are_added_without_changing_existing_objects(
     from services.schema_compat import ensure_creation_agent_schema
     _, _, asset, scenes = await objects()
     connection = Tortoise.get_connection('default')
-    monkeypatch.setattr('services.schema_compat.settings.DATABASE_URL', 'sqlite://:memory:')
+    sqlite = connection.capabilities.dialect == 'sqlite'
+    monkeypatch.setattr('services.schema_compat.settings.DATABASE_URL',
+                        'sqlite://:memory:' if sqlite else 'postgres://test')
     for table in ('assets', 'asset_variants', 'scenes'):
         await connection.execute_script(f'ALTER TABLE {table} DROP COLUMN deleted_at;')
     try:
@@ -133,7 +135,12 @@ async def test_old_database_columns_are_added_without_changing_existing_objects(
         assert (await Asset.get(id=asset.id)).canonical_name == asset.canonical_name
         assert (await Scene.get(id=scenes[0].id)).description == scenes[0].description
         for table in ('assets', 'asset_variants', 'scenes'):
-            columns = await connection.execute_query_dict(f'PRAGMA table_info({table})')
+            if sqlite:
+                columns = await connection.execute_query_dict(f'PRAGMA table_info({table})')
+            else:
+                columns = await connection.execute_query_dict(
+                    "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1",
+                    [table])
             assert len([column for column in columns if column['name'] == 'deleted_at']) == 1
     finally:
         await ensure_creation_agent_schema()

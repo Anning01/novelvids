@@ -435,3 +435,14 @@ it('keeps the editor on the general prompt during optimization failure and after
   expect(editor.props('modelValue')).toBe('编辑期间的用户改稿')
   expect(toggle.attributes('aria-pressed')).toBe('false')
 })
+
+it('waits for a local model choice when imported settings have no binding', async () => {
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data:{chapter,scenes:[{...scene,metadata:{}}],assets:[],videos:{}}} as never)
+  vi.mocked(api.novelMeta).mockResolvedValue({data:{id:9,name:'导入项目',video_generation_defaults:{
+    model_config_id:null,resolution:'480p',aspect_ratio:'16:9',return_last_frame:true}}} as never)
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data:[model]} as never)
+  const {wrapper} = await render()
+  expect(wrapper.get('.chapter-model-select button').text()).toContain('未选择视频模型')
+  expect(wrapper.get('button[aria-label="生成视频"]').attributes('disabled')).toBeDefined()
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})

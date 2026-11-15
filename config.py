@@ -1,6 +1,8 @@
 import os
 from zoneinfo import ZoneInfo
 
+from services.releases import LOCAL as STUDIO_RELEASE
+
 import dotenv
 
 dotenv.load_dotenv()
@@ -33,7 +35,7 @@ class Settings:
     # 应用配置
     APP_NAME: str = "猫影短剧"
     APP_DESC: str = "基于第三方AI模型的短剧/小说生成平台"
-    VERSION: str = "1.0.0"
+    VERSION: str = STUDIO_RELEASE["version"]
     DEBUG: bool = _env_bool("DEBUG", True)
     GENERATE_SCHEMAS: bool = _env_bool("GENERATE_SCHEMAS", True)
 

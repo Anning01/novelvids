@@ -106,3 +106,34 @@ async def test_episode_source_at_1080p_cannot_be_enhanced_even_with_a_forged_res
     with pytest.raises(ValueError):
         await chapter_exports.quote(source,config.id,AuthContext())
     assert await AiTask.filter(task_type=8).count()==0
+
+
+@pytest.mark.asyncio
+async def test_explicit_retry_creates_new_enhancement_attempt_and_keeps_old_receipts(tmp_path, monkeypatch):
+    from services.video_enhancement.media import inspect_media
+    novel, chapter, _ = await enabled_project()
+    path = tmp_path / 'source.mp4'
+    fixture_video(path, size='864x496')
+    @asynccontextmanager
+    async def materialize(_):
+        yield path
+    monkeypatch.setattr(export_media, 'materialize', materialize)
+    source = await ChapterExport.create(novel_id=novel.id, chapter_id=chapter.id,
+        identity_key='a' * 64, source_version='b' * 64, source_sha256=file_digest(path),
+        source_media_ref='https://media.example/source.mp4', source_probe=inspect_media(path).model_dump(mode='json'))
+    config = await AiModelConfig.create(task_type=8, name='MediaKit', is_active=True, api_key='test', **ENHANCEMENT_PRESET)
+    quote = await chapter_exports.quote(source, config.id, AuthContext())
+    request = ExportEnhanceIn(model_config_id=config.id, source_sha256=quote['source_sha256'], quote_version=quote['quote_version'])
+    old, old_task = await chapter_exports.enhance(source.id, request, AuthContext())
+    old_identity = old.identity_key
+    await AiTask.filter(id=old_task.id).update(status=4, stage='needs_review')
+    old.provider_task_id = 'old-provider-task'
+    await old.save(update_fields=['provider_task_id'])
+    fresh, task = await chapter_exports.enhance(source.id, request, AuthContext())
+    assert fresh.id != old.id and task.id != old_task.id
+    assert task.request_params['provider_client_token'] != old_identity
+    await old.refresh_from_db()
+    assert old.provider_task_id == 'old-provider-task' and old.identity_key != fresh.identity_key
+    repeated, repeated_task = await chapter_exports.enhance(source.id, request, AuthContext())
+    assert repeated.id == fresh.id and repeated_task.id == task.id
+    assert await ChapterExport.filter(parent_export_id=source.id).count() == 2

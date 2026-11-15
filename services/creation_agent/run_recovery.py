@@ -44,7 +44,7 @@ async def resume_source(conversation, task_id):
     task = await AiTask.get(id=task_id)
     root = await recovery_root({'task_id': str(task.id)})
     if task.status != 4 or task.request_params.get('operation') or source.run_input.get('targets') or source.run_input.get('write_scope') not in {'chapter', 'project'}:
-        raise HTTPException(409, '当前任务不能复用规划步骤，请核对已有成果后提交新要求')
+        raise HTTPException(409, '当前任务不能沿用规划步骤，请重新提交生成要求')
     if task.request_params.get('has_creation_plan') or await PromptChange.filter(task=task).exists() or await AgentOperation.filter(task=task, key__startswith='submit:').exists():
         raise HTTPException(409, '此任务已有生产或保存记录，请从具体失败步骤继续')
     if await AgentOperation.filter(task_id=root, key='recovery:repair', state='completed').exists():
@@ -53,8 +53,6 @@ async def resume_source(conversation, task_id):
     failure = await AgentOperation.get_or_none(task_id=root, key='recovery:failure')
     if failure and any(issue.get('code') == 'output_length' for issue in failure.result.get('issues', [])):
         raise HTTPException(409, '输出额度不足，请调整输出设置或模型后发起新任务')
-    if any(row.state in {'uncertain', 'running'} for row in rows):
-        raise HTTPException(409, '仍有调用结果待核对，不能重复提交')
     checkpoint = await AgentOperation.get_or_none(task_id=root, key='recovery:inputs', state='completed')
     if checkpoint is None or checkpoint.result['project_revision'] != await project_revision(conversation.novel_id):
         raise HTTPException(409, '原文、对象或约束已有变化，请重新规划')
@@ -68,7 +66,7 @@ async def resume_source(conversation, task_id):
 
 async def copy_planning_receipts(source_rows, task):
     for row in source_rows:
-        if row.state == 'failed' and row.key.startswith('model:'):
+        if row.state in {'failed', 'uncertain', 'running'} and row.key.startswith('model:'):
             await AgentOperation.create(task=task, key=row.key, state='pending', external=row.external,
                 result={'recovered_failure': True})
             continue

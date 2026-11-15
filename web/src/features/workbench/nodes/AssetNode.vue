@@ -10,7 +10,7 @@ import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
 import { notice } from '@/shared/notice'
-import { estimateImageCost } from '@/shared/modelPricing'
+import { estimateAssetImageCost } from '@/shared/modelPricing'
 import AssetDefaultImage from '../components/AssetDefaultImage.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import ImageAnnotationDialog from '../components/ImageAnnotationDialog.vue'
@@ -409,10 +409,8 @@ registerWorkbenchPromptAction(props.id, {
   get busyLabel() { return tr('生成中') },
   enabled: canGenerate,
   busy,
-  cost: computed(() => estimateImageCost(
-    selectedImageModel.value?.pricing,
-    imageParameterValue.value.clarity,
-    imageParameterValue.value.generationCount,
+  cost: computed(() => estimateAssetImageCost(
+    selectedImageModel.value, imageParameterValue.value, materialMentions.value.filter(item => item.hasImage).length,
   )),
   costPricing: computed(() => selectedImageModel.value?.pricing),
   controls: [

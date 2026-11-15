@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, API_BASE, authHeaders, mediaUrl } from '@/api'
 import { useAuthStore } from '@/features/auth/authStore'
 import { tr } from '@/i18n'
@@ -24,9 +24,10 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
   const quoting = ref(false), uncertain = ref(false), submittedId = ref(0)
   const awaitingSource = ref(false)
   const resultVideo = shallowRef<Video | null>(null)
+  const dismissedRuns = ref(new Set<number>())
   const source = computed(() => rows.value.find(row => !row.parent_export_id))
   const run = computed(() => rows.value.find(row => row.id === submittedId.value)
-    || rows.value.find(row => row.parent_export_id && (running(row) || row.stage === 'needs_review' || row.applied_to_scene)))
+    || rows.value.find(row => !dismissedRuns.value.has(row.id) && row.parent_export_id && (running(row) || row.stage === 'needs_review' || row.applied_to_scene)))
   const canWrite = computed(() => auth.enabled !== true || auth.role === 'super' || ['admin', 'creator'].includes(auth.role || ''))
   const scope = computed(() => `${video.value.id}:${auth.activeTeamId}:${auth.user?.id}:${auth.role}`)
   const model = computed(() => models.value.find(item => String(item.id) === modelId.value))
@@ -141,6 +142,24 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
     }
   }
 
+  async function retry() {
+    if (submitting.value || !canWrite.value) return
+    if (run.value && running(run.value)) { uncertain.value = false; await refresh(); return }
+    if (run.value) dismissedRuns.value.add(run.value.id)
+    submittedId.value = 0
+    uncertain.value = false
+    actionError.value = ''
+    quoteError.value = ''
+    quotedKey = ''
+    await refresh()
+    for (const row of rows.value) {
+      if (row.parent_export_id && [4, 5].includes(row.status || 0)) dismissedRuns.value.add(row.id)
+    }
+    await nextTick()
+    await fetchQuote()
+    await submit(true)
+  }
+
   async function apply(row: ChapterExport) {
     if (submitting.value || !canWrite.value) return
     const revision = generation, current = scope.value
@@ -172,7 +191,7 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
     finally { if (valid(revision, current)) submitting.value = false }
   }
 
-  async function submit() {
+  async function submit(restart = false) {
     const confirmedQuote = quote.value, confirmedSource = source.value, key = quoteKey.value
     if (!key || key !== quotedKey || !confirmedQuote || !confirmedSource || confirmedQuote.source_sha256 !== confirmedSource.source_sha256 || submitting.value || error.value) return
     if (confirmedQuote.reused_export_id) {
@@ -186,7 +205,9 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
     submitting.value = true; actionError.value = ''
     try {
       // The inline confirmation submits exactly the source, model, target and quote the user saw.
-      const response = await exportApi.enhance(confirmedSource.id, selectedModel, confirmedQuote, selectedResolution)
+      const response = restart
+        ? await exportApi.enhance(confirmedSource.id, selectedModel, confirmedQuote, selectedResolution, true)
+        : await exportApi.enhance(confirmedSource.id, selectedModel, confirmedQuote, selectedResolution)
       if (!valid(revision, current)) return
       submittedId.value = response.data.export_id
       invalidateHistory()
@@ -233,5 +254,5 @@ export function useVideoEnhancement(video: Readonly<Ref<Video>>, visible: Readon
   onUnmounted(() => { alive = false; generation++; quoteRevision++; clearInterval(interval); window.removeEventListener('focus', focus) })
   return { rows, models, modelId, resolution, source, run, model, size, shortSide, target, resolutions, locked,
     loadingModels, loadingHistory, preparing, submitting, quoting, uncertain, submittedId, quote, error, quoteError,
-    canWrite, background, resultVideo, sourceReady, submittedQuote, fetchQuote, refresh, submit, apply, restoreOriginal, download }
+    canWrite, background, resultVideo, sourceReady, submittedQuote, fetchQuote, refresh, retry, submit, apply, restoreOriginal, download }
 }

@@ -121,9 +121,16 @@ async def transfer(project_id,user,layouts=None):
         plan=export_plan(await project_snapshot(project.id,browser_layouts=layouts),project.team_id)
     except ArchiveError as error:
         raise HTTPException(422,str(error)) from None
+    # Thumbnails viewed before migration can be cached for a year without CORS headers.
+    # Give unsigned storage downloads a separate, stable browser cache entry.
+    storage_origin = urlsplit(resolve_media_url('uploads/0/migration.webp') or '').netloc
     for file in plan['files']:
         if file['authenticated']:
             file['url']=file['url'].replace('/api/video/exports/',PREFIX+'/exports/',1)
+        else:
+            url = urlsplit(file['url'])
+            if storage_origin and url.scheme == 'https' and url.netloc == storage_origin and not url.query:
+                file['url'] = url._replace(query='cat-migration=1').geturl()
     return ResponseSchema(data=plan)
 
 

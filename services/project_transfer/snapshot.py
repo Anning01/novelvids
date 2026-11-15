@@ -89,6 +89,12 @@ async def project_snapshot(novel_id: int, *, browser_layouts=None) -> dict:
             shot["asset_ids"] = sorted(by_scene.get(shot["id"], []))
             library_ids.update(ref["library_resource_id"] for ref in (shot["metadata"] or {}).get("video_reference_media", [])
                                if isinstance(ref, dict) and isinstance(ref.get("library_resource_id"), int))
+        exports = await rows(ChapterExport, novel_id=novel_id, chapter_id__in=[c["id"] for c in chapters], collection_complete=True)
+        export_ids = {row["id"] for row in exports}
+        for row in exports:
+            # Incomplete source renders are intentionally absent from the portable collection.
+            if row.get("parent_export_id") not in export_ids:
+                row["parent_export_id"] = None
         return {
             "sync_works":creative_value(await mappings_for(novel_id,db)),
             "portfolio":await rows(PortfolioWork,novel_id=novel_id),
@@ -99,7 +105,7 @@ async def project_snapshot(novel_id: int, *, browser_layouts=None) -> dict:
             "videos": await rows(Video, scene__chapter__novel_id=novel_id, scene__deleted_at__isnull=True),
             "editor_assets": await rows(EditorAsset, novel_id=novel_id),
             "edit_drafts": await rows(ChapterEditDraft, chapter__novel_id=novel_id),
-            "exports": await rows(ChapterExport, novel_id=novel_id, chapter_id__in=[c["id"] for c in chapters], collection_complete=True),
+            "exports": exports,
             "publications": await rows(FinishedEpisodePublication, chapter__novel_id=novel_id),
             "remake_sources": await rows(RemakeSource, novel_id=novel_id),
         }
