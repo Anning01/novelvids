@@ -35,6 +35,7 @@ import CatalogResourcePicker from '@/features/resource-library/CatalogResourcePi
 import { catalogApi, type CatalogResource } from '@/features/resource-library/catalog'
 import ImageAnnotationEditor from '@/components/ImageAnnotationEditor.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
+import { assetGallery } from '@/shared/imageGallery'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
 import { api, mediaUrl, persistedMediaRef } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
@@ -78,9 +79,10 @@ type AssetEditorFormSnapshot = {
 
 const VARIANT_EDITOR_FORM_KEY = 'editor_form'
 
-const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode; initialVariantId?: number }>(), {
+const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode; initialVariantId?: number; previewAssets?: Asset[] }>(), {
   episodeNumbers: () => [],
   initialMode: 'ai',
+  previewAssets: () => [],
 })
 const emit = defineEmits<{ close: []; created: [asset: Asset]; saved: [asset: Asset]; 'generation-started': [generation: AssetActiveGeneration] }>()
 
@@ -173,6 +175,7 @@ const selectedVariant = ref<AssetVariant | null>(null)
 const variantDraft = ref<AssetVariantDraft | null>(null)
 const variantStripRef = ref<{ upsertVariant: (variant: AssetVariant) => void } | null>(null)
 const lightboxImage = ref('')
+const lightboxHistory = ref(false)
 const lightboxAlt = ref('')
 const lightboxFormat = ref('')
 const annotationOpen = ref(false)
@@ -546,7 +549,21 @@ function imageInfoLabel(url: string, formatHint?: string) {
   return resolveImageFormat(url, formatHint)
 }
 
-function openImageLightbox(url: string, alt: string, formatHint?: string) {
+const previewGallery = computed(() => {
+  const current = promptSourceAsset.value || props.asset
+  if (!current) return assetGallery(props.previewAssets)
+  const updated: Asset = {...current, variants: ownVariants.value.map(variant =>
+    variant.id === selectedVariant.value?.id && generatedImage.value
+      ? {...variant, images: [generatedImage.value]} : variant),
+    main_image: !selectedVariant.value && !variantDraft.value?.is_new && generatedImage.value ? generatedImage.value : current.main_image}
+  const assets = props.previewAssets.some(asset => asset.id === current.id)
+    ? props.previewAssets.map(asset => asset.id === current.id ? updated : asset)
+    : [...props.previewAssets, updated]
+  return assetGallery(assets)
+})
+
+function openImageLightbox(url: string, alt: string, formatHint?: string, history = false) {
+  lightboxHistory.value = history
   lightboxImage.value = mediaUrl(url)
   lightboxAlt.value = alt
   lightboxFormat.value = resolveImageFormat(url, formatHint)
@@ -1475,7 +1492,7 @@ onUnmounted(() => {
             <div v-else-if="!visibleGenerationHistory.length" class="asset-generation-history__state">{{ tr('暂无其他生成记录') }}</div>
             <div v-else class="asset-generation-history__list">
               <article v-for="record in visibleGenerationHistory" :key="record.id" :class="`is-status-${record.status}`">
-                <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="tr('放大查看{p0}的生成图片', { p0: formatHistoryTime(record.created_at) })" @click="openImageLightbox(record.images[0], tr('{p0}的历史生成图片', { p0: name }), record.output_format)">
+                <button v-if="record.images[0]" type="button" class="asset-generation-history__image" :aria-label="tr('放大查看{p0}的生成图片', { p0: formatHistoryTime(record.created_at) })" @click="openImageLightbox(record.images[0], tr('{p0}的历史生成图片', { p0: name }), record.output_format, true)">
                   <img :src="record.image_thumbnails?.[0] || imageDerivativeUrl(record.images[0])" :alt="tr('{p0}的历史生成图片', { p0: name })" loading="lazy" decoding="async" />
                   <span>{{ imageInfoLabel(record.images[0], record.output_format) }}</span>
                 </button>
@@ -1666,7 +1683,7 @@ onUnmounted(() => {
   </Teleport>
   <AudioReferencePicker :open="voicePickerOpen" :selected-id="voiceReferenceId" :novel-id="props.asset?.novel_id" @close="voicePickerOpen = false" @choose="selectVoiceReference" />
   <CatalogResourcePicker v-if="resourcePickerOpen" :open="resourcePickerOpen" kind="image" :max-selection="10 - referenceImagePreviews.length" @close="resourcePickerOpen = false" @choose="chooseReferenceResources" />
-  <ImageLightbox :open="Boolean(lightboxImage)" :src="lightboxImage" :alt="lightboxAlt" :format="lightboxFormat" @close="closeImageLightbox" />
+  <ImageLightbox :images="lightboxHistory ? [] : previewGallery" :open="Boolean(lightboxImage)" :src="lightboxImage" :alt="lightboxAlt" :format="lightboxFormat" @close="closeImageLightbox" />
   <ImageAnnotationEditor
     :open="annotationOpen"
     :image-url="generatedImage"

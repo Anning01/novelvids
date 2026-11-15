@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { provide } from 'vue'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
@@ -42,6 +43,7 @@ import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModel
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
+import { storyboardGallery, storyboardGalleryKey } from '@/shared/imageGallery'
 import { modelImageMentions } from '@/shared/modelImageMentions'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
@@ -176,6 +178,7 @@ const activeChapterId = ref(0)
 const activeChapter = ref<Chapter | null>(null)
 const assets = ref<Asset[]>([])
 const scenes = ref<Scene[]>([])
+provide(storyboardGalleryKey, computed(() => storyboardGallery(scenes.value)))
 const activeSceneId = ref(0)
 const chapterToolbarHeight = ref(104)
 const videoModels = ref<VideoGenerationModel[]>([])
@@ -2892,6 +2895,7 @@ onBeforeUnmount(() => {
       @apply-defaults="applyVideoDefaults"
     />
     <AssetCreateDialog
+      :preview-assets="assets"
       :open="Boolean(editingAsset)"
       :kind="editingAssetKind(editingAsset)"
       :novel-id="projectId"

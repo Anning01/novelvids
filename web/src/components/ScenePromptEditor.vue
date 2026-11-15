@@ -3,10 +3,11 @@ import type { Scene } from '@/types'
 import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { tr } from '@/i18n'
 
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
+import { computed, inject, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue'
 import { AtSign, Boxes, Clock3, Film, Image as ImageIcon, Map as MapIcon, Pause, UserRound, Volume2, X } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import { storyboardGalleryKey } from '@/shared/imageGallery'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { DURATION_MENTION_SOURCE, parseDurationMention } from '@/shared/durationMention'
 
@@ -91,6 +92,11 @@ const groupedOptions = computed(() => {
 const activeOption = computed(() => filteredOptions.value[activeIndex.value] || null)
 const durationMentionOption = computed(() => filteredOptions.value.find(item => item.kind === 'duration') || null)
 const imagePreview = computed(() => previewOption.value?.kind !== 'video' ? previewOption.value : null)
+const chapterSheets = inject(storyboardGalleryKey, computed(() => []))
+const previewGallery = computed(() => chapterSheets.value.some(item => item.src === imagePreview.value?.previewUrl)
+  ? chapterSheets.value
+  : renderedOptions.value.filter(item => item.previewUrl && ['person', 'scene', 'item', 'image'].includes(item.kind))
+    .map(item => ({src: item.previewUrl!, alt: item.label})))
 const hoverPreviewSource = computed(() => hoverPreviewOption.value?.previewUrl || hoverPreviewOption.value?.thumbnailUrl || '')
 const hoverPreviewStyle = computed(() => ({ left: `${hoverPreviewPosition.value.left}px`, top: `${hoverPreviewPosition.value.top}px` }))
 const menuStyle = computed(() => ({ left: `${menuPosition.value.left}px`, top: `${menuPosition.value.top}px` }))
@@ -796,6 +802,7 @@ onBeforeUnmount(() => {
 
     <ImageLightbox
       :open="Boolean(imagePreview?.previewUrl)"
+      :images="previewGallery"
       :src="imagePreview?.previewUrl || ''"
       :alt="imagePreview?.label || tr('引用图片')"
       @close="closePreview"

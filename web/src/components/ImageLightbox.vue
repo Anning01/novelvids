@@ -1,127 +1,170 @@
 <script setup lang="ts">
-import { tr } from '@/i18n'
-
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Maximize2, Minus, Plus, RotateCcw, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw, X } from 'lucide-vue-next'
+import { tr } from '@/i18n'
+import type { PreviewImage } from '@/shared/imageGallery'
 
 const props = withDefaults(defineProps<{
   open: boolean
   src: string
   alt: string
   format?: string
-}>(), {
-  format: '',
-})
+  images?: PreviewImage[]
+}>(), { format: '', images: () => [] })
 const emit = defineEmits<{ close: [] }>()
-
+const dialog = ref<HTMLDialogElement | null>(null)
+const track = ref<HTMLElement | null>(null)
+const slides = ref<PreviewImage[]>([])
+const index = ref(0)
 const zoom = ref(1)
-const dimensions = ref('')
-const dialog = ref<HTMLElement | null>(null)
-let previousFocus: HTMLElement | null = null
-
-const normalizedFormat = computed(() => {
-  if (props.format) return props.format.toUpperCase().replace('JPG', 'JPEG')
-  const dataMime = props.src.match(/^data:image\/([^;,]+)/i)?.[1]
-  if (dataMime) return dataMime.toUpperCase().replace('JPG', 'JPEG')
-  const extension = props.src.split(/[?#]/, 1)[0]?.match(/\.([a-z0-9]+)$/i)?.[1]
-  return extension?.toUpperCase().replace('JPG', 'JPEG') || 'IMAGE'
+const loaded = ref<Record<string, string>>({})
+const failed = ref<Record<string, boolean>>({})
+let scrollTimer: ReturnType<typeof setTimeout> | undefined
+let resize: ResizeObserver | undefined
+const current = computed(() => slides.value[index.value])
+const metadata = computed(() => {
+  const item = current.value
+  const format = item?.format || item?.src.match(/^data:image\/([^;,]+)/i)?.[1]
+    || item?.src.split(/[?#]/, 1)[0]?.match(/\.([a-z0-9]+)$/i)?.[1] || 'IMAGE'
+  return [item && loaded.value[item.src], format.toUpperCase().replace('JPG', 'JPEG')].filter(Boolean).join(' / ')
 })
-const metadata = computed(() => [dimensions.value, normalizedFormat.value].filter(Boolean).join(' / '))
-const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
-
-function onImageLoad(event: Event) {
-  const image = event.currentTarget as HTMLImageElement
-  dimensions.value = image.naturalWidth && image.naturalHeight
-    ? `${image.naturalWidth} × ${image.naturalHeight}`
-    : ''
+function align() {
+  if (track.value) track.value.scrollLeft = index.value * track.value.clientWidth
 }
-
-function zoomIn() {
-  zoom.value = Math.min(3, Number((zoom.value + 0.25).toFixed(2)))
-}
-
-function zoomOut() {
-  zoom.value = Math.max(0.5, Number((zoom.value - 0.25).toFixed(2)))
-}
-
-function resetZoom() {
+function select(next: number) {
+  if (next < 0 || next >= slides.value.length) return
+  index.value = next
   zoom.value = 1
+  align()
 }
-
-function toggleZoom() {
-  zoom.value = zoom.value === 1 ? 2 : 1
-}
-
-function onDialogKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); emit('close'); return }
-  if (event.key !== 'Tab') return
-  const buttons = [...(dialog.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [])]
-  const first = buttons[0], last = buttons.at(-1)
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
-}
-watch(() => props.open, async open => {
-  if (!open) { previousFocus?.focus(); return }
-  previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  zoom.value = 1
-  dimensions.value = ''
+watch(index, async () => {
   await nextTick()
-  dialog.value?.querySelector<HTMLButtonElement>('[aria-label="' + tr('关闭大图') + '"]')?.focus()
+  dialog.value?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({block: 'nearest', inline: 'nearest'})
+})
+function settleScroll() {
+  clearTimeout(scrollTimer)
+  scrollTimer = setTimeout(() => {
+    if (!track.value?.clientWidth) return
+    const next = Math.round(track.value.scrollLeft / track.value.clientWidth)
+    if (next !== index.value) select(next)
+  }, 120)
+}
+function keydown(event: KeyboardEvent) {
+  // The parent asset editor also handles Escape; let the native dialog own dismissal.
+  event.stopPropagation()
+  if (event.target instanceof HTMLElement && event.target.closest('input,textarea,select,[contenteditable="true"]')) return
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    select(index.value + (event.key === 'ArrowLeft' ? -1 : 1))
+  }
+}
+function load(event: Event, item: PreviewImage) {
+  const image = event.currentTarget as HTMLImageElement
+  loaded.value[item.src] = `${image.naturalWidth} × ${image.naturalHeight}`
+}
+function close() { dialog.value?.close() }
+watch(() => [props.open, props.src] as const, async ([open]) => {
+  await nextTick()
+  if (!dialog.value) return
+  if (!open) { dialog.value.close(); return }
+  // Freeze the browsing sequence while open: background generations must not move the current slide.
+  slides.value = props.images.filter(item => item.src)
+  if (!slides.value.some(item => item.src === props.src) && props.src) {
+    slides.value = [{ src: props.src, alt: props.alt, format: props.format }, ...slides.value]
+  }
+  index.value = Math.max(0, slides.value.findIndex(item => item.src === props.src))
+  zoom.value = 1
+  await nextTick()
+  if (!props.open || !dialog.value) return
+  if (!dialog.value.open) dialog.value.showModal()
+  align()
+  resize?.disconnect()
+  if (track.value) { resize = new ResizeObserver(align); resize.observe(track.value) }
 }, { immediate: true })
-onBeforeUnmount(() => { if (props.open) previousFocus?.focus() })
+onBeforeUnmount(() => { clearTimeout(scrollTimer); resize?.disconnect(); dialog.value?.close() })
 </script>
 
 <template>
   <Teleport to="body">
-    <Transition name="image-lightbox">
-      <div v-if="open" ref="dialog" class="image-lightbox" role="dialog" aria-modal="true" :aria-label="tr('图片放大查看')" @keydown="onDialogKeydown" @click.self="emit('close')">
+    <dialog ref="dialog" class="image-lightbox" :aria-label="tr('图片放大查看')" @keydown="keydown" @close="emit('close')">
+      <template v-if="open">
         <header class="image-lightbox__toolbar">
-          <div>
-            <Maximize2 :size="16" />
+          <div class="image-lightbox__heading">
+            <strong>{{ current?.alt || alt }}</strong>
             <span>{{ metadata }}</span>
           </div>
           <nav :aria-label="tr('图片缩放控制')">
-            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('缩小图片')" :title="tr('缩小')" :disabled="zoom <= 0.5" @click="zoomOut"><Minus :size="16" /></AppButton>
-            <output aria-live="polite">{{ zoomLabel }}</output>
-            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('放大图片')" :title="tr('放大')" :disabled="zoom >= 3" @click="zoomIn"><Plus :size="16" /></AppButton>
-            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('恢复适应窗口')" :title="tr('恢复适应窗口')" @click="resetZoom"><RotateCcw :size="15" /></AppButton>
-            <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭大图')" :title="tr('关闭')" @click="emit('close')"><X :size="18" /></AppButton>
+            <button type="button" :aria-label="tr('缩小图片')" :disabled="zoom <= 0.5" @click="zoom = Math.max(0.5, zoom - .25)"><Minus :size="18" /></button>
+            <output>{{ Math.round(zoom * 100) }}%</output>
+            <button type="button" :aria-label="tr('放大图片')" :disabled="zoom >= 3" @click="zoom = Math.min(3, zoom + .25)"><Plus :size="18" /></button>
+            <button type="button" :aria-label="tr('恢复适应窗口')" @click="zoom = 1"><RotateCcw :size="18" /></button>
+            <button type="button" autofocus :aria-label="tr('关闭大图')" @click="close"><X :size="22" /></button>
           </nav>
         </header>
-        <div class="image-lightbox__stage">
-          <img :src="src" :alt="alt" :style="{ transform: `scale(${zoom})` }" @click="toggleZoom" @load="onImageLoad" />
+        <div class="image-lightbox__viewport">
+          <div ref="track" class="image-lightbox__track" :class="{ 'is-zoomed': zoom > 1 }" @scroll.passive="settleScroll">
+            <div v-for="(item, position) in slides" :key="`${position}:${item.src}`" class="image-lightbox__stage" :class="{ 'is-zoomed': position === index && zoom > 1 }"
+              role="group" :aria-label="`${position + 1} / ${slides.length} · ${item.alt}`" :inert="position !== index ? true : undefined">
+              <p v-if="failed[item.src]" role="status">{{ tr('图片加载失败，可切换其他图片') }}</p>
+              <template v-else-if="Math.abs(position - index) <= 1">
+                <span v-if="!loaded[item.src]" class="image-lightbox__loading">{{ tr('正在加载图片…') }}</span>
+                <img :src="item.src" :alt="item.alt" :style="{ transform: `scale(${position === index ? zoom : 1})` }" draggable="false"
+                  @click="zoom = zoom === 1 ? 2 : 1" @load="load($event, item)" @error="failed[item.src] = true" />
+              </template>
+            </div>
+          </div>
+          <template v-if="slides.length > 1">
+            <button type="button" class="image-lightbox__previous" :aria-label="tr('上一张')" :disabled="index === 0" @click="select(index - 1)"><ChevronLeft :size="28" /></button>
+            <button type="button" class="image-lightbox__next" :aria-label="tr('下一张')" :disabled="index === slides.length - 1" @click="select(index + 1)"><ChevronRight :size="28" /></button>
+          </template>
         </div>
-        <p>{{ tr('点击图片可在适应窗口和 200% 之间切换') }}</p>
-      </div>
-    </Transition>
+        <footer class="image-lightbox__footer">
+          <div role="status" aria-live="polite" aria-atomic="true">{{ index + 1 }} / {{ slides.length }} · {{ current?.alt }}</div>
+          <nav v-if="slides.length > 1" class="image-lightbox__positions" :aria-label="tr('选择预览图片')">
+            <button v-for="(item, position) in slides" :key="position" type="button" :aria-label="`${position + 1} · ${item.alt}`"
+              :aria-current="position === index ? 'true' : undefined" @click="select(position)">{{ item.label || position + 1 }}</button>
+          </nav>
+          <small>{{ slides.length > 1 ? tr('左右滑动或按 ← → 切换，点击图片放大，Esc 关闭') : tr('点击图片可在适应窗口和 200% 之间切换') }}</small>
+        </footer>
+      </template>
+    </dialog>
   </Teleport>
 </template>
 
 <style scoped>
-.image-lightbox { position: fixed; inset: 0; z-index: 180; display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: 12px; padding: 18px; color: #f2f3f6; background: rgb(19 21 27 / 94%); backdrop-filter: blur(14px); }
+.image-lightbox { position: fixed; inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 16px; box-sizing: border-box; overflow: hidden; border: 0; color: #f2f3f6; background: #13151b; }
+.image-lightbox[open] { display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: 12px; }
+.image-lightbox:modal { overscroll-behavior: contain; }
+.image-lightbox::backdrop { background: #13151b; overflow: hidden; overscroll-behavior: contain; }
 .image-lightbox__toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.image-lightbox__toolbar > div,.image-lightbox__toolbar nav { display: flex; align-items: center; gap: 8px; }
-.image-lightbox__toolbar > div { min-width: 0; color: #c8cbd3; font-size: 11px; font-variant-numeric: tabular-nums; }
-.image-lightbox__toolbar nav { padding: 4px; border-radius: 12px; background: rgb(44 47 56 / 82%); }
-.image-lightbox__toolbar :deep(.app-button) { color: #e7e9ef; }
-.image-lightbox__toolbar :deep(.app-button:hover),.image-lightbox__toolbar :deep(.app-button:focus-visible) { color: #fff; background: rgb(255 255 255 / 10%); }
-.image-lightbox__toolbar output { min-width: 46px; color: #d5d8df; font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; }
-.image-lightbox__stage { display: grid; min-width: 0; min-height: 0; place-items: center; overflow: auto; overscroll-behavior: contain; }
-.image-lightbox__stage img { display: block; max-width: calc(100vw - 48px); max-height: calc(100dvh - 132px); object-fit: contain; cursor: zoom-in; transform-origin: center; transition: transform .22s cubic-bezier(.2,.72,.2,1); user-select: none; }
-.image-lightbox__stage img[style*="scale(2"],.image-lightbox__stage img[style*="scale(3"] { cursor: zoom-out; }
-.image-lightbox > p { margin: 0; color: #8f949f; font-size: 10px; text-align: center; }
-.image-lightbox-enter-active,.image-lightbox-leave-active { transition: opacity .2s ease; }
-.image-lightbox-enter-active .image-lightbox__stage img,.image-lightbox-leave-active .image-lightbox__stage img { transition: opacity .2s ease,transform .24s cubic-bezier(.2,.72,.2,1); }
-.image-lightbox-enter-from,.image-lightbox-leave-to { opacity: 0; }
-.image-lightbox-enter-from .image-lightbox__stage img,.image-lightbox-leave-to .image-lightbox__stage img { opacity: 0; transform: scale(.96) !important; }
+.image-lightbox__heading { display: grid; gap: 4px; min-width: 0; }
+.image-lightbox__heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.image-lightbox__heading span,.image-lightbox__footer small { color: #b8bdc9; font-size: 12px; }
+.image-lightbox nav { display: flex; align-items: center; gap: 4px; }
+.image-lightbox button { display: inline-grid; place-items: center; flex-shrink: 0; min-width: 44px; min-height: 44px; padding: 8px; border: 1px solid #4a4f5b; border-radius: 8px; color: inherit; background: #282d37; cursor: pointer; font: inherit; touch-action: manipulation; }
+.image-lightbox button:hover:not(:disabled) { background: #3a4353; }
+.image-lightbox button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.image-lightbox button:disabled { opacity: .35; cursor: default; }
+.image-lightbox output { min-width: 45px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; }
+.image-lightbox__viewport { position: relative; min-width: 0; min-height: 0; }
+.image-lightbox__track { display: flex; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior: contain; scrollbar-width: none; }
+.image-lightbox__track.is-zoomed { overflow-x: hidden; }
+.image-lightbox__stage { position: relative; flex: 0 0 100%; height: 100%; display: grid; grid-template-rows: minmax(0,1fr); place-items: center; min-width: 0; min-height: 0; overflow: hidden; scroll-snap-align: start; scroll-snap-stop: always; }
+.image-lightbox__stage.is-zoomed { place-items: start; overflow: auto; overscroll-behavior: contain; }
+.image-lightbox__stage img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; transform-origin: center; user-select: none; }
+.image-lightbox__stage.is-zoomed img { transform-origin: top left; cursor: zoom-out; }
+.image-lightbox__loading { position: absolute; color: #b8bdc9; }
+.image-lightbox__previous,.image-lightbox__next { position: absolute; top: 50%; transform: translateY(-50%); }
+.image-lightbox__previous { left: 8px; }.image-lightbox__next { right: 8px; }
+.image-lightbox__footer { display: grid; justify-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.image-lightbox__positions { max-width: 100%; overflow-x: auto; padding: 3px; scrollbar-width: thin; scrollbar-color: #555d6d #20252e; }
+.image-lightbox__positions button { min-width: 36px; min-height: 36px; font-size: 12px; }
+.image-lightbox__positions button[aria-current] { color: #13151b; background: #f2f3f6; }
 @media (max-width: 640px) {
   .image-lightbox { padding: 10px; }
-  .image-lightbox__toolbar :deep(.app-button) { min-width: 44px; min-height: 44px; }
-  .image-lightbox__toolbar { align-items: flex-start; flex-direction: column; }
-  .image-lightbox__toolbar nav { align-self: flex-end; }
-  .image-lightbox__stage img { max-width: calc(100vw - 20px); max-height: calc(100dvh - 164px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .image-lightbox,.image-lightbox__stage img { transition-duration: .01ms !important; }
+  .image-lightbox__toolbar { flex-wrap: wrap; gap: 8px; }
+  .image-lightbox__heading { flex: 1 1 100%; }
+  .image-lightbox__toolbar nav { margin-left: auto; }
+  .image-lightbox__footer small { text-align: center; }
 }
 </style>

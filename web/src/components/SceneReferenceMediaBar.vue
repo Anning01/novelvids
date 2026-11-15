@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, ref, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { Film, ImageIcon, LoaderCircle, Plus, Volume2, X } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { catalogApi } from '@/features/resource-library/catalog'
@@ -9,6 +9,7 @@ import type { Scene, VideoGenerationModel, VideoReferenceMedia } from '@/types'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import { storyboardGalleryKey } from '@/shared/imageGallery'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { withBlockingReference } from '@/shared/sceneBlockingReference'
 import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
@@ -59,6 +60,11 @@ const gallery = computed(() => {
   }
   return entries
 })
+const chapterSheets = inject(storyboardGalleryKey, computed(() => []))
+const previewGallery = computed(() => chapterSheets.value.some(item => item.src === previewImage.value?.url)
+  ? chapterSheets.value
+  : gallery.value.filter(entry => entry.item.type === 'image' && !unavailableReference(entry.item))
+    .map(entry => ({src: referenceUrl(entry.item), alt: entry.item.name || tr('参考图片')})))
 const uploadedImages = computed(() => (props.scene && !props.disabled ? withBlockingReference(props.scene, props.media) : props.media).filter(item => item.type === 'image').length)
 const uploadedVideos = computed(() => props.media.filter(item => item.type === 'video').length)
 const totalVideoDuration = computed(() => props.media
@@ -179,6 +185,7 @@ function closeImagePreview() {
     <div v-if="sceneId" class="reference-save-actions"><span v-for="item in media.filter(value => value.type === 'video' && !value.library_resource_id)" :key="item.url"><small>{{ item.name || tr('参考视频') }}</small><SaveVideoToLibrary :source="{ source: 'scene', source_id: sceneId, media_url: item.url, name: item.name || tr('参考视频') }" /></span></div>
     <ImageLightbox
       :open="Boolean(previewImage)"
+      :images="previewGallery"
       :src="previewImage?.url || ''"
       :alt="previewImage?.name || tr('参考图片')"
       @close="closeImagePreview"

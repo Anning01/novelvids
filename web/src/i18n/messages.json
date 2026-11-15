@@ -13,6 +13,13 @@
 
     "已同步 {p0} 个平台模型，当前版本尚不支持：{p1}": "Synced {p0} platform models. This version does not support: {p1}",
     "等待后台任务完成": "Waiting for active tasks to finish",
+    "图片加载失败，可切换其他图片": "Image failed to load. You can view another image.",
+    "正在加载图片…": "Loading image…",
+    "上一张": "Previous image",
+    "下一张": "Next image",
+    "选择预览图片": "Choose an image",
+    "左右滑动或按 ← → 切换，点击图片放大，Esc 关闭": "Swipe or press ← → to browse. Click to zoom. Esc to close.",
+    "分镜 {p0} · 线稿故事版": "Shot {p0} · Storyboard",
     "工作台更新": "Studio updates",
     "分镜修改尚未保存，请保存后再刷新。": "Save your storyboard edits before refreshing.",
     "确认当前编辑已保存，再载入新版页面。": "Make sure your edits are saved before reloading.",
