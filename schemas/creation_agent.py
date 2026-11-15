@@ -1,6 +1,7 @@
 """Narrow contracts for creation-agent prompt edits."""
 
 from utils.messages import localized_message
+from utils.model_limits import DEFAULT_OUTPUT_TOKENS
 
 from typing import Literal
 from uuid import UUID
@@ -69,7 +70,7 @@ class AgentConfiguration(BaseModel):
 
     def output_model_settings(self, model_limit: int | None = None) -> dict:
         limits = [value for value in (self.max_output_tokens, model_limit) if value is not None]
-        return {'max_tokens': min(limits)} if limits else {}
+        return {'max_tokens': min(limits) if limits else DEFAULT_OUTPUT_TOKENS}
 
     def context_character_limit(self, model_limit: int | None) -> int | None:
         return min((limit for limit in (self.max_context_characters, model_limit) if limit is not None), default=None)

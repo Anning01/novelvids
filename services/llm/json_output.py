@@ -111,8 +111,8 @@ async def create_json_completion(
         request["response_format"] = {"type": "json_object"}
     if thinking in ("enabled", "disabled"):
         request["thinking"] = {"type": thinking}
-    if max_tokens is not None:
-        request["max_tokens"] = max_tokens
+    from utils.model_limits import DEFAULT_OUTPUT_TOKENS
+    request["max_tokens"] = max_tokens if max_tokens is not None else DEFAULT_OUTPUT_TOKENS
     if timeout is not None:
         request["timeout"] = timeout
 

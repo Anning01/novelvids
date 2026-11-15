@@ -160,8 +160,8 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
 
     def transport(outgoing):
         payload = json.loads(outgoing.content)
-        assert 'max_tokens' not in payload
-        reported_output = 2048  # The provider may end a response at its own default limit.
+        assert payload['max_tokens'] == 128000
+        reported_output = 128000
         envelope = {'id': 'truncated', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
         chunks = [
             {**envelope, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'reasoning_content': 'synthetic-reasoning'}, 'finish_reason': None}]},

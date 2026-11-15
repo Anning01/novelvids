@@ -69,7 +69,8 @@ def configured_model(config, limits: AgentConfiguration, *, structured_output=Tr
         OpenAIModelProfile(openai_supports_tool_choice_required=False)
     )
     return UsagePreservingChatModel(config.model, provider=provider, profile=profile,
-                                   settings={'extra_body': extra_body})
+                                   settings={**limits.output_model_settings(getattr(config, 'max_tokens', None)),
+                                             'extra_body': extra_body})
 
 
 def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = False) -> str:

@@ -127,7 +127,7 @@ async def test_gateway_omits_optional_provider_parameters_when_capabilities_are_
     assert "response_format" not in request
     assert "reasoning_effort" not in request
     assert "extra_body" not in request
-    assert "max_tokens" not in request
+    assert request["max_tokens"] == 128000
 
 
 @pytest.mark.asyncio

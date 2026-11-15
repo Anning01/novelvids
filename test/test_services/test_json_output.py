@@ -17,6 +17,15 @@ class ExamAnswer(BaseModel):
     answer: str
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('limit,expected', [(None, 128000), (8192, 8192), (262144, 262144)])
+async def test_output_limit_is_always_sent_and_explicit_values_are_preserved(limit, expected):
+    client, create = fake_client('{"question":"Q","answer":"A"}')
+    await create_json_completion(client, model='test', messages=[{'role': 'user', 'content': 'Q'}],
+                                 response_model=ExamAnswer, max_tokens=limit)
+    assert create.await_args.kwargs['max_tokens'] == expected
+
+
 def fake_client(content: str, finish_reason: str = "stop"):
     create = AsyncMock(return_value=SimpleNamespace(
         choices=[SimpleNamespace(
