@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr, dateLocale } from '@/i18n'
+import { appConfirm } from '@/shared/confirmDialog'
 import { imageReferenceCount } from '@/shared/assetImageDependencies'
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -19,6 +20,7 @@ import {
   RefreshCw,
   Upload,
   Undo2,
+  Trash2,
   UserRound,
   Volume2,
   X,
@@ -166,6 +168,7 @@ const generationRequested = ref(false)
 const generationError = ref('')
 const selectedErrorRecordId = ref('')
 const restoringRecordId = ref('')
+const deletingRecordId = ref('')
 const selectedVariant = ref<AssetVariant | null>(null)
 const variantDraft = ref<AssetVariantDraft | null>(null)
 const variantStripRef = ref<{ upsertVariant: (variant: AssetVariant) => void } | null>(null)
@@ -635,6 +638,27 @@ function selectVariantPreview(variant: AssetVariant | null) {
 
 function updateVariantDraft(draft: AssetVariantDraft | null) {
   variantDraft.value = draft
+}
+
+async function deleteFailedGeneration(record: AssetGenerationRecord) {
+  if (!props.asset || deletingRecordId.value || record.status !== TaskStatusEnum.FAILED) return
+  const assetId = props.asset.id
+  if (!await appConfirm({ title: tr('删除这条失败记录？'),
+    message: tr('删除后不再显示在生成记录中，不影响资产图片和费用记录。'),
+    confirmLabel: tr('删除记录'), tone: 'danger' })) return
+  deletingRecordId.value = record.id
+  try {
+    await api.deleteFailedAssetGeneration(assetId, record.id)
+    if (props.asset?.id === assetId) {
+      generationHistory.value = generationHistory.value.filter(item => item.id !== record.id)
+      if (selectedErrorRecordId.value === record.id) selectedErrorRecordId.value = ''
+    }
+    notice.success(tr('失败记录已删除'))
+  } catch (error) {
+    notice.error((error as Error).message)
+  } finally {
+    deletingRecordId.value = ''
+  }
 }
 
 async function restoreGeneration(record: AssetGenerationRecord) {
@@ -1471,6 +1495,11 @@ onUnmounted(() => {
                     > {{ tr('查看详情') }}<ChevronDown :size="12" />
                     </button>
                   </div>
+                  <AppButton v-if="record.status === TaskStatusEnum.FAILED" type="button" variant="ghost" size="xs"
+                    :disabled="Boolean(deletingRecordId)" :loading="deletingRecordId === record.id"
+                    :aria-label="tr('删除失败记录')" @click="deleteFailedGeneration(record)">
+                    <Trash2 v-if="deletingRecordId !== record.id" :size="12" />{{ tr('删除记录') }}
+                  </AppButton>
                   <AppButton
                     v-if="record.status === TaskStatusEnum.COMPLETED && record.images[0]"
                     type="button"

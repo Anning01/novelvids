@@ -1,4 +1,4 @@
-"""Storyboard model orchestration with bounded continuation batches."""
+"""Generate the complete episode together; split only at actual context/output limits."""
 
 from utils.messages import localized_message
 
@@ -80,7 +80,7 @@ async def generate_storyboard(
     episode_pacing: dict | None = None,
     episode_max_seconds: int | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
-    """Generate fresh bounded calls and carry only a continuity summary."""
+    """Keep the full episode in one request whenever the configured context permits."""
     from services.creation_agent.skill_execution import current_execution
     execution = current_execution.get()
     seen_assets = list(dict.fromkeys(previously_seen_assets or []))
@@ -97,56 +97,50 @@ async def generate_storyboard(
             facts["episode_max_seconds"] = episode_max_seconds
         if duration_range := execution.params.get("shot_duration_range", shot_duration_range):
             facts["shot_duration_range"] = duration_range
-        sections = screenplay_sections(long_text)
+        sections = dict(screenplay_sections(long_text))
+        numbers = [number for number in sections if number is not None]
+        facts['source_scene_numbers'] = numbers
+        facts['segment'] = 'episode'
         shots = []
         scene_numbers = []
         layouts = dict(scene_layouts or {})
-        # Missing flag belongs to an older frozen task; preserve its replay keys.
         generate_blocking_maps = execution.params.get('generate_blocking_maps', True)
         if not generate_blocking_maps:
             facts['generate_blocking_maps'] = False
         plan_continuations = generate_blocking_maps and modern and "blocking_guide" in execution.snapshot.contents
-        for index, (scene_number, content) in enumerate(sections):
-            scene_facts = {**facts, 'chapter': content}
-            if layouts:
-                scene_facts["scene_layouts"] = dict(layouts)
-            if scene_number:
-                scene_facts.update(segment=f'screenplay:{index}:{scene_number}', source_scene_number=scene_number)
-            requirement = asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions)
-            if plan_continuations and scene_number:
-                from prompts.storyboard import scene_continuity_instruction
-                requirement = "\n".join(filter(None, (requirement, scene_continuity_instruction(prompt_language))))
-            options = {"additional_instructions": requirement} if requirement else {}
-            if scene_number:
-                options['activity_label'] = localized_message('生成场次 {p0} 的分镜', p0=scene_number)
-            batch = await execution.generate('storyboard', scene_facts, StructuredSkillStoryboard if modern else SkillStoryboard, **options)
-            previous = None
-            for part, shot in enumerate(batch.shots, 1):
-                if plan_continuations:
-                    from services.storyboard.blocking_plans import ending_state, place_shot
-                    continuation = part > 1 and (scene_number is not None or shot.duration_split_part is not None)
-                    if continuation:
-                        shot = shot.model_copy(update={"duration_split_part": part})
-                        shot = await place_shot(execution, shot, entities, layouts, previous, content,
-                                                f'blocking:{index}:{part}', activity_label=localized_message(
-                                                    '场次 {p0} · 补充第 {p1}/{p2} 镜空间定位图',
-                                                    p0=scene_number or index + 1, p1=part, p2=len(batch.shots)))
-                    else:
-                        shot = shot.model_copy(update={"blocking_map": None, "duration_split_part": None})
-                    previous = ending_state(shot)
-                elif not generate_blocking_maps:
-                    shot = shot.model_copy(update={'blocking_map': None, 'duration_split_part': None})
-                shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
-                scene_numbers.append(scene_number)
-                for name in visible_storyboard_assets(shot, entities):
-                    if name not in seen_assets:
-                        seen_assets.append(name)
+        from prompts.storyboard import episode_storyboard_instruction, scene_continuity_instruction
+        requirement = "\n".join(filter(None, (
+            episode_storyboard_instruction(prompt_language),
+            asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions),
+            scene_continuity_instruction(prompt_language) if plan_continuations and numbers else None,
+        )))
+        batch = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard,
+            additional_instructions=requirement, activity_label=localized_message('生成整集分镜'))
+        previous, previous_number, part = None, None, 0
+        for index, shot in enumerate(batch.shots, 1):
+            scene_number = shot.source_scene_number
+            part = part + 1 if index > 1 and scene_number == previous_number else 1
+            if plan_continuations:
+                from services.storyboard.blocking_plans import ending_state, place_shot
+                continuation = part > 1 and (scene_number is not None or shot.duration_split_part is not None)
+                if continuation:
+                    shot = shot.model_copy(update={"duration_split_part": part})
+                    shot = await place_shot(execution, shot, entities, layouts, previous,
+                        sections.get(scene_number, long_text), f'blocking:episode:{index}')
+                else:
+                    shot = shot.model_copy(update={"blocking_map": None, "duration_split_part": None})
+                previous = ending_state(shot)
+            elif not generate_blocking_maps:
+                shot = shot.model_copy(update={'blocking_map': None, 'duration_split_part': None})
+            previous_number = scene_number
+            shots.append(shot.model_copy(update={"sequence": index}))
+            scene_numbers.append(scene_number)
         result = SkillStoryboard(shots=shots) if not modern else StructuredSkillStoryboard(shots=shots)
         if modern:
             from services.storyboard.validation import prepare_skill_storyboard
             result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,
                                                storyboard_strategy or "cinematic", scene_layouts=scene_layouts)
-        return result, {'model': execution.params['assistant_model_config_id'], 'batch_count': len(sections), 'usage': {},
+        return result, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
                         'source_scene_numbers': scene_numbers}
     strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
     fixed_messages = build_storyboard_messages(
@@ -163,7 +157,7 @@ async def generate_storyboard(
         max_context_characters,
         _message_characters(fixed_messages),
     )
-    chunks = [(number, chunk) for number, content in screenplay_sections(long_text) for chunk in chunker.split(content)]
+    chunks = [(None, chunk) for chunk in chunker.split(long_text)] if max_context_characters is not None else [(None, long_text)]
     scene_numbers = []
     shots = []
     completions: list[Any] = []
@@ -171,7 +165,7 @@ async def generate_storyboard(
 
     while batch_index < len(chunks):
         number, content = chunks[batch_index]
-        previous_shot = shots[-1] if shots and scene_numbers[-1] == number else None
+        previous_shot = shots[-1] if shots else None
         messages = build_storyboard_messages(
             content,
             entities,
@@ -208,7 +202,7 @@ async def generate_storyboard(
         if number is not None and not batch_storyboard.shots:
             raise ValueError(localized_message('分镜模型未返回任何批次结果'))
         for shot in batch_storyboard.shots:
-            scene_numbers.append(number)
+            scene_numbers.append(shot.source_scene_number or number)
             validate_storyboard_duration(shot, shot_duration_range)
             shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
             for name in visible_storyboard_assets(shot, entities):

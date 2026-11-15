@@ -264,3 +264,26 @@ async def test_personal_projects_alone_do_not_trigger_a_default_team(client: Asy
     await personal.refresh_from_db()
     assert personal.team_id is None
     assert await Team.all().count() == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_generation_deletion_requires_project_access_and_editor_role(client):
+    from models.asset import Asset
+    from models.ai_task import AiTask
+    team = await _create_team('History owner')
+    other_team = await _create_team('History outsider')
+    owner, _ = await _create_member('history_owner', team)
+    await _create_member('history_viewer', team, role=TeamRoleEnum.viewer.value)
+    await _create_member('history_outsider', other_team)
+    novel = await _create_novel('History project', team, owner.id)
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='人物')
+    task = await AiTask.create(task_type=2, status=4, request_params={'asset_id': asset.id})
+    path = f'/api/asset/{asset.id}/generation-history/{task.id}'
+    assert (await client.delete(path)).json()['code'] == 401
+    for username, expected in [('history_outsider', 404), ('history_viewer', 403)]:
+        token = await _login(client, username)
+        assert (await client.delete(path, headers=_auth(token))).json()['code'] == expected
+        await task.refresh_from_db()
+        assert not (task.response_data or {}).get('generation_history_deleted')
+    token = await _login(client, 'history_owner')
+    assert (await client.delete(path, headers=_auth(token))).json()['code'] == 0

@@ -68,3 +68,50 @@ it('keeps a continuous property edit as one undo entry and saves after the edit 
   expect(state.document.value?.width).toBe(1280)
   wrapper.unmount()
 })
+
+it('persists newly synchronized scene sources even without a manual edit', async () => {
+  vi.mocked(editorApi.get).mockResolvedValue({data: {document: value, revision: 1, media: [], updated_at: '', needs_save: true}} as never)
+  vi.mocked(editorApi.save).mockResolvedValue({data: {document: value, revision: 2}} as never)
+  const {wrapper, state} = render()
+  await state.load(1)
+  expect(editorApi.save).toHaveBeenCalledExactlyOnceWith(1, 1, value)
+  expect(state.dirty.value).toBe(false)
+  expect(state.revision.value).toBe(2)
+  wrapper.unmount()
+})
+
+it('keeps synchronized data dirty after save failure and supports retry', async () => {
+  vi.mocked(editorApi.get).mockResolvedValue({data: {document: value, revision: 1, media: [], needs_save: true}} as never)
+  vi.mocked(editorApi.save).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({data: {document: value, revision: 2}} as never)
+  const {wrapper, state} = render()
+  await state.load(1)
+  expect(state.document.value).toEqual(value)
+  expect(state.dirty.value).toBe(true)
+  expect(state.saveError.value).toBe('offline')
+  expect(await state.save()).toBe(true)
+  expect(state.dirty.value).toBe(false)
+  wrapper.unmount()
+})
+
+it('shows synchronized sources to viewers without writing or blocking navigation', async () => {
+  vi.mocked(editorApi.get).mockResolvedValue({data: {document: value, revision: 1, media: [], needs_save: true}} as never)
+  const {wrapper, state} = render()
+  await state.load(1, false)
+  expect(editorApi.save).not.toHaveBeenCalled()
+  expect(state.dirty.value).toBe(false)
+  wrapper.unmount()
+})
+
+it('preserves an unresolved browser recovery copy while saving synchronized sources', async () => {
+  const key = 'novelvids-editor-v1:user:team:project:1'
+  const recovery = JSON.stringify({revision: 1, document: {...value, width: 1440}})
+  sessionStorage.setItem(key, recovery)
+  vi.mocked(editorApi.get).mockResolvedValue({data: {document: value, revision: 1, media: [], needs_save: true}} as never)
+  vi.mocked(editorApi.save).mockResolvedValue({data: {document: value, revision: 2}} as never)
+  const {wrapper, state} = render()
+  await state.load(1)
+  expect(state.recovery.value?.width).toBe(1440)
+  expect(sessionStorage.getItem(key)).toBe(recovery)
+  wrapper.unmount()
+  expect(sessionStorage.getItem(key)).toBe(recovery)
+})

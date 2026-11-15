@@ -572,6 +572,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             ):
                 continue
             response_data = task.response_data or {}
+            if response_data.get("generation_history_deleted"):
+                continue
             raw_images = response_data.get("images", [])
             images = (
                 [image for image in raw_images if isinstance(image, str)]
@@ -618,6 +620,19 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             if current_record is not None:
                 current_record["is_current"] = True
         return records
+
+    @atomic()
+    async def delete_failed_generation(self, asset_id: int, task_id: UUID) -> None:
+        await self.get(asset_id)
+        task = await AiTask.filter(id=task_id, task_type=AiTaskTypeEnum.reference_image.value).select_for_update().first()
+        params = task.request_params if task else {}
+        if task is None or params.get('asset_id') != asset_id or params.get('variant_id') is not None:
+            raise HTTPException(404, localized_message('该生成记录不存在'))
+        if task.status != TaskStatusEnum.failed.value:
+            raise HTTPException(400, localized_message('只能删除生成失败的记录'))
+        # Keep task and billing references intact; removal applies to asset history only.
+        task.response_data = {**(task.response_data or {}), 'generation_history_deleted': True}
+        await task.save(update_fields=['response_data'])
 
     @atomic()
     async def record_image_edit(

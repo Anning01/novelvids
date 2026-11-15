@@ -203,3 +203,29 @@ describe('App 侧边栏团队选择器与用户入口', () => {
     }))
     expect(wrapper.find('.app-user-wallet').exists()).toBe(false)
   })
+
+it.each(['light', 'dark'])('keeps update-banner space out of fullscreen workspaces (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = setupStore({ enabled: false, ready: true, deploymentRole: 'studio' })
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/projects', component: { template: '<div>Projects</div>' } },
+    { path: '/workspace', meta: { fullscreen: true }, component: { template: '<div>Workspace</div>' } },
+  ] })
+  await router.push('/projects')
+  const wrapper = mount(App, { global: { plugins: [pinia, router], stubs: {
+    StudioReleaseBanner: { template: '<div data-test="release-banner">Update available</div>' },
+  } } })
+  try {
+    expect(wrapper.find('[data-test="release-banner"]').exists()).toBe(true)
+    await router.push('/workspace')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="release-banner"]').exists()).toBe(false)
+    expect(wrapper.get('.app-content').classes()).toContain('is-fullscreen')
+    await router.push('/projects')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-test="release-banner"]').exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})

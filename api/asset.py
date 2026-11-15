@@ -204,6 +204,16 @@ async def get_asset_generation_history(
     return ResponseSchema(data=await asset_controller.generation_history(asset_id))
 
 
+@router.delete('/{asset_id}/generation-history/{task_id}', summary='删除失败生图记录', response_model=ResponseSchema[None])
+async def delete_failed_asset_generation(
+    asset_id: int, task_id: UUID,
+    _: AuthContext = Depends(require_asset_access),
+    __: AuthContext = _EDITOR,
+):
+    await asset_controller.delete_failed_generation(asset_id, task_id)
+    return ResponseSchema(data=None)
+
+
 @router.post(
     "/{asset_id}/generation-history/edit",
     summary="保存资产图片标注并创建生成记录",

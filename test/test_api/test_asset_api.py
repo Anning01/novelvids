@@ -189,6 +189,39 @@ async def test_api_get_asset_generation_history_is_scoped_and_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_delete_failed_generation_removes_history_but_retains_task(client):
+    novel = await Novel.create(name='删除失败记录')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='人物', main_image='/media/current.png')
+    task = await AiTask.create(task_type=2, status=4, request_params={'asset_id': asset.id},
+        response_data={'usage': {'tokens': 10}}, error_message='失败')
+    url = f'/api/asset/{asset.id}/generation-history'
+    for _ in range(2):
+        response = await client.delete(f'{url}/{task.id}')
+        assert response.json()['code'] == 0
+    assert (await client.get(url)).json()['data'] == []
+    await task.refresh_from_db()
+    await asset.refresh_from_db()
+    assert task.status == 4 and task.error_message == '失败'
+    assert task.response_data['usage'] == {'tokens': 10}
+    assert asset.main_image == '/media/current.png'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('status,params,task_type,expected', [
+    (1, {}, 2, 400), (2, {}, 2, 400), (3, {}, 2, 400), (5, {}, 2, 400), (6, {}, 2, 400),
+    (4, {'asset_id': -1}, 2, 404), (4, {'variant_id': 1}, 2, 404), (4, {}, 4, 404),
+])
+async def test_delete_generation_rejects_other_records(client, status, params, task_type, expected):
+    novel = await Novel.create(name='删除范围')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='人物')
+    task = await AiTask.create(task_type=task_type, status=status, request_params={'asset_id': asset.id, **params})
+    response = await client.delete(f'/api/asset/{asset.id}/generation-history/{task.id}')
+    assert response.json()['code'] == expected
+    await task.refresh_from_db()
+    assert not (task.response_data or {}).get('generation_history_deleted')
+
+
+@pytest.mark.asyncio
 async def test_api_asset_generation_history_resolves_oss_object_keys(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
