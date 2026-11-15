@@ -10,6 +10,7 @@ import type { Scene, VideoGenerationModel } from '@/types'
 import SceneVideoParameterPicker from '@/components/SceneVideoParameterPicker.vue'
 import ShortDramaBatchVideoDialog from '@/components/ShortDramaBatchVideoDialog.vue'
 import { exportApi } from '@/features/video-export/api'
+import { agentApi } from '@/features/creation-agent/api'
 
 vi.mock('@/api', async importOriginal => {
   const original = await importOriginal<typeof import('@/api')>()
@@ -51,6 +52,7 @@ beforeEach(() => {
   vi.mocked(api.updateScene).mockReset()
   vi.mocked(api.scene).mockReset()
   vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
+  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data: {production_concurrency: 2}} as never)
 })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); delete document.documentElement.dataset.appTheme })
 
@@ -445,4 +447,86 @@ it('waits for a local model choice when imported settings have no binding', asyn
   expect(wrapper.get('.chapter-model-select button').text()).toContain('未选择视频模型')
   expect(wrapper.get('button[aria-label="生成视频"]').attributes('disabled')).toBeDefined()
   expect(api.generateVideo).not.toHaveBeenCalled()
+})
+
+
+it.each(['light', 'dark'])('optimizes the whole chapter once, preserves active drafts and saves results in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const shots = [scene, {...scene, id: 110, sequence: 2}, {...scene, id: 111, sequence: 3,
+    prompt: '保留已优化稿', metadata: {video_prompt_model: model.model_type}}, {...scene, id: 112, sequence: 4, prompt: ''}]
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: shots, assets: [], videos: {}}} as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({data: {...shots.find(s => s.id === id), ...update}}) as never)
+  vi.mocked(api.optimizeScenePrompt).mockImplementation(async id => ({data: {status: 3,
+    response_data: {scene_id: id, model_type: model.model_type, prompt: `优化稿${id}`}}}) as never)
+  const {wrapper} = await render()
+  await wrapper.get('.batch-skills-optimize').trigger('click')
+  await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(2)
+  expect(api.updateScene).toHaveBeenCalledWith(109, expect.objectContaining({prompt: '优化稿109',
+    metadata: expect.objectContaining({video_prompt_model: model.model_type, generic_video_prompt: scene.prompt})}), scene.prompt)
+  expect(wrapper.get('[data-scene-id="111"]').text()).not.toContain('优化稿111')
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 2 镜，失败 0 镜')
+  expect(wrapper.get('.batch-skills-optimize').attributes('disabled')).toBeDefined()
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})
+
+it('limits Skills concurrency, continues after failure and retries only unfinished shots', async () => {
+  const shots = [scene, {...scene, id: 110, sequence: 2}, {...scene, id: 111, sequence: 3}]
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: shots, assets: [], videos: {}}} as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({data: {...shots.find(s => s.id === id), ...update}}) as never)
+  const finish = new Map<number, () => void>()
+  vi.mocked(api.optimizeScenePrompt).mockImplementation(id => new Promise(resolve => finish.set(id, () => resolve({data: {
+    status: id === 110 ? 4 : 3, error_message: '临时失败',
+    response_data: {scene_id: id, model_type: model.model_type, prompt: `优化稿${id}`},
+  }} as never))))
+  const {wrapper} = await render()
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(2)
+  expect(wrapper.get('progress').attributes('max')).toBe('3')
+  const refresh = new Event('studio-before-refresh', {cancelable: true})
+  window.dispatchEvent(refresh)
+  expect(refresh.defaultPrevented).toBe(true)
+  expect(wrapper.get('.batch-skills-optimize').attributes('aria-busy')).toBe('true')
+  finish.get(109)!(); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(3)
+  finish.get(110)!(); finish.get(111)!(); await flushPromises()
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 2 镜，失败 1 镜')
+  vi.mocked(api.optimizeScenePrompt).mockClear().mockResolvedValue({data: {status: 3,
+    response_data: {scene_id: 110, model_type: model.model_type, prompt: '重试稿'}}} as never)
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledExactlyOnceWith(110, expect.anything())
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 1 镜，失败 0 镜')
+})
+
+it('retries an unsaved optimized draft without paying for another optimization', async () => {
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: [scene], assets: [], videos: {}}} as never)
+  vi.mocked(api.optimizeScenePrompt).mockResolvedValue({data: {status: 3,
+    response_data: {scene_id: scene.id, model_type: model.model_type, prompt: '保存待重试'}}} as never)
+  vi.mocked(api.updateScene).mockRejectedValueOnce(new Error('保存失败'))
+  const {wrapper} = await render()
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('失败 1 镜')
+  vi.mocked(api.updateScene).mockImplementation(async (_id, update) => ({data: {...scene, ...update}}) as never)
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(1)
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 1 镜，失败 0 镜')
+})
+
+it('stops scheduling Skills requests and ignores results after leaving the chapter', async () => {
+  const shots = [scene, {...scene, id: 110}, {...scene, id: 111}]
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: shots, assets: [], videos: {}}} as never)
+  const finishes: (() => void)[] = []
+  vi.mocked(api.optimizeScenePrompt).mockImplementation(id => new Promise(resolve => finishes.push(() => resolve({data: {
+    status: 3, response_data: {scene_id: id, model_type: model.model_type, prompt: '迟到结果'},
+  }} as never))))
+  const {wrapper} = await render()
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  wrapper.unmount()
+  finishes.forEach(finish => finish()); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(2)
+  expect(api.updateScene).not.toHaveBeenCalled()
 })

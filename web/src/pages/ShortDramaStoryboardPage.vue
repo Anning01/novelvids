@@ -78,6 +78,7 @@ import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
 import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
+import { agentApi } from '@/features/creation-agent/api'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -1867,8 +1868,62 @@ function selectPromptVersion(scene: Scene, prompt: string, model: string) {
 }
 
 const promptOptimizations = ref(new Map<number, AbortController>())
+const batchPromptProgress = ref<{ total: number; finished: number; failed: number; running: boolean; error?: string } | null>(null)
+let batchPromptController: AbortController | null = null
+const unsavedModelPrompts = ref(new Set<number>())
+const pendingModelPrompts = computed(() => scenes.value.filter(scene => {
+  const draft = draftFor(scene)
+  return draft.prompt.trim() && (draft.promptModel !== selectedVideoModelConfig.value?.model_type || unsavedModelPrompts.value.has(scene.id))
+}))
+
+async function optimizeChapterPrompts() {
+  const model = selectedVideoModelConfig.value
+  if (!model || batchPromptProgress.value?.running || promptOptimizations.value.size || !pendingModelPrompts.value.length) return
+  const targets = [...pendingModelPrompts.value]
+  const controller = new AbortController()
+  batchPromptController = controller
+  batchPromptProgress.value = { total: targets.length, finished: 0, failed: 0, running: true }
+  try {
+    const { data: configuration } = await agentApi.capabilities(projectId.value)
+    await runVideoGenerationQueue(targets, configuration.production_concurrency || 1, false, async scene => {
+      if (controller.signal.aborted) return false
+      const applied = draftFor(scene).promptModel === model.model_type || await optimizeModelPrompt(scene, model, false)
+      if (controller.signal.aborted) return false
+      const saved = applied && await saveScene(scene, false, model)
+      if (controller.signal.aborted) return false
+      const progress = batchPromptProgress.value!
+      progress.finished += 1
+      if (!saved) {
+        progress.failed += 1
+        if (applied) unsavedModelPrompts.value.add(scene.id)
+      } else unsavedModelPrompts.value.delete(scene.id)
+      return saved
+    })
+    if (!controller.signal.aborted) {
+      const progress = batchPromptProgress.value!
+      const message = tr('Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜', {
+        p0: progress.finished - progress.failed, p1: progress.failed,
+      })
+      progress.failed ? notice.error(message) : notice.success(message)
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      batchPromptProgress.value!.error = (error as Error).message
+      notice.error((error as Error).message)
+    }
+  } finally {
+    if (batchPromptController === controller) {
+      batchPromptProgress.value!.running = false
+      batchPromptController = null
+    }
+  }
+}
 
 function cancelPromptOptimizations() {
+  batchPromptController?.abort()
+  batchPromptController = null
+  batchPromptProgress.value = null
+  unsavedModelPrompts.value.clear()
   for (const controller of promptOptimizations.value.values()) controller.abort()
   promptOptimizations.value.clear()
 }
@@ -1899,23 +1954,31 @@ async function toggleModelPrompt(scene: Scene) {
     return
   }
   const model = selectedVideoModelConfig.value
-  if (!model || !draft.prompt.trim() || promptOptimizations.value.has(scene.id)) return
+  if (!model) return
+  await optimizeModelPrompt(scene, model)
+}
+
+async function optimizeModelPrompt(scene: Scene, model: VideoGenerationModel, reportError = true): Promise<boolean> {
+  const draft = draftFor(scene)
+  if (!draft.prompt.trim() || promptOptimizations.value.has(scene.id)) return false
   const facts = optimizationInput(scene, model)
   const input = JSON.stringify(facts)
   const controller = new AbortController()
   promptOptimizations.value.set(scene.id, controller)
   try {
     const optimized = await resolveModelPrompt(scene, model, facts, draft.modelVersions, controller.signal)
-    if (controller.signal.aborted || selectedVideoModelConfig.value?.config_id !== model.config_id) return
+    if (controller.signal.aborted || selectedVideoModelConfig.value?.config_id !== model.config_id) return false
     if (JSON.stringify(optimizationInput(scene, model)) !== input) {
-      notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
-      return
+      if (reportError) notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
+      return false
     }
     draft.generic = facts.generic_prompt
     draft.modelVersions[model.model_type] = { prompt: optimized, input }
     selectPromptVersion(scene, optimized, model.model_type)
+    return true
   } catch (error) {
-    if (!controller.signal.aborted) notice.error((error as Error).message)
+    if (!controller.signal.aborted && reportError) notice.error((error as Error).message)
+    return false
   } finally {
     if (promptOptimizations.value.get(scene.id) === controller) promptOptimizations.value.delete(scene.id)
   }
@@ -2016,7 +2079,7 @@ async function saveScene(
 }
 
 function guardReleaseRefresh(event: Event) {
-  if (sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
+  if (batchPromptProgress.value?.running || promptOptimizations.value.size || sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
     const draft = sceneDrafts.value[scene.id]
     return draft && JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(scene))
   })) event.preventDefault()
@@ -2564,6 +2627,9 @@ onBeforeUnmount(() => {
           </button>
           <div class="chapter-actions">
             <AppSelect v-model="selectedVideoModelInput" class="chapter-model-select" density="compact" :ariaLabel="tr('视频模型')" :options="videoModelOptions" :menu-width="300" align="end" />
+            <AppButton class="batch-skills-optimize" variant="secondary" size="sm" :loading="batchPromptProgress?.running"
+              :disabled="loading || generatingStoryboard || waitingAnalysis || !selectedVideoModelConfig || !pendingModelPrompts.length || Boolean(promptOptimizations.size)"
+              @click="optimizeChapterPrompts"><WandSparkles v-if="!batchPromptProgress?.running" :size="15" aria-hidden="true" />{{ tr('一键 Skills 优化') }}</AppButton>
             <AppButton variant="secondary" size="sm" @click="openVideoDefaults">{{ tr('批量参数') }}</AppButton>
             <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
@@ -2573,6 +2639,12 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
+
+        <div v-if="batchPromptProgress" class="batch-skills-progress">
+          <progress v-if="batchPromptProgress.running" :value="batchPromptProgress.finished" :max="batchPromptProgress.total" :aria-label="tr('Skills 优化进度')" />
+          <span>{{ batchPromptProgress.error || (batchPromptProgress.running ? tr('Skills 优化进度：{p0}/{p1} 镜', { p0: batchPromptProgress.finished, p1: batchPromptProgress.total }) : tr('Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜', { p0: batchPromptProgress.finished - batchPromptProgress.failed, p1: batchPromptProgress.failed })) }}</span>
+          <span v-if="batchPromptProgress.failed">{{ tr('未完成的镜头可再次一键优化') }}</span>
+        </div>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
         <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
@@ -2864,6 +2936,8 @@ onBeforeUnmount(() => {
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
 .storyboard-main { --storyboard-right-gutter: 2px; min-width: 0; padding: 16px var(--storyboard-right-gutter) 42px 16px; }
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
+.batch-skills-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 8px 16px; color: var(--app-text-secondary); font-size: 13px; }
+.batch-skills-progress progress { width: 120px; height: 8px; accent-color: var(--app-accent); }
 .chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px calc(-1 * var(--storyboard-right-gutter)) 2px -16px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
 .chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
 .chapter-summary:hover { background: color-mix(in srgb,var(--app-surface) 72%,transparent); box-shadow: inset 0 0 0 1px var(--app-border); }
