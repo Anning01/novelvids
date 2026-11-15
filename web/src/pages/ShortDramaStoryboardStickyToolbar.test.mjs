@@ -42,5 +42,6 @@ it('keeps creation actions local to each scene and exposes configured batch gene
   expect(source).toMatch(
     /runVideoGenerationQueue\(\s*targets,\s*model\.concurrency,\s*false,/
   )
-  expect(source).toContain('class="chapter-model-select"')
+  expect(source).not.toContain('class="chapter-model-select"')
+  expect(source.indexOf('@click="openVideoDefaults"')).toBeLessThan(source.indexOf('@click="optimizeChapterPrompts"'))
 })

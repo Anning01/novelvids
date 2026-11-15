@@ -51,6 +51,7 @@ class CreationAgentController:
             can_write = False
         models = await agent_models(ctx)
         return {"enabled": bool(models), "can_write": can_write, "max_targets": limits.max_targets,
+                "production_concurrency": limits.production_concurrency,
                 "models": [{"id": item.id, "name": item.name, "model": item.model} for item in models]}
 
     async def conversations(self, novel_id: int, ctx: AuthContext, *, deleted: bool = False):

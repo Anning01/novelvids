@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
+import ShortDramaBatchVideoDialog from '@/components/ShortDramaBatchVideoDialog.vue'
 import { api } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -17,6 +18,7 @@ vi.mock('@/api', async (importOriginal) => {
       videoGenerationModels: vi.fn(),
       workbenchBootstrap: vi.fn(),
       updateNovel: vi.fn(),
+      applyVideoDefaults: vi.fn(),
       novelAnalysis: vi.fn(),
     },
   }
@@ -124,21 +126,20 @@ describe('分镜页面视频模型偏好', () => {
     } finally { wrapper.unmount() }
   })
 
-  it('刷新后恢复已保存模型，并在切换时立即落库', async () => {
+  it('在批量参数中恢复已保存模型，并统一保存新的模型设置', async () => {
     const wrapper = await mountPage()
     await flushPromises()
-
-    const trigger = wrapper.get('button[aria-label="视频模型"]')
-    expect(trigger.text()).toContain('模型 B')
-    expect(api.updateNovel).not.toHaveBeenCalled()
-
-    await trigger.trigger('click')
-    const modelA = wrapper.findAll('[role="option"]').find(option => option.text().includes('模型 A'))
-    expect(modelA).toBeTruthy()
-    await modelA!.trigger('click')
+    expect(wrapper.find('.chapter-model-select').exists()).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === '批量参数')!.trigger('click')
+    const dialog = wrapper.getComponent(ShortDramaBatchVideoDialog)
+    expect(dialog.props('initialModelConfigId')).toBe(22)
+    const settings = {model_config_id: 11, resolution: '720p', aspect_ratio: '9:16', return_last_frame: false, auto_enhancement: null}
+    vi.mocked(api.applyVideoDefaults).mockResolvedValue({data: {settings, scene_count: 0, remembered: true}} as never)
+    dialog.vm.$emit('applyDefaults', settings, true)
     await flushPromises()
-
-    expect(api.updateNovel).toHaveBeenCalledWith(7, { video_model_config_id: 11 })
-    expect(trigger.text()).toContain('模型 A')
+    expect(api.applyVideoDefaults).toHaveBeenCalledWith(7, 337, settings, true)
+    expect(dialog.props('initialModelConfigId')).toBe(11)
+    expect(api.updateNovel).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 })
