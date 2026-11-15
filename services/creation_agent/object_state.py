@@ -45,8 +45,6 @@ async def write_fields(objects: CreationObjects, target, fields: dict):
     values = deepcopy(fields)
     if isinstance(target, Chapter) and "content" in fields:
         values.setdefault("screenplay", None)  # Restoring a pre-adaptation snapshot.
-    if isinstance(target, AssetVariant) and 'chapter_numbers' in values:
-        await objects.ensure_variant_chapters(target.asset_id, values['chapter_numbers'], exclude_id=target.id)
     if isinstance(target, Scene):
         if 'asset_ids' in values or 'variant_bindings' in values:
             asset_ids = values.get('asset_ids', await target.assets.all().values_list('id', flat=True))

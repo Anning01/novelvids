@@ -117,9 +117,15 @@ class ExtractionReuse:
             repair_assets, repair_variants = set(), set()
             repair_versions = {}
             for field, kind in [('persons', 1), ('scenes', 2), ('items', 3)]:
-                bindings = {row['name']: row for row in saved.result.get(field, []) if row.get('asset_id')}
+                rows = [row for row in saved.result.get(field, []) if row.get('asset_id')]
+                # Legacy receipts have only IDs; newer ones also freeze the extracted form name.
+                saved_variants = {variant.id: variant for variant in await AssetVariant.with_deleted().filter(
+                    id__in=[row['variant_id'] for row in rows if row.get('variant_id')])}
+                bindings = {(row['name'], row.get('variant_name') or (
+                    saved_variants[row['variant_id']].name if row.get('variant_id') in saved_variants else '')): row
+                    for row in rows}
                 for item in getattr(original, field):
-                    binding = bindings.get(item.name)
+                    binding = bindings.get((item.name, item.variant.name if item.variant else ''))
                     asset = await Asset.get_or_none(id=binding['asset_id'], novel_id=project.id, asset_type=kind) if binding else None
                     if not asset and binding and await Asset.with_deleted().filter(id=binding['asset_id'], novel_id=project.id, deleted_at__not_isnull=True).exists():
                         from utils.messages import localized_message
@@ -156,7 +162,7 @@ class ExtractionReuse:
                             'description': variant.description or ''}) if variant else None})
                     groups[field].append(current)
                     summary[field].append({'name': name, 'action': 'reused', 'asset_id': asset.id,
-                        **({'variant_id': variant.id} if variant else {})})
+                        **({'variant_id': variant.id, 'variant_name': variant.name} if variant else {})})
                     summary['asset_ids'].append(asset.id)
                     if variant:
                         summary['variant_ids'].append(variant.id)

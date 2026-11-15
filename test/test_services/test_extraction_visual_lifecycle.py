@@ -143,9 +143,9 @@ async def test_variant_failure_rolls_back_placeholder_promotion_and_other_asset_
     asset = await Asset.create(novel=novel, asset_type=1, canonical_name='主资产',
         base_traits='占位', metadata={'analysis_source': 'project_analysis'})
     await AssetVariant.create(asset=asset, name='已分配形态', chapter_numbers=[2])
-    with pytest.raises(ValueError, match='已有形态'):
+    with pytest.raises(ValueError, match='绑定形态不存在'):
         await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=2,
-            result=result(Person, 'persons', variant={'name': '冲突形态', 'base_traits': '完整形象',
+            result=result(Person, 'persons', variant={'name': '冲突形态', 'existing_variant_id': 999999, 'base_traits': '完整形象',
                 'change_reason': '本章外形变化'}), preserve_existing=True)
     await asset.refresh_from_db()
     assert asset.base_traits == '占位'

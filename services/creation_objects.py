@@ -104,17 +104,11 @@ class CreationObjects:
             raise CreationNameConflict('asset', existing)
         return await Asset.create(novel_id=self.novel_id, **values)
 
-    async def ensure_variant_chapters(self, asset_id: int, numbers: list[int], *, exclude_id: int | None = None):
-        variants = await AssetVariant.filter(asset_id=asset_id)
-        if any(variant.id != exclude_id and set(variant.chapter_numbers or []) & set(numbers) for variant in variants):
-            raise ValueError(localized_message('该角色在这些章节已有形态，请编辑已有形态或明确重新分配适用章节'))
-
     async def create_variant(self, asset_id: int, values: dict) -> AssetVariant:
         await self.get('asset', asset_id)
         existing = await AssetVariant.with_deleted().filter(asset_id=asset_id, name=values['name']).first()
         if existing:
             raise CreationNameConflict('variant', existing)
-        await self.ensure_variant_chapters(asset_id, values.get('chapter_numbers') or [])
         return await AssetVariant.create(asset_id=asset_id, **values)
 
     @staticmethod
@@ -292,8 +286,6 @@ class CreationObjects:
                 expected = (snapshot.get('variant_versions') or {}).get(str(variant.id))
                 if variant.deleted_at != target.deleted_at or (expected and expected != await self.recovery_version(variant)):
                     raise ValueError(localized_message('关联形态已有后续修改，不能直接恢复覆盖'))
-        if kind == 'variant':
-            await self.ensure_variant_chapters(target.asset_id, target.chapter_numbers or [], exclude_id=target.id)
         if kind == 'scene':
             scenes = await self._ordered(target.chapter_id)
             position = self._insert_position(scenes, snapshot['after_id'])
