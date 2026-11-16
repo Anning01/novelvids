@@ -10,6 +10,7 @@ import re
 
 from ag_ui.core import BaseEvent, RunAgentInput, UserMessage
 from pydantic import Field
+from pydantic.json_schema import SkipJsonSchema
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
@@ -152,7 +153,7 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
     current = {'query_creation_objects', 'read_creation_objects', 'apply_creation_changes', 'undo_creation_change'}
     # Historical selected-prompt runners remain replayable. Each live run sees
     # exactly one set of writers, never two competing business contracts.
-    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'get_creation_prompt_rules', 'revise_creation_object'}
+    omitted = legacy if ctx.deps.changes else current | {'read_creation_history', 'patch_creation_prompts', 'create_creation_setting', 'get_creation_prompt_rules', 'revise_creation_object', 'read_storyboard_sheet', 'edit_storyboard_sheet'}
     capabilities = (
         {'query', 'read', 'create', 'update', 'delete', 'undo'}
         if ctx.deps.tools_enabled
@@ -171,9 +172,9 @@ async def prepare_creation_tools(ctx: RunContext[CreationAgentDeps], definitions
                 omitted.add('undo_creation_change')
     from services.creation_agent.skill_execution import current_execution
     if current_execution.get() is None:
-        omitted.update({'read_skill', 'submit_production', 'get_production_context', 'revise_creation_object'})
+        omitted.update({'read_skill', 'submit_production', 'get_production_context', 'revise_creation_object', 'read_storyboard_sheet', 'edit_storyboard_sheet'})
     if not ctx.deps.changes or getattr(getattr(ctx.deps.changes, 'request', None), 'write_scope', 'read_only') == 'read_only':
-        omitted.update({'submit_production', 'revise_creation_object'})
+        omitted.update({'submit_production', 'revise_creation_object', 'edit_storyboard_sheet'})
     prepared = [definition for definition in definitions if definition.name not in omitted]
     if ctx.deps.changes:
         for index, definition in enumerate(prepared):
@@ -692,3 +693,29 @@ async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
     from models.remake_source import RemakeSource
     sources = await RemakeSource.filter(novel_id=execution.params['novel_id']).values('id', 'chapter_id', 'episode_number', 'media_status')
     return {'models': models, 'remake_sources': sources, 'tasks': await production_receipts(execution.params['task_id'])}
+
+
+@creation_agent.tool
+async def read_storyboard_sheet(ctx: RunContext[CreationAgentDeps], scene_id: Annotated[int, Field(gt=0)]) -> dict:
+    """读取指定分镜是否已有线稿和当前修订号。编辑工具自动取得原图，不要用 read_file 读取图片。"""
+    from services.creation_agent.sheet_tools import scene_for
+    from services.storyboard.sheet_history import sheet_history
+    await scene_for(crud_service(ctx), scene_id)
+    result = await sheet_history(scene_id)
+    return {key: result[key] for key in ('scene_id', 'sequence', 'revision', 'task_id', 'task_status')} | {
+        'has_current_image': bool(result['current_image_url']), 'history_count': len(result['items'])}
+
+
+@creation_agent.tool(sequential=True)
+async def edit_storyboard_sheet(ctx: RunContext[CreationAgentDeps], scene_id: Annotated[int, Field(gt=0)],
+    expected_revision: Annotated[str, Field(min_length=1, max_length=128)],
+    model_config_id: Annotated[int | None, Field(gt=0)] = None,
+    instruction: SkipJsonSchema[str | None] = None) -> dict:
+    """用户明确要求改线稿图片时使用；修改提示词文字用现有文字工具，询问或分析不生图。无需转述修改要求或读取图片文件，服务端直接使用本轮用户原话并自动附上旧线稿。不得擅自纠正用户指定的字样。以现有线稿和原提示词编辑，仅提交该分镜的图片任务；返回submitted不等于完成。省略模型时沿用原线稿模型。"""
+    # Old conversations may replay this argument; user text always comes from the frozen request.
+    del instruction
+    from services.creation_agent.sheet_tools import edit_sheet
+    try:
+        return await edit_sheet(crud_service(ctx), scene_id, expected_revision, model_config_id)
+    except ValueError as error:
+        raise ModelRetry(str(error)) from None

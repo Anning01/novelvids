@@ -209,6 +209,9 @@ class AssetReferenceHandler(BaseTaskHandler):
             api_key: str
             model: str
         """
+        if request_params.get('operation') == 'storyboard_sheet_edit':
+            from services.storyboard.sheets import execute_sheet_edit
+            return await execute_sheet_edit(request_params)
         if request_params.get('operation') == 'storyboard_sheet':
             from services.storyboard.sheets import execute_sheet
             return await execute_sheet(request_params)

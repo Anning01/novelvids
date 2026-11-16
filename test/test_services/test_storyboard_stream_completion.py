@@ -31,35 +31,41 @@ class StreamBody(httpx.AsyncByteStream):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('interrupted', [False, True])
 @pytest.mark.parametrize('replace_existing', [False, True])
-async def test_complete_storyboard_survives_transport_close_after_finish(interrupted, replace_existing):
-    novel, chapter, _ = await enabled_project()
+@pytest.mark.parametrize('json_mode', [False, True])
+async def test_storyboard_retains_v19_stream_completion_contract(interrupted, replace_existing, json_mode):
+    novel, chapter, config = await enabled_project()
+    config.supports_json_output = json_mode
+    await config.save(update_fields=['supports_json_output'])
     await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': 'zh'})
     asset = await Asset.create(novel=novel, canonical_name='Alex', asset_type=1, base_traits='灰衣少年', source_chapters=[1])
-    variant = await AssetVariant.create(asset=asset, name='战斗', base_traits='黑甲', chapter_numbers=[1])
+    await AssetVariant.create(asset=asset, name='战斗', base_traits='黑甲', chapter_numbers=[1])
     if replace_existing:
         await Scene.create(chapter=chapter, sequence=1, prompt='旧分镜', duration=4)
     calls = []
     async def respond(request):
-        asset.main_image = '/media/new-base.png'
-        asset.metadata = {'image_gallery': ['/media/new-base.png']}
-        await asset.save()
-        variant.images = ['/media/new-variant.png']
-        await variant.save()
         payload = json.loads(request.content)
         calls.append(payload)
-        tool = next(tool['function']['name'] for tool in payload['tools'] if 'final_result' in tool['function']['name'])
         envelope = {'id': 'test-completion', 'created': 1, 'model': 'test', 'object': 'chat.completion.chunk'}
-        events = [{**envelope, 'choices': [{'index': 0, 'delta': {'tool_calls': [{'index': 0,
-            'id': 'result-call', 'type': 'function', 'function': {'name': tool, 'arguments': json.dumps({'shots': [raw_shot(1), raw_shot(2)]})}}]},
-            'finish_reason': 'tool_calls'}]}]
+        content = json.dumps({'shots': [raw_shot(1), raw_shot(2)]})
+        if json_mode:
+            assert payload['response_format'] == {'type': 'json_object'}
+            delta, finish = {'content': content}, 'stop'
+        else:
+            tool = next(tool['function']['name'] for tool in payload['tools'] if 'final_result' in tool['function']['name'])
+            delta = {'tool_calls': [{'index': 0, 'id': 'result-call', 'type': 'function',
+                'function': {'name': tool, 'arguments': content}}]}
+            finish = 'tool_calls'
+        events = [{**envelope, 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}]
         return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=StreamBody(events, interrupted))
     with patch('services.creation_agent.handler.AsyncOpenAI', side_effect=lambda **kw: AsyncOpenAI(
             **kw, http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)))):
         task = await scene_controller.generate(chapter.id, replace_existing=replace_existing)
         await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.status == 3, task.error_message
-    assert await Scene.filter(chapter=chapter).count() == 2
+    assert task.status == (4 if interrupted else 3), task.error_message
+    assert await Scene.filter(chapter=chapter).count() == ((1 if replace_existing else 0) if interrupted else 2)
+    if interrupted and replace_existing:
+        assert (await Scene.get(chapter=chapter)).prompt == '旧分镜'
     assert len(calls) == 1
 
 

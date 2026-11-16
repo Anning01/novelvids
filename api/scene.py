@@ -27,6 +27,7 @@ from schemas.scene import (
     StoryboardStrategyOut,
 )
 from schemas.ai_task import AiTaskOut
+from schemas.storyboard_sheet import SheetEditRequest, SheetRestoreRequest
 from services.ai_task_executor import ai_task_executor
 from utils.page import QueryParams, get_list_params
 from utils.response_format import PaginationResponse, ResponseSchema
@@ -226,3 +227,27 @@ async def generate_storyboard_sheet(scene_id: int, background_tasks: BackgroundT
     task = await submit_sheet(scene_id, model_config_id=model_config_id, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
     background_tasks.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
+
+
+@router.get('/{scene_id}/storyboard-sheet/history', response_model=ResponseSchema)
+async def storyboard_sheet_history(scene_id: int, _: AuthContext = Depends(require_scene_access)):
+    from services.storyboard.sheet_history import sheet_history
+    return ResponseSchema(data=await sheet_history(scene_id))
+
+
+@router.post('/{scene_id}/storyboard-sheet/edit', response_model=ResponseSchema[AiTaskOut])
+async def edit_storyboard_sheet(scene_id: int, payload: SheetEditRequest, background_tasks: BackgroundTasks,
+    ctx: AuthContext = Depends(get_auth_context), _: AuthContext = Depends(require_scene_access), __: AuthContext = _EDITOR):
+    from services.storyboard.sheets import submit_sheet_edit
+    task = await submit_sheet_edit(scene_id, payload, team_id=ctx.team_id, user_id=ctx.user.id if ctx.user else None)
+    background_tasks.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post('/{scene_id}/storyboard-sheet/restore', response_model=ResponseSchema[SceneOut])
+async def restore_storyboard_sheet(scene_id: int, payload: SheetRestoreRequest,
+    _: AuthContext = Depends(require_scene_access), __: AuthContext = _EDITOR):
+    from services.storyboard.sheet_history import restore_sheet
+    scene = await restore_sheet(scene_id, payload)
+    await scene.fetch_related('assets')
+    return ResponseSchema(data=scene)

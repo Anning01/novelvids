@@ -1,4 +1,4 @@
-"""Storyboard input guards distinguish design edits from image bookkeeping."""
+"""Rollback preserves v1.9 object guards and reads newer saved plan payloads."""
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -29,13 +29,14 @@ async def storyboard_plan():
 
 
 @pytest.mark.asyncio
-async def test_storyboard_keeps_valid_inputs_when_only_asset_image_changes():
+async def test_v19_storyboard_keeps_original_strict_object_version_guard():
     asset, params = await storyboard_plan()
     await validate_step_inputs(params)
     asset.main_image = '/media/new.png'
     asset.metadata = {'image_gallery': ['/media/new.png']}
     await asset.save()
-    await validate_step_inputs(params)
+    with pytest.raises(ValueError, match='新修改'):
+        await validate_step_inputs(params)
 
 
 @pytest.mark.asyncio
@@ -49,11 +50,10 @@ async def test_storyboard_still_rejects_changed_design_inputs(field, value):
 
 
 @pytest.mark.asyncio
-async def test_storyboard_detects_new_variant_after_input_snapshot():
+async def test_v19_base_snapshot_is_not_replaced_by_a_variant_collection_fingerprint():
     asset, params = await storyboard_plan()
     await AssetVariant.create(asset=asset, name='战斗形态', base_traits='铠甲', chapter_numbers=[1])
-    with pytest.raises(ValueError, match='新修改'):
-        await validate_step_inputs(params)
+    await validate_step_inputs(params)
 
 
 @pytest.mark.asyncio
@@ -70,21 +70,32 @@ async def test_legacy_plan_keeps_strict_conflict_detection():
 
 
 @pytest.mark.asyncio
-async def test_changed_inputs_fail_before_model_request():
-    from unittest.mock import patch, AsyncMock
+async def test_v19_save_guard_still_protects_changed_inputs_and_existing_scenes():
+    from models.scene import Scene
+    from schemas.agent_workflow import StructuredSkillStoryboard
+    from services.creation_agent.skill_execution import current_execution
     from services.storyboard.handler import StoryboardTaskHandler
+    from test.test_services.test_storyboard_speech_timing import snapshot
+    from test.test_services.test_storyboard_partial_repair import raw_shot
     asset, params = await storyboard_plan()
     asset.description = '新的设定'
     await asset.save()
-    with patch('services.storyboard.handler.generate_storyboard', new_callable=AsyncMock) as generate:
+    count = await Scene.filter(chapter_id=params['chapter_id']).count()
+    from services.storyboard.validation import prepare_skill_storyboard
+    frozen = snapshot()
+    storyboard = prepare_skill_storyboard(StructuredSkillStoryboard(shots=[raw_shot(1)]), frozen, 'zh', [], 'cinematic')
+    token = current_execution.set(SimpleNamespace(params=params, snapshot=frozen))
+    try:
         with pytest.raises(ValueError, match='新修改'):
-            await StoryboardTaskHandler().execute({**params, 'base_url': 'https://example.invalid',
-                'api_key': 'test', 'model': 'test'})
-    generate.assert_not_awaited()
+            await StoryboardTaskHandler()._save_scenes(params['chapter_id'],
+                storyboard, {}, 0, entities=[])
+    finally:
+        current_execution.reset(token)
+    assert await Scene.filter(chapter_id=params['chapter_id']).count() == count
 
 
 @pytest.mark.asyncio
-async def test_dependency_design_snapshot_survives_media_update_but_not_design_edit():
+async def test_v19_dependency_receipts_keep_original_object_versions():
     from models.agent_operation import AgentOperation
     from schemas.creation_plan import CreationPlanStep
     from services.creation_agent.input_versions import storyboard_input_versions
@@ -101,9 +112,11 @@ async def test_dependency_design_snapshot_survives_media_update_but_not_design_e
     await AgentOperation.create(task_id=params['creation_run_id'], key='plan-step:design', state='completed',
         result={'status': 'completed', 'object_versions': versions,
                 'storyboard_input_versions': await storyboard_input_versions(versions)})
+    await validate_step_inputs(params)
     asset.main_image = '/media/new.png'
     await asset.save()
-    await validate_step_inputs(params)
+    with pytest.raises(ValueError, match='新修改'):
+        await validate_step_inputs(params)
     asset.base_traits = '后续人工修改'
     await asset.save()
     with pytest.raises(ValueError, match='新修改'):

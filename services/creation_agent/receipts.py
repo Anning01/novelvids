@@ -9,6 +9,8 @@ def receipt_of(task) -> dict:
     """Project one task the way production receipts have always reported it."""
     return {
         "task_id": str(task.id),
+        **({"scene_id": task.request_params.get("scene_id"), "saved": (task.response_data or {}).get("saved")}
+           if task.request_params.get("operation") in {"storyboard_sheet", "storyboard_sheet_edit"} else {}),
         "operation": task.request_params.get("operation")
         or {
             1: "assets",

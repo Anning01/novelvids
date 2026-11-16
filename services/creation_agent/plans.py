@@ -37,20 +37,14 @@ async def validate_sources(plan):
             raise ValueError(localized_message('方案引用的原文已变化，请重新规划并确认'))
 
 
-async def validate_objects(plan, keys=None, chapter_ids=None, input_versions=None):
+async def validate_objects(plan, keys=None, chapter_ids=None):
     models = {'asset': Asset, 'variant': AssetVariant, 'scene': Scene}
     for key, version in plan.object_versions.items():
         if keys is not None and key not in keys:
             continue
         kind, identifier = key.split(':')
         target = await models[kind].get_or_none(id=int(identifier))
-        if target is not None and input_versions and key in input_versions:
-            from services.creation_agent.input_versions import storyboard_input_version
-            current = await storyboard_input_version(target)
-            version = input_versions[key]
-        else:
-            current = await object_version(target) if target is not None else None
-        if target is None or current != version:
+        if target is None or await object_version(target) != version:
             raise ValueError(localized_message('方案涉及的对象已有新修改，请重新规划并确认'))
     for chapter_id, versions in plan.chapter_scenes.items():
         if chapter_ids is not None and int(chapter_id) not in chapter_ids:
@@ -190,8 +184,6 @@ class CreationPlanner:
                             plan.object_versions[f'variant:{variant.id}'] = await object_version(variant)
                             keys.append(f'variant:{variant.id}')
             plan.object_scopes[step.id] = list(dict.fromkeys(keys))
-        from services.creation_agent.input_versions import storyboard_input_versions
-        plan.storyboard_input_versions = await storyboard_input_versions(plan.object_versions)
         await AgentOperation.create(task_id=self.execution.params['task_id'], key=PLAN_KEY, state='completed', result=plan.model_dump(mode='json'))
         task = await AiTask.get(id=self.execution.params['task_id'])
         task.request_params = {**task.request_params, 'has_creation_plan': True}

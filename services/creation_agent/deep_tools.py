@@ -57,11 +57,12 @@ async def business_tools(deps, model, before_request):
         'get_creation_context', 'query_creation_objects', 'get_creation_prompt_rules',
         'read_creation_objects', 'read_creation_history', 'patch_creation_prompts',
         'create_creation_setting', 'undo_creation_change', 'link_scene_references', 'read_episode_script', 'revise_episode_script',
+        'read_storyboard_sheet', 'edit_storyboard_sheet',
         'revise_creation_object', 'get_production_context', 'submit_production', 'remember_creation_constraints',
     ) if deps.changes else ('get_creation_context', 'update_image_prompt', 'update_storyboard_prompt')
     if deps.changes and deps.changes.request.write_scope == 'read_only':
         names = tuple(name for name in names if name in {'get_creation_context', 'query_creation_objects',
-            'get_creation_prompt_rules', 'read_creation_objects', 'read_creation_history', 'get_production_context', 'read_episode_script'})
+            'get_creation_prompt_rules', 'read_creation_objects', 'read_creation_history', 'get_production_context', 'read_episode_script', 'read_storyboard_sheet'})
     local = {'remember_creation_constraints': remember_creation_constraints, 'link_scene_references': link_scene_references, 'read_episode_script': read_episode_script, 'revise_episode_script': revise_episode_script}
     native = {name: Tool(local[name] if name in local else getattr(runtime, name)) for name in names}
     context = RunContext(deps=deps, model=model, usage=RunUsage())

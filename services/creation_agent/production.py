@@ -33,6 +33,7 @@ async def conversation_for_task(task):
     labels = {
         "blocking_maps": ("补齐本集空间定位图", "Complete shot blocking diagrams"),
         "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
+        "storyboard_sheet_edit": ("修改线稿故事版", "Edit storyboard sheet"),
         "image": ("生成图片", "Generate image"),
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
@@ -184,6 +185,7 @@ async def run_production(task, handler):
         },
         message,
         before_request,
+        strict_streaming=task.task_type == AiTaskTypeEnum.storyboard.value,
     )
     from utils.prompt_language import skill_workflow
 
@@ -265,6 +267,7 @@ async def finish_production_message(task):
     english = task.request_params.get("prompt_language", "en") == "en"
     labels = {
         "storyboard_sheet": ("生成线稿故事版", "Generate line-art storyboard"),
+        "storyboard_sheet_edit": ("修改线稿故事版", "Edit storyboard sheet"),
         3: ("已完成", "Completed"),
         4: ("任务未完成", "Task failed"),
         5: ("后续步骤已停止", "Further steps stopped"),
