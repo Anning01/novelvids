@@ -51,8 +51,7 @@ class CreationAgentController:
             can_write = False
         models = await agent_models(ctx)
         return {"enabled": bool(models), "can_write": can_write, "max_targets": limits.max_targets,
-                "production_concurrency": limits.production_concurrency,
-                "models": [{"id": item.id, "name": item.name, "model": item.model} for item in models]}
+                "models": [{"id": item.id, "name": item.name, "model": item.model, "concurrency": item.concurrency} for item in models]}
 
     async def conversations(self, novel_id: int, ctx: AuthContext, *, deleted: bool = False):
         await ensure_novel_access(novel_id, ctx)
@@ -87,7 +86,7 @@ class CreationAgentController:
         assistant.task = task
         production = await production_receipts_for([task])
         activity = await activity_for_messages([assistant], {assistant.id: events}, production)
-        return AgentRunOut(recovery=await recovery_summary(task), activity=activity[assistant.id], **run_timing(task, production[str(task.id)]), pending_production=(await pending_productions([task]))[str(task.id)],
+        return AgentRunOut(background=bool(task.request_params.get('background')), recovery=await recovery_summary(task), activity=activity[assistant.id], **run_timing(task, production[str(task.id)]), pending_production=(await pending_productions([task]))[str(task.id)],
             production=production[str(task.id)], task_id=task.id, conversation_id=conversation.id, status=task.status,
             content=assistant.content, error_message=task.error_message,
             changes=[change_projection(change) for change in changes], usage=(await usage_summaries([assistant]))[assistant.id],

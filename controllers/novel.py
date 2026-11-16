@@ -37,7 +37,10 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
     async def meta(self, novel_id: int) -> dict:
         """轻量元信息：不返回书稿正文，节约流量。"""
         novel = await self.get(novel_id)
+        active_cover = next((task for task in await AiTask.filter(task_type=5, status__in=[1, 2, 6]).order_by('-created_at')
+            if task.request_params.get('novel_id') == novel_id and task.request_params.get('operation') == 'project_cover'), None)
         return {
+            'active_cover_task_id': str(active_cover.id) if active_cover else None,
             "id": novel.id,
             "name": novel.name,
             "author": novel.author,
@@ -349,6 +352,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             "novel_id": novel_id,
             "resolution": "1K",
             "include_cover": include_cover,
+            "background_media": True,
             "assistant_model_config_id": assistant_model_config_id,
             **({"operation": "project_cover"} if cover_only else {}),
             **({"cover_model_config_id": cover_model_config_id} if include_cover else {}),
@@ -359,7 +363,11 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         if user_id is not None:
             params["user_id"] = user_id
         from services.creation_agent.skill_execution import prepare_workflow
-        params = await prepare_workflow(params)
+        if cover_only:
+            from services.media_tasks import prepare_media_task
+            params = await prepare_media_task(params)
+        else:
+            params = await prepare_workflow(params)
         from services.creation_objects import project_write
         async with project_write(novel_id) as connection:
             from services.creation_agent.submissions import previous_submission, bind_submission
@@ -367,7 +375,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if previous:
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
-                if existing.request_params.get('novel_id') == novel_id:
+                if (existing.request_params.get('novel_id') == novel_id
+                    and (existing.request_params.get('operation') == 'project_cover') == cover_only):
                     if assistant_model_config_id is not None and existing.request_params.get('assistant_model_config_id') != assistant_model_config_id:
                         raise HTTPException(409, localized_message('已有分析任务正在运行，请等待完成后再切换分析模型'))
                     if (existing.request_params.get('cover_model_config_id') != params.get('cover_model_config_id')

@@ -63,7 +63,7 @@ async def clip_session(project_id: int, ctx: AuthContext):
 
 async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
     ensure_project_creation_team(ctx)
-    assistant, _ = await require_agent(ctx.team_id)
+    assistant = (await require_agent(ctx.team_id))[0] if payload.mode != 'direct' else None
     task_type = AiTaskTypeEnum.video if payload.task_type == 'video' else AiTaskTypeEnum.reference_image
     config = await ai_model_config_controller.get_active(task_type.value, payload.model_config_id, team_id=ctx.team_id)
     if payload.task_type == 'video':
@@ -103,7 +103,7 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
                 project.project_setting = json.dumps({
                     **payload.model_dump(mode='json', exclude={'frame_count', 'frame_duration_ms'}), 'resolution': resolution,
                     **({'frame_count': selected.frame_count, 'frame_duration_ms': selected.frame_duration_ms} if payload.output_format == 'gif' else {}),
-                    'model_name': config.name, 'assistant_model_config_id': assistant.id,
+                    'model_name': config.name, 'assistant_model_config_id': assistant.id if assistant else None,
                     'image_model_config_id': image_config.id if image_config else None,
                 }, ensure_ascii=False)
                 await project.save(update_fields=['creation_idempotency_key', 'creation_payload_hash', 'project_setting'])
@@ -184,10 +184,8 @@ async def _start_direct(session: dict, ctx: AuthContext, *, media_base_url: str)
     """Submit existing media jobs without asking an LLM to rewrite or dispatch."""
     from controllers.asset import asset_controller
     from controllers.video import video_controller
-    from controllers._creation import creation_write
     from models.ai_task import AiTask
     from schemas.video import VideoGenerateRequest
-    from services.creation_agent.production import conversation_for_task
     from services.creation_agent.submissions import submission, previous_submission
 
     request_id = uuid5(NAMESPACE_URL, f'clip-direct:{session["project_id"]}:{session["request_id"]}')
@@ -210,13 +208,6 @@ async def _start_direct(session: dict, ctx: AuthContext, *, media_base_url: str)
                     model_config_id=session['model_config_id'], request_id=request_id, aspect_ratio=session['aspect_ratio'],
                     resolution=session['resolution'], duration=session['duration'], reference_media=session['reference_media']), media_base_url=media_base_url, **owner)
                 task = await AiTask.get(id=video.metadata['agent_run_id'])
-        async with creation_write(session['project_id']):
-            message = await conversation_for_task(task)
-            project = await Novel.get(id=session['project_id'])
-            data = _settings(project)
-            data['conversation_id'] = message.conversation_id
-            project.project_setting = json.dumps(data, ensure_ascii=False)
-            await project.save(update_fields=['project_setting'])
         return task
     finally:
         submission.reset(token)

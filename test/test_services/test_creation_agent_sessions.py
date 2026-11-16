@@ -109,11 +109,14 @@ async def test_assistant_model_enables_workflow_and_chat_without_global_activati
 
 
 @pytest.mark.asyncio
-async def test_project_capabilities_expose_configured_production_concurrency():
+async def test_project_capabilities_expose_model_concurrency_without_an_agent_cap():
     from controllers.creation_agent import creation_agent_controller
     conversation, _, _ = await session_fixture()
     await AgentSettings.filter(id=1).update(configuration=AgentConfiguration(production_concurrency=3).model_dump())
     capabilities = await creation_agent_controller.capabilities(conversation.novel_id, AuthContext())
-    assert capabilities['production_concurrency'] == 3
+    assert 'production_concurrency' not in capabilities
+    from models.config import AiModelConfig
+    for item in capabilities['models']:
+        assert item['concurrency'] == (await AiModelConfig.get(id=item['id'])).concurrency
     assert capabilities['can_write']
     assert 'api_key' not in str(capabilities)

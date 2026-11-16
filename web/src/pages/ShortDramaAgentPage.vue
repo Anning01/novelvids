@@ -269,6 +269,7 @@ async function loadProject(): Promise<boolean> {
   try {
     const response = await api.novelMeta(projectId.value)
     novel.value = response.data as unknown as Novel
+    if (response.data.active_cover_task_id && !generatingCover.value) void monitorCover(response.data.active_cover_task_id)
     if (response.data.narrator_audio_reference_id) {
       const voices = await api.audioReferences(1, '', { id: response.data.narrator_audio_reference_id })
       narratorVoice.value = voices.data.items[0] || null
@@ -423,13 +424,11 @@ const generatingCover = ref(false)
 const coverError = ref('')
 const hasCover = computed(() => Boolean(project.value.coverPreview || project.value.cover || analysisResult.value?.cover))
 
-async function generateCover() {
-  if (!canEdit.value || !coverModelId.value || generatingCover.value || startingAnalysis.value || analysisRunning.value) return
+async function monitorCover(taskId: string) {
   generatingCover.value = true
   coverError.value = ''
   try {
-    const { data } = await api.generateNovelCover(projectId.value, Number(coverModelId.value))
-    const task = await pollUntilTerminal(async signal => (await api.task(data.id, signal)).data, {
+    const task = await pollUntilTerminal(async signal => (await api.task(taskId, signal)).data, {
       signal: scriptRequests.signal, intervalMs: 1200,
       terminalStatuses: new Set([TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED]),
     })
@@ -444,8 +443,21 @@ async function generateCover() {
   }
 }
 
+async function generateCover() {
+  if (!canEdit.value || !coverModelId.value || generatingCover.value || startingAnalysis.value || analysisRunning.value) return
+  generatingCover.value = true
+  coverError.value = ''
+  try {
+    const { data } = await api.generateNovelCover(projectId.value, Number(coverModelId.value))
+    void monitorCover(data.id)
+  } catch (error) {
+    coverError.value = (error as Error).message
+    generatingCover.value = false
+  }
+}
+
 async function startAnalysis() {
-  if (!canEdit.value || !analysisModelId.value || startingAnalysis.value || analysisRunning.value || generatingCover.value) return
+  if (!canEdit.value || !analysisModelId.value || startingAnalysis.value || analysisRunning.value) return
   startingAnalysis.value = true
   analysisError.value = ''
   try {
@@ -819,7 +831,7 @@ onBeforeUnmount(() => {
               <small v-if="coverError" class="cover-generation-error" role="alert">{{ coverError }}</small>
             </div>
             <div v-if="canEdit && hasAnalysisContent" class="cover-generation-actions">
-              <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="!analysisModelId || analysisRunning || startingAnalysis || generatingCover" @click="startAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
+              <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="!analysisModelId || analysisRunning || startingAnalysis" @click="startAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
             </div>
             <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration || adapting" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
@@ -842,7 +854,7 @@ onBeforeUnmount(() => {
               <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
               <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
         </template>
-        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="!analysisModelId || generatingCover" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
+        <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="!analysisModelId" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
         <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
 

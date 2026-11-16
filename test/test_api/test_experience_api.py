@@ -214,19 +214,19 @@ async def test_http_create_and_restore_return_the_same_context(client, configure
 
 
 @pytest.mark.asyncio
-async def test_start_persists_one_real_agent_task_and_replays_without_duplicate(configured):
+async def test_direct_start_persists_one_media_task_without_agent_messages_and_replays(configured):
     video, _ = configured
     result = await create_clip(payload(video.id, mode='direct'), AuthContext())
     task = await start_clip(result['project_id'], AuthContext())
     replay = await start_clip(result['project_id'], AuthContext())
     assert task.id == replay.id
     from models.creation_agent import AgentMessage
-    message = await AgentMessage.get(task_id=task.id, role='user')
+    assert not await AgentMessage.filter(task_id=task.id).exists()
     assert task.task_type == 4
     assert task.request_params['video_request']['model_config_id'] == video.id
     assert task.request_params['video_request']['scene_id'] == result['scene_id']
     assert (await Scene.get(id=result['scene_id'])).prompt == result['prompt']
-    assert message.conversation_id == (await clip_session(result['project_id'], AuthContext()))['conversation_id']
+    assert task.request_params['execution_mode'] == 'media'
 
 
 @pytest.mark.asyncio

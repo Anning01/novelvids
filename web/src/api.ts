@@ -62,7 +62,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|batch|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
@@ -506,6 +506,7 @@ export const api = {
   activateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/activate`, { method: 'POST' }),
   deactivateConfig: (id: number) => request<SingleResponse<AiModelConfig>>(`/config/${id}/deactivate`, { method: 'POST' }),
   deleteConfig: (id: number) => request<SingleResponse<null>>(`/config/${id}`, { method: 'DELETE' }),
+  retryTask: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}/retry`, { method: 'POST' }),
   task: (id: string, signal?: AbortSignal) => request<SingleResponse<AiTask>>(`/task/${id}`, signal ? { signal } : undefined),
   billingStatementParties: () => request<SingleResponse<BillingStatementParties>>('/billing/statements/parties'),
   billingStatements: (params: BillingStatementFilters & { page?: number; page_size?: number } = {}) => request<SingleResponse<BillingStatement>>(`/billing/statements${qs({ ...params })}`),

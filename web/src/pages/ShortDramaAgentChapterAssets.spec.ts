@@ -63,7 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.spyOn(agentApi, 'capabilities').mockResolvedValue({code: 0, message: '', data: {
     enabled: true, can_write: true, max_targets: 32, models: [
-      { id: 11, name: '豆包', model: 'doubao' }, { id: 12, name: 'DeepSeek', model: 'deepseek' },
+      { id: 11, name: '豆包', model: 'doubao', concurrency: 4 }, { id: 12, name: 'DeepSeek', model: 'deepseek', concurrency: 4 },
     ],
   }})
   vi.mocked(api.imageGenerationModels).mockResolvedValue({code: 0, message: '', data: []})

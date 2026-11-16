@@ -282,3 +282,16 @@ it('reuses the whole batch submission identity after a lost response', async () 
   expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/asset/reference-batch', '/api/asset/reference-batch'])
   expect(JSON.parse(String(first.body)).asset_ids).toEqual([1, 2, 3, 4, 5])
 })
+
+it('reuses the video batch identity after a lost response', async () => {
+  localStorage.clear()
+  const payload = [{ scene_id: 11, model_config_id: 7, return_last_frame: false }]
+  const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('Connection lost'))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0, data: { id: 'batch', status: 6 } })))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(api.generateVideoBatch(payload)).rejects.toThrow('Connection lost')
+  await api.generateVideoBatch(payload)
+  const first = new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit).headers).get('X-Creation-Request-Id')
+  expect(first).toBeTruthy()
+  expect(new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers).get('X-Creation-Request-Id')).toBe(first)
+})

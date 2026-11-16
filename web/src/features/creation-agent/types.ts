@@ -113,6 +113,7 @@ export interface AgentMessage extends AgentProgress {
 }
 
 export interface AgentRun extends AgentProgress {
+  background?: boolean
   pending_production?: PendingProduction | null
   production?: ProductionReceipt[]
   task_id: string
@@ -127,11 +128,10 @@ export interface AgentRun extends AgentProgress {
 }
 
 export interface AgentCapabilities {
-  production_concurrency?: number
   enabled: boolean
   can_write: boolean
   max_targets: number
-  models: { id: number; name: string; model: string }[]
+  models: { id: number; name: string; model: string; concurrency: number }[]
 }
 
 export interface ProductionIntent {
@@ -159,7 +159,6 @@ export interface AgentRunInput {
 
 export interface AgentConfiguration {
   runtime?: 'deepagents' | 'pydantic_ai'
-  production_concurrency?: number
   enabled: boolean
   request_limit: number | null
   tool_calls_limit: number | null

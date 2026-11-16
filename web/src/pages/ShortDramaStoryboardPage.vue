@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { provide } from 'vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
@@ -80,7 +81,6 @@ import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
-import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { agentApi } from '@/features/creation-agent/api'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
@@ -1903,7 +1903,9 @@ async function optimizeChapterPrompts() {
   batchPromptProgress.value = { total: targets.length, finished: 0, failed: 0, running: true }
   try {
     const { data: configuration } = await agentApi.capabilities(projectId.value)
-    await runVideoGenerationQueue(targets, configuration.production_concurrency || 1, false, async scene => {
+    const assistant = configuration.models[0]
+    if (!assistant) throw new Error(tr('还需要配置一个对话模型'))
+    await runVideoGenerationQueue(targets, assistant.concurrency, false, async scene => {
       if (controller.signal.aborted) return false
       const applied = draftFor(scene).promptModel === model.model_type || await optimizeModelPrompt(scene, model, false)
       if (controller.signal.aborted) return false
@@ -2439,7 +2441,11 @@ async function monitorVideoBatch(taskId: string) {
       return task
     }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
       requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
-    if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
+    if (result.status === TaskStatusEnum.COMPLETED && Number(result.response_data?.failed_count) > 0) {
+      notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', {
+        p0: Number(result.response_data?.completed_count || 0), p1: Number(result.response_data?.failed_count),
+      }))
+    } else if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
     else notice.error(result.error_message || tr('连续生成已停止，后续分镜未提交'))
   } catch (error) {
     if (!isAbortError(error)) notice.error((error as Error).message)
@@ -2476,55 +2482,33 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     draft.returnLastFrame = request.returnLastFrame
     draft.autoEnhancement = request.autoEnhancement || null
   }
-  const generationSettings: SceneVideoGenerationSettings = {
-    model,
-    resolution: request.resolution,
-    aspectRatio: request.aspectRatio,
-    returnLastFrame: request.returnLastFrame,
-    autoEnhancement: request.autoEnhancement || null,
-  }
+  const chapterId = activeChapterId.value
   try {
-    if (request.returnLastFrame) {
-      for (const scene of targets) {
-        const blocked = batchVideoDisabledReason(scene, model, request)
-        if (blocked) throw new Error(blocked)
-        ensureSceneVoiceReferencePrompt(scene)
-        if (!await saveScene(scene, false, model)) return
-      }
-      const requests = targets.map(scene => {
-        const draft = draftFor(scene)
-        return { scene_id: scene.id, model_config_id: model.config_id,
-          generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
-          last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
-          resolution: request.resolution, aspect_ratio: request.aspectRatio,
-          output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
-          return_last_frame: true, auto_enhancement: request.autoEnhancement || null,
-          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia) : [] }
-      })
-      const task = (await api.generateVideoBatch(requests)).data
-      await monitorVideoBatch(task.id)
-      return
+    for (const scene of targets) {
+      const blocked = batchVideoDisabledReason(scene, model, request)
+      if (blocked) throw new Error(blocked)
+      ensureSceneVoiceReferencePrompt(scene)
+      if (!await saveScene(scene, false, model)) return
     }
-    const completedCount = await runVideoGenerationQueue(
-      targets,
-      model.concurrency,
-      false,
-      async scene => {
-        const blocked = batchVideoDisabledReason(scene, model, request)
-        if (blocked) setSceneVideoError(scene.id, blocked)
-        return !blocked && await generateVideo(scene, false, generationSettings)
-      },
-    )
-    const failedCount = targets.length - completedCount
-    failedCount
-      ? notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
-      : notice.success(request.autoEnhancement
-        ? tr('批量视频生成完成：成功 {p0} 条，高清化进度见各分镜', { p0: completedCount })
-        : tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
+    const requests = targets.map(scene => {
+      const draft = draftFor(scene)
+      return { scene_id: scene.id, model_config_id: model.config_id,
+        generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
+        last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
+        resolution: request.resolution, aspect_ratio: request.aspectRatio,
+        output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
+        return_last_frame: request.returnLastFrame, auto_enhancement: request.autoEnhancement || null,
+        reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia) : [] }
+    })
+    const task = (await api.generateVideoBatch(requests)).data
+    if (alive && chapterId === activeChapterId.value) {
+      notice.info(tr('任务已提交，正在等待模型执行。'))
+      void monitorVideoBatch(task.id)
+    }
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    batchGeneratingVideos.value = false
+    if (chapterId === activeChapterId.value && !batchMonitor) batchGeneratingVideos.value = false
   }
 }
 

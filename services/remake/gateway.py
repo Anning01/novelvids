@@ -219,7 +219,9 @@ class RemakeVideoAnalysisGateway:
         attempts = len(self.retry_delays) + 1
         for attempt in range(attempts):
             try:
-                completion = await self.client.chat.completions.create(**request)
+                from services.model_concurrency import model_slots
+                async with model_slots.hold(getattr(self.config, 'id', None)):
+                    completion = await self.client.chat.completions.create(**request)
                 self._add_usage(completion_usage(completion))
                 result = _completion_json(completion)
                 if include_segment_metadata:

@@ -938,8 +938,8 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             await objects.get('asset', asset.id)
             if variant:
                 await objects.get('variant', variant.id)
-            from services.creation_agent.skill_execution import prepare_workflow
-            request_params = await prepare_workflow(request_params)
+            from services.media_tasks import prepare_media_task
+            request_params = await prepare_media_task(request_params)
             task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, request_params, db_connection=connection)
             task.request_params = {**(task.request_params or request_params), 'generation_run_id': str(task.id)}
             await task.save(update_fields=['request_params', 'updated_at'])

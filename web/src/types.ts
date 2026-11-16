@@ -30,6 +30,7 @@ export interface WorkbenchCapabilities {
 }
 
 export interface NovelMeta {
+  active_cover_task_id?: string | null
   episodes_managed?: boolean
   shot_duration_max?: number; audiovisual_guidance?: string | null
   storyboard_enabled?: boolean

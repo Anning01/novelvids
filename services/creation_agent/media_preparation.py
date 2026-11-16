@@ -18,7 +18,7 @@ async def prepare_planned_media(execution, *, kind, target):
     context = await step_context(execution.params)
     if context is None:
         return
-    key = 'prepare:media'
+    key = execution.params.get('media_preparation_key', 'prepare:media')
     previous = await AgentOperation.get_or_none(task_id=execution.params['task_id'], key=key, state='completed')
     if previous:
         await target.refresh_from_db()

@@ -246,7 +246,7 @@ class AssetReferenceHandler(BaseTaskHandler):
         )
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
-        if execution:
+        if execution or request_params.get('execution_mode') == 'media':
             style_prompt = ""
 
 
@@ -355,6 +355,10 @@ class AssetReferenceHandler(BaseTaskHandler):
                             await validate_prepared_media(execution, variant or asset)
                         except ValueError:
                             not_applied_reason = localized_message('生成期间内容已有新修改，图片已保留，未替换当前素材')
+                    if request_params.get('execution_mode') == 'media':
+                        from services.media_tasks import media_input_matches
+                        if not await media_input_matches(request_params):
+                            not_applied_reason = localized_message('生成期间内容已有新修改，图片已保留，未替换当前素材')
                     if not not_applied_reason:
                         if variant:
                             variant.images = result_urls
@@ -375,7 +379,7 @@ class AssetReferenceHandler(BaseTaskHandler):
             result = {"images": result_urls, "variant_id": variant.id if variant else None}
             if not_applied_reason:
                 result['not_applied_reason'] = not_applied_reason
-            if execution:
+            if execution or request_params.get('execution_mode') == 'media':
                 result["image_count"] = len(image_list)
             if reference_images:
                 result["input_image_count"] = len(reference_images)

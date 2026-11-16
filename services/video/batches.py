@@ -10,7 +10,8 @@ from models.video import Video
 from schemas.video import VideoGenerateRequest, VideoReferenceMedia
 from services.creation_objects import project_write
 from services.creation_agent.operation_receipts import execute_step
-from services.creation_agent.skill_execution import current_execution, prepare_workflow
+from services.creation_agent.skill_execution import current_execution
+from services.media_tasks import prepare_media_task
 from services.creation_agent.submissions import submit_once
 from services.creation_agent.waiting import WaitingForDependencies
 
@@ -27,10 +28,10 @@ async def submit_batch(request, *, media_base_url='', team_id=None, user_id=None
     scenes = await Scene.filter(id__in=ids).order_by('sequence').prefetch_related('chapter')
     if len(scenes) != len(ids) or len({s.chapter_id for s in scenes}) != 1:
         raise HTTPException(422, '连续生成必须选择同一集的不重复分镜')
-    if not all(item.return_last_frame for item in request.requests):
-        raise HTTPException(422, '连续生成必须开启尾帧衔接')
+    if len({item.return_last_frame for item in request.requests}) != 1:
+        raise HTTPException(422, '同一批次必须使用相同的尾帧衔接设置')
     chapter_id = scenes[0].chapter_id
-    params = await prepare_workflow({'operation': 'video_batch', 'novel_id': scenes[0].chapter.novel_id,
+    params = await prepare_media_task({'operation': 'video_batch', 'novel_id': scenes[0].chapter.novel_id,
         'chapter_id': chapter_id, 'team_id': team_id, 'user_id': user_id, 'media_base_url': media_base_url,
         'batch_requests': [next(item for item in request.requests if item.scene_id == scene.id).model_dump(mode='json') for scene in scenes]})
     async with project_write(params['novel_id']) as connection:
@@ -60,12 +61,18 @@ def require_continuity(video, next_scene_id):
 
 class VideoBatchHandler:
     async def execute(self, params):
+        if not any(item.get('return_last_frame') for item in params['batch_requests']):
+            return await self.execute_independent(params)
         from services.creation_agent.video_jobs import submit_video
         execution = current_execution.get()
         requests = params['batch_requests']
         videos = []
         for index, raw in enumerate(requests):
-            await execution.before_request()
+            if execution:
+                await execution.before_request()
+            else:
+                from services.media_tasks import check_media_task
+                await check_media_task(params)
             req = VideoGenerateRequest.model_validate(raw)
             request_id = uuid5(UUID(params['task_id']), f'video:{req.scene_id}')
             key = 'submit:' + str(request_id)
@@ -99,3 +106,36 @@ class VideoBatchHandler:
             require_continuity(video, requests[index + 1]['scene_id'] if index + 1 < len(requests) else None)
         await AiTask.filter(id=params['task_id']).update(progress=100)
         return {'video_ids': videos, 'completed_count': len(requests), 'total': len(requests)}
+
+    async def execute_independent(self, params):
+        from services.creation_agent.video_jobs import submit_video
+        from services.media_tasks import check_media_task
+        videos, failures = [], []
+        for raw in params['batch_requests']:
+            await check_media_task(params)
+            req = VideoGenerateRequest.model_validate(raw)
+            identifier = uuid5(UUID(params['task_id']), f'video:{req.scene_id}')
+            req = req.model_copy(update={'request_id': identifier})
+
+            async def submit():
+                try:
+                    video = await submit_video(req, media_base_url=params.get('media_base_url', ''),
+                        team_id=params.get('team_id'), user_id=params.get('user_id'))
+                    return {'video_id': video.id, 'task_id': video.metadata['agent_run_id']}
+                except (HTTPException, ValueError) as error:
+                    return {'scene_id': req.scene_id, 'error': str(getattr(error, 'detail', error))}
+
+            receipt = await execute_step(params['task_id'], 'submit:' + str(identifier), submit, atomic=True)
+            if receipt.get('error'):
+                failures.append(receipt)
+            else:
+                videos.append(await Video.get(id=receipt['video_id']))
+        finished = [video for video in videos if video.status in {3, 4, 5}]
+        result = {'video_ids': [video.id for video in videos], 'total': len(params['batch_requests']),
+            'completed_count': sum(video.status == 3 for video in videos),
+            'failed_count': len(failures) + sum(video.status in {4, 5} for video in videos), 'errors': failures}
+        await AiTask.filter(id=params['task_id']).update(response_data=result,
+            progress=round((len(finished) + len(failures)) / result['total'] * 100))
+        if len(finished) != len(videos):
+            raise WaitingForDependencies()
+        return result

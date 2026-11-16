@@ -76,12 +76,14 @@ it('keeps the workspace and saved content visible after start failure',async () 
   expect(wrapper.text()).toContain('你的描述、参考素材和生成参数已保存')
   expect(wrapper.text()).toContain('重试')
 })
-it('submits explicit generation intent with the selected model and ratio',async () => {
+it('submits video directly with the selected model and ratio',async () => {
   const {wrapper,store} = await render()
   const send = vi.spyOn(store,'send').mockResolvedValue(true)
+  const generate = vi.spyOn(api, 'generateVideo').mockResolvedValue(ok({id: 1, status: 6} as Video))
   const button = wrapper.findAll('button').find(item=>item.text()==='生成视频')!
   await button.trigger('click'); await flushPromises()
-  expect(send).toHaveBeenCalledWith(expect.objectContaining({production_intents:[expect.objectContaining({operation:'video',target_id:30,media_model_config_id:2,video_options:expect.objectContaining({aspect_ratio:'16:9',duration:5,resolution:'720p'})})]}))
+  expect(generate).toHaveBeenCalledWith(30, 2, expect.objectContaining({aspect_ratio:'16:9',duration:5,resolution:'720p'}))
+  expect(send).not.toHaveBeenCalled()
 })
 
 

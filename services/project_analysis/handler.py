@@ -251,10 +251,20 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         cover_model_config_id = request_params.get("cover_model_config_id")
         if not cover_model_config_id or not request_params.get("include_cover", True):
             return result
-        return await self._generate_cover(
-            novel, request_params, prompt_language, task_id,
-            outline=analysis.story_outline, book_types=analysis.book_types, result=result, stopped=stopped,
-        )
+        if not request_params.get('background_media'):
+            return await self._generate_cover(novel, request_params, prompt_language, task_id,
+                outline=analysis.story_outline, book_types=analysis.book_types, result=result, stopped=stopped)
+        from uuid import uuid5, UUID
+        from services.creation_agent.submissions import submission
+        token = submission.set({'submission_id': str(uuid5(UUID(str(task_id)), 'project-cover')),
+            'submission_hash': str(task_id) + ':project-cover'})
+        try:
+            cover_task = await novel_controller.analyze(novel.id, cover_only=True,
+                cover_model_config_id=cover_model_config_id, team_id=request_params.get('team_id'),
+                user_id=request_params.get('user_id'))
+        finally:
+            submission.reset(token)
+        return {**result, 'cover_status': 'pending', 'cover_task_id': str(cover_task.id)}
 
     async def _generate_cover(self, novel, request_params, prompt_language, task_id, *, outline, book_types, result, stopped):
         from services.creation_agent.skill_execution import current_execution
@@ -305,9 +315,9 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 result["cover"] = cover
                 result["cover_status"] = "ready"
                 return {key: result[key] for key in ('cover', 'cover_status', 'image_usage', 'image_config_id', 'image_model') if key in result}
-            if execution:
+            if task_id:
                 from services.creation_agent.operation_receipts import execute_step
-                result.update(await execute_step(execution.params['task_id'], 'media:cover', generate_cover, external=True))
+                result.update(await execute_step(task_id, 'media:cover', generate_cover, external=True))
             else:
                 await generate_cover()
         except Exception as error:
@@ -315,11 +325,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             from services.image_generation import ImageGenerationError
             if isinstance(error, ImageGenerationError):
                 result["cover_error"] = str(error)
-            if execution:
+            if task_id:
                 from models.agent_operation import AgentOperation
-                if await AgentOperation.filter(task_id=execution.params['task_id'], external=True, state='uncertain').exists():
+                if await AgentOperation.filter(task_id=task_id, external=True, state='uncertain').exists():
                     result["cover_status"] = "needs_review"
                     error.partial_result = result
                     raise
+            if request_params.get('execution_mode') == 'media':
+                error.partial_result = result
+                raise
             logger.warning("Optional project cover failed: %s", type(error).__name__)
         return result

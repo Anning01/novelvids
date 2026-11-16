@@ -71,6 +71,7 @@ class CreationPlanRunner:
         records = {row.key.removeprefix('plan-step:'): row for row in await AgentOperation.filter(
             task_id=self.params['task_id'], key__startswith='plan-step:')}
         by_id = {step.id: step for step in plan.steps}
+        waiting_for_media = False
         for step in plan.steps:
             await self.execution.before_request()
             if step.id in records and records[step.id].state == 'completed':
@@ -132,6 +133,7 @@ class CreationPlanRunner:
                         errors.append(task.error_message or localized_message('生成未完成'))
                     else:
                         active = True
+                        waiting_for_media = waiting_for_media or task.request_params.get('execution_mode') == 'media'
                 if active:
                     continue
                 if errors:
@@ -149,6 +151,11 @@ class CreationPlanRunner:
             finally:
                 current_execution.reset(token)
         if any(step.id not in records or records[step.id].state != 'completed' for step in plan.steps):
+            if waiting_for_media:
+                from models.creation_agent import AgentConversation
+                task = await AiTask.get(id=self.params['task_id'])
+                await AiTask.filter(id=task.id).update(request_params={**task.request_params, 'background': True})
+                await AgentConversation.filter(id=self.execution.message.conversation_id, active_task_id=task.id).update(active_task_id=None)
             raise WaitingForDependencies()
         results = [{'label': step.label, **records[step.id].result} for step in plan.steps]
         failed = [item for item in results if item['status'] in {'failed', 'blocked'}]

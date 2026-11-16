@@ -4,7 +4,7 @@ from utils.messages import localized_message
 
 from uuid import UUID
 
-from ag_ui.core import Event, RunAgentInput, RunErrorEvent
+from ag_ui.core import Event, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from ag_ui.encoder import EventEncoder
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -130,6 +130,9 @@ async def stream(task_id: UUID, request: Request, body: RunAgentInput | None = B
         while not await request.is_disconnected():
             async with task_signals.subscription(str(task_id)) as signal:
                 task = await AiTask.get(id=task_id)
+                if task.request_params.get('background'):
+                    yield encoder.encode(RunFinishedEvent(thread_id=str(conversation.id), run_id=str(task.id)))
+                    return
                 active = task.status in ACTIVE_STATUSES
                 while True:
                     batch = await agent_event_log.page(assistant, cursor, _STREAM_BATCH)

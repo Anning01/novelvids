@@ -75,17 +75,13 @@ async def test_real_batch_admission_creates_first_child_with_language_without_a_
     batch.status = 2
     await batch.save(update_fields=['status'])
     params = {**batch.request_params, 'task_id': str(batch.id)}
-    execution = SkillExecution(params, await conversation_for_task(batch), AsyncMock())
-    token = current_execution.set(execution)
-    try:
-        with pytest.raises(WaitingForDependencies):
-            await VideoBatchHandler().execute(params)
-    finally:
-        current_execution.reset(token)
+    with pytest.raises(WaitingForDependencies):
+        await VideoBatchHandler().execute(params)
     child = await Video.get(scene=scenes[0])
     child_task = await AiTask.get(id=child.metadata['agent_run_id'])
     assert child_task.request_params['prompt_language'] == 'zh'
-    assert child_task.request_params['origin_run_id'] == str(batch.id)
+    assert child_task.request_params['execution_mode'] == 'media'
+    assert 'origin_run_id' not in child_task.request_params
     assert child.external_task_id is None
     assert await Video.filter(scene=scenes[1]).count() == 0
     assert await ModelUsageRecord.all().count() == 0

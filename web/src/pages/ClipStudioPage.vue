@@ -142,20 +142,20 @@ async function load() {
 }
 async function generate(kind: 'image' | 'video', id: number) {
   const value = session.value
-  if (!value || store.busy || store.loading || starting.value || quotaBlocked.value) return
+  if (!value || starting.value || quotaBlocked.value) return
   const modelId = kind === 'image' ? value.image_model_config_id : value.model_config_id
   if (kind === 'image' && imageHistory.value[id]?.some(record => isAgentRunning(record.status))) return
   if (kind === 'video' && videos.value.some(video => video.scene_id === id && isAgentRunning(video.status))) return
   submittingMedia.value = { kind, id, at: new Date().toISOString() }
-  const target = { kind: kind === 'video' ? 'scene' as const : 'asset' as const, id }
-  const accepted = await store.send({ message: kind === 'video' ? '生成视频' : '生成图片', chapter_id: value.chapter_id,
-    targets: [target], write_scope: 'selected', model_config_id: value.assistant_model_config_id,
-    production_intents: [{ operation: kind, target_id: id, request_id: crypto.randomUUID(), media_model_config_id: modelId ?? undefined,
-      ...(kind === 'video' ? {video_options: { aspect_ratio: value.aspect_ratio, resolution: value.resolution, duration: value.duration, reference_media: value.reference_media }} : {}),
-    }],
-  })
-  if (accepted) void refresh()
-  else submittingMedia.value = null
+  try {
+    if (kind === 'image') await api.generateAsset(id)
+    else await api.generateVideo(id, modelId!, { aspect_ratio: value.aspect_ratio,
+      resolution: value.resolution, duration: value.duration, reference_media: value.reference_media })
+    void refresh()
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : tr('生成失败')
+    submittingMedia.value = null
+  }
 }
 watch(() => store.busy, busy => { if (!busy) submittingMedia.value = null })
 watch([() => route.params.projectId, () => auth.activeTeamId], load, { immediate: true })
@@ -187,12 +187,12 @@ onBeforeUnmount(() => { ++epoch; clearInterval(timer); store.disconnect() })
             :aspect-ratio="imageHistory[asset.id]?.[0]?.aspect_ratio || session.aspect_ratio" :model="imageHistory[asset.id]?.[0]?.model || (session.task_type === 'image' ? session.model_name : '')"
             :prompt="asset.base_traits || ''" :requested-format="imageHistory[asset.id]?.[0]?.output_format || String(asset.metadata?.output_format || session.output_format || 'png')" :records="preparingImage(asset.id) ? [] : imageRecords(asset.id)" :cost-error="costError" :show-costs="auth.canAccessBilling"
             :estimated-cost="asset.id === session.asset_id ? imageQuote.quote.value?.estimated_cost : null" :estimate-currency="imageQuote.quote.value?.currency">
-            <template #action><AppButton size="sm" :disabled="store.busy || store.loading || starting || quotaBlocked || Boolean(imageHistory[asset.id]?.some(record => isAgentRunning(record.status)))" @click="generate('image',asset.id)">{{ asset.main_image ? tr('重新生成') : tr('生成图片') }}</AppButton></template>
+            <template #action><AppButton size="sm" :disabled="starting || quotaBlocked || Boolean(imageHistory[asset.id]?.some(record => isAgentRunning(record.status)))" @click="generate('image',asset.id)">{{ asset.main_image ? tr('重新生成') : tr('生成图片') }}</AppButton></template>
           </ClipMediaResult>
         </div></section>
         <section v-if="session.task_type === 'video'" class="result-group"><h2><Film :size="16" />{{ tr('镜头与视频') }}</h2>
           <article v-for="scene in scenes" :key="scene.id" class="result-card shot-card">
-            <header><div><span>{{ tr('镜头') }} {{ scene.sequence }}</span><strong>{{ scene.description }}</strong></div><AppButton variant="secondary" size="sm" :disabled="store.busy || store.loading || starting || quotaBlocked || videos.some(video => video.scene_id === scene.id && isAgentRunning(video.status))" @click="generate('video', scene.id)">{{ tr('生成视频') }}<ArrowUpRight :size="14" /></AppButton></header>
+            <header><div><span>{{ tr('镜头') }} {{ scene.sequence }}</span><strong>{{ scene.description }}</strong></div><AppButton variant="secondary" size="sm" :disabled="starting || quotaBlocked || videos.some(video => video.scene_id === scene.id && isAgentRunning(video.status))" @click="generate('video', scene.id)">{{ tr('生成视频') }}<ArrowUpRight :size="14" /></AppButton></header>
             <div v-if="videos.some(video => video.scene_id === scene.id)" class="video-versions"><ClipMediaResult v-for="video in videos.filter(item => item.scene_id === scene.id)" :key="video.id" kind="video"
               :name="`${tr('视频')} #${video.id}`" :src="video.status === 3 ? video.url : undefined" :status="video.status" :created-at="video.created_at"
               :error="typeof video.metadata?.error === 'string' ? video.metadata.error : undefined" :aspect-ratio="String(video.metadata?.aspect_ratio || session.aspect_ratio)" :resolution="String(video.metadata?.resolution || session.resolution)"

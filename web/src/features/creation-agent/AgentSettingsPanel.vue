@@ -25,7 +25,6 @@ interface BudgetField {
 }
 const groups: { title: string; description: string; fields: BudgetField[] }[] = [
   { get title() { return tr('执行与输出') }, get description() { return tr('助手持续执行到任务完成或主动停止，上下文自动整理；单次输出遵循所选模型的能力。') }, fields: [
-    { key: 'production_concurrency', get label() { return tr('同时执行的创作任务') }, get unit() { return tr('个') } },
     { key: 'max_targets', get label() { return tr('单批操作对象') }, get unit() { return tr('个 / 批') } },
     { key: 'max_output_tokens', get label() { return tr('单次输出上限') }, unit: 'token', optional: true, min: 256 },
   ] },

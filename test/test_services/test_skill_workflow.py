@@ -665,9 +665,10 @@ async def test_chat_submission_uses_same_image_admission_and_reuses_receipt(
         assert child.request_params.get("variant_id") == (
             variant.id if variant else None
         )
-        assert child.request_params["origin_run_id"] == str(parent.id)
+        assert child.request_params["execution_mode"] == "media"
+        assert "origin_run_id" not in child.request_params
         assert child.request_params["prompt_language"] == "zh"
-        assert child.request_params["skill_snapshot"] == workflow["skill_snapshot"]
+        assert "skill_snapshot" not in child.request_params
         assert child.request_params["model_config_id"] == image_model.id
         assert await AiTask.filter(task_type=2).count() == 1
     finally:
@@ -795,10 +796,11 @@ async def test_cancelled_queued_video_has_terminal_pollable_record():
 
 
 @pytest.mark.asyncio
-async def test_button_and_worker_share_production_concurrency_limit():
+async def test_button_and_worker_share_the_image_model_concurrency_limit():
     from services.ai_task_executor import AiTaskExecutor
     from schemas.creation_agent import AgentConfiguration
 
+    model = await AiModelConfig.create(name='image-slots', task_type=2, model='test', base_url='https://example.invalid', api_key='synthetic', concurrency=1)
     executor = AiTaskExecutor()
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -818,7 +820,7 @@ async def test_button_and_worker_share_production_concurrency_limit():
         await AiTask.create(
             task_type=2,
             status=1,
-            request_params={"workflow_version": "agent-skills-v1"},
+            request_params={"workflow_version": "agent-skills-v1", "model_config_id": model.id},
         )
         for _ in range(3)
     ]
@@ -1393,7 +1395,12 @@ async def test_failed_cover_keeps_story_result_and_allows_an_explicit_new_attemp
     task = await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.stage == "needs_review"
+    assert task.status == 3
+    submit.assert_not_awaited()
+    cover = await AiTask.get(id=task.response_data['cover_task_id'])
+    await ai_task_executor.run(cover)
+    await cover.refresh_from_db()
+    assert cover.stage == 'needs_review'
     assert task.response_data["story_outline"] == "Preserved outline"
     assert (await Novel.get(id=novel.id)).story_outline == "Preserved outline"
     retry = await novel_controller.analyze(novel.id, cover_only=True, cover_model_config_id=image_config.id)
@@ -1542,9 +1549,13 @@ async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_ap
     await task.save()
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.stage == 'needs_review'
+    assert task.status == 3
+    cover = await AiTask.get(id=task.response_data['cover_task_id'])
+    await ai_task_executor.run(cover)
+    await cover.refresh_from_db()
+    assert cover.stage == 'needs_review'
     assert task.response_data['analysis_completed'] is True
-    assert task.response_data['cover_status'] == 'needs_review'
+    assert task.response_data['cover_status'] == 'pending'
     response=(await client.get(f'/api/novel/{novel.id}/analysis')).json()['data']
     assert response['response_data']['analysis_completed'] is True
     assert response['response_data']['story_outline'] == '已保存的故事大纲'

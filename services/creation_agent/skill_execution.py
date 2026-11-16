@@ -187,6 +187,8 @@ class SkillExecution:
 
         segment = str(facts.get("segment", "")) if isinstance(facts, dict) else ""
         key = f"model:{skill}:{output_type.__name__}:{segment}"
+        if self.params.get('media_preparation_key'):
+            key += ':' + self.params['media_preparation_key']
         from models.agent_operation import AgentOperation
         from services.creation_agent.plan_sources import fingerprint
         stable_facts = dict(facts) if isinstance(facts, dict) else facts

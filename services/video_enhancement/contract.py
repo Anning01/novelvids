@@ -30,6 +30,7 @@ class EnhancementOptions(BaseModel):
     max_duration_seconds: Decimal | None = Field(None, gt=0)
     max_file_bytes: int | None = Field(None, gt=0)
     poll_seconds: int = Field(15, ge=5, le=300)
+    # Compatibility only for stored provider snapshots; capacity comes from AiModelConfig.
     account_concurrency: int = Field(20, ge=1, le=1000)
     queue_id: str | None = Field(None, max_length=100)
     media_base_url: str | None = Field(None, max_length=500)

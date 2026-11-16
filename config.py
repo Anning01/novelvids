@@ -187,10 +187,6 @@ class Settings:
         1,
         int(os.getenv("VIDEO_RECONCILE_BATCH_SIZE", "50")),
     )
-    REMAKE_ANALYSIS_CONCURRENCY: int = max(
-        1,
-        int(os.getenv("REMAKE_ANALYSIS_CONCURRENCY", "2")),
-    )
     # 配置工作机地址时，重制工坊通过 SSH 处理媒体。
     REMAKE_MEDIA_SSH_HOST = os.getenv("REMAKE_MEDIA_SSH_HOST", "").strip()
     REMAKE_MEDIA_WORKER_PATH = os.getenv("REMAKE_MEDIA_WORKER_PATH", "/opt/novelvids-media-worker").strip()

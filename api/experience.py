@@ -45,6 +45,11 @@ async def start(project_id: int, background_tasks: BackgroundTasks, request: Req
     task = await start_clip(project_id, ctx, media_base_url=str(request.base_url).rstrip("/"))
     if task.status in ACTIVE_STATUSES:
         background_tasks.add_task(ai_task_executor.run, task)
+    from services.media_tasks import is_media_task
+    if is_media_task(task.request_params):
+        session = await clip_session(project_id, ctx)
+        return ResponseSchema(data={'task_id': str(task.id), 'status': task.status,
+            'conversation_id': session['conversation_id'], 'background': True})
     return ResponseSchema(data=await creation_agent_controller.snapshot(task.id, ctx))
 
 

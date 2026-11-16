@@ -94,11 +94,12 @@ class EnhanceExportHandler(BaseTaskHandler):
         from tortoise.expressions import F
         capacity_available = False
         async with in_transaction() as db:
-            # Conservatively share one quota across all MediaKit configurations.
-            anchor = await AiModelConfig.filter(task_type=8).order_by('id').using_db(db).first()
-            await AiModelConfig.filter(id=anchor.id).using_db(db).update(updated_at=F('updated_at'))
-            reserved = await ChapterExport.filter(submission_slot=True).exclude(id=export.id).using_db(db).count()
-            quota = min(snapshot.get('concurrency', 1), options.account_concurrency)
+            await AiModelConfig.filter(id=config.id).using_db(db).update(concurrency=F('concurrency'))
+            current = await AiModelConfig.filter(id=config.id).using_db(db).select_for_update().get()
+            occupied = await ChapterExport.filter(submission_slot=True).exclude(id=export.id).using_db(db).select_related('task')
+            # Keep legacy reservations with no task until their existing recovery releases them.
+            reserved = sum(row.task is None or row.task.request_params.get('model_config_id') == config.id for row in occupied)
+            quota = current.concurrency
             if reserved >= quota:
                 await AiTask.filter(id=request_params['task_id']).using_db(db).update(status=6, stage='waiting_capacity')
             else:

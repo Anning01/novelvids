@@ -25,7 +25,7 @@ vi.mock('./AgentComposer.vue', () => ({ default: defineComponent({
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(agentApi.promptStatus).mockResolvedValue({ code: 0, message: "", data: [] })
-  vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: { enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '助手模型', model: 'model' }] } })
+  vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: { enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '助手模型', model: 'model', concurrency: 4 }] } })
   vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [] })
   vi.mocked(api.assets).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { page: 1, pages: 1, total: 0, page_size: 50 } } })
   vi.mocked(api.scenes).mockResolvedValue({ code: 0, message: '', data: { items: [{ id: 9, chapter_id: 3, sequence: 1, description: '夜晚车站', created_at: '', updated_at: '' }], pagination: { page: 1, pages: 1, total: 1, page_size: 100 } } })
@@ -370,7 +370,7 @@ it('does not show status returned for a previous chapter after switching chapter
 
 it('preserves draft and model choice after closing and reopening the assistant', async () => {
   vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: {
-    enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '默认模型', model: 'first' }, { id: 2, name: '所选模型', model: 'second' }],
+    enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '默认模型', model: 'first', concurrency: 4 }, { id: 2, name: '所选模型', model: 'second', concurrency: 4 }],
   } })
   const pinia = createPinia()
   const settings = { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } }

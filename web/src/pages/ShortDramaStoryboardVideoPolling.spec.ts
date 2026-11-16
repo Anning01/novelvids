@@ -52,7 +52,7 @@ beforeEach(() => {
   vi.mocked(api.updateScene).mockReset()
   vi.mocked(api.scene).mockReset()
   vi.spyOn(exportApi, 'models').mockResolvedValue({ data: [] })
-  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data: {production_concurrency: 2}} as never)
+  vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data: {models: [{id: 7, name: 'LLM', model: 'test', concurrency: 2}]}} as never)
 })
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); delete document.documentElement.dataset.appTheme })
 
@@ -69,7 +69,7 @@ async function render() {
   return { wrapper, router }
 }
 
-it('hands every selected scene to one persistent batch without submitting videos from the browser', async () => {
+it.each([false, true])('hands every selected scene to one persistent batch (continuity=%s)', async continuity => {
   vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [model] } as never)
   const shots = Array.from({ length: 5 }, (_, i) => ({ ...scene, id: 109 + i, sequence: i + 1, metadata: {} }))
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [], videos: {} } } as never)
@@ -78,12 +78,12 @@ it('hands every selected scene to one persistent batch without submitting videos
   vi.mocked(api.task).mockResolvedValue({ data: { id: 'batch-1', status: 3 } } as never)
   const { wrapper } = await render()
   wrapper.getComponent(ShortDramaBatchVideoDialog).vm.$emit('generate', {
-    sceneIds: shots.map(shot => shot.id), modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: true,
+    sceneIds: shots.map(shot => shot.id), modelConfigId: 11, resolution: '480p', aspectRatio: '16:9', returnLastFrame: continuity,
   })
   await flushPromises()
   expect(api.generateVideoBatch).toHaveBeenCalledTimes(1)
   expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].map(item => item.scene_id)).toEqual([109, 110, 111, 112, 113])
-  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].every(item => item.return_last_frame)).toBe(true)
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].every(item => item.return_last_frame === continuity)).toBe(true)
   expect(api.generateVideo).not.toHaveBeenCalled()
 })
 
@@ -164,8 +164,13 @@ it.each(['light', 'dark'])('releases the batch generation slot while HD continue
   vi.mocked(exportApi.models).mockResolvedValue({ data: [{ id: 8, name: 'HD', resolutions: [{ value: '1080p', short_side: 1080 }] }] })
   vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [], videos: {} } } as never)
   vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({ data: { ...shots.find(shot => shot.id === id), ...update } }) as never)
-  vi.mocked(api.generateVideo).mockImplementation(async sceneId => ({ data: { ...pending, id: sceneId, scene_id: sceneId,
-    metadata: { auto_enhancement: { stage: 'waiting_video' } } } }) as never)
+  vi.mocked(api.generateVideoBatch).mockImplementation(async () => {
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: shots, assets: [],
+      videos: Object.fromEntries(shots.map(shot => [shot.id, [{ ...completed, id: shot.id, scene_id: shot.id,
+        metadata: { auto_enhancement: { stage: 'enhancing' } } }]])) } } as never)
+    return { data: { id: 'batch-hd', status: 6 } } as never
+  })
+  vi.mocked(api.task).mockResolvedValue({ data: { id: 'batch-hd', status: 3 } } as never)
   vi.mocked(api.queryVideo).mockImplementation(async videoId => ({ data: { ...completed, id: videoId, scene_id: videoId,
     metadata: { auto_enhancement: { stage: 'enhancing' } } } }) as never)
   const { wrapper } = await render()
@@ -174,14 +179,15 @@ it.each(['light', 'dark'])('releases the batch generation slot while HD continue
     aspectRatio: '16:9', returnLastFrame: false, autoEnhancement: auto,
   })
   await flushPromises()
-  expect(vi.mocked(api.generateVideo).mock.calls.map(call => call[0])).toEqual([109, 110])
+  expect(vi.mocked(api.generateVideoBatch).mock.calls[0]![0].map(item => item.scene_id)).toEqual([109, 110])
+  expect(api.generateVideo).not.toHaveBeenCalled()
   expect(wrapper.text()).toContain('正在自动高清化')
   // Both HD operations remain unfinished; polling must continue independently.
   const queries = vi.mocked(api.queryVideo).mock.calls.length
   await vi.advanceTimersByTimeAsync(4000)
   await flushPromises()
   expect(vi.mocked(api.queryVideo).mock.calls.length).toBeGreaterThan(queries)
-  expect(api.generateVideo).toHaveBeenCalledTimes(2)
+  expect(api.generateVideoBatch).toHaveBeenCalledTimes(1)
 })
 
 it('resumes an existing task and displays a background completion without refreshing or generating', async () => {
@@ -501,6 +507,26 @@ it('limits Skills concurrency, continues after failure and retries only unfinish
   await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
   expect(api.optimizeScenePrompt).toHaveBeenCalledExactlyOnceWith(110, expect.anything())
   expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 1 镜，失败 0 镜')
+})
+
+it('uses the LLM model capacity instead of a retired task cap or the video model capacity', async () => {
+  const shots = Array.from({length: 6}, (_, index) => ({...scene, id: 109 + index, sequence: index + 1}))
+  vi.mocked(agentApi.capabilities).mockResolvedValue({data: {
+    production_concurrency: 1, models: [{id: 7, name: 'LLM', model: 'test', concurrency: 200}],
+  }} as never)
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({data: [model]} as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({data: {chapter, scenes: shots, assets: [], videos: {}}} as never)
+  vi.mocked(api.updateScene).mockImplementation(async (id, update) => ({data: {...shots.find(shot => shot.id === id), ...update}}) as never)
+  const finishes: (() => void)[] = []
+  vi.mocked(api.optimizeScenePrompt).mockImplementation(id => new Promise(resolve => finishes.push(() => resolve({data: {
+    status: 3, response_data: {scene_id: id, model_type: model.model_type, prompt: `优化稿${id}`},
+  }} as never))))
+  const {wrapper} = await render()
+  await wrapper.get('.batch-skills-optimize').trigger('click'); await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(6)
+  finishes.forEach(finish => finish())
+  await flushPromises()
+  expect(wrapper.get('.batch-skills-progress').text()).toContain('成功 6 镜')
 })
 
 it('retries an unsaved optimized draft without paying for another optimization', async () => {

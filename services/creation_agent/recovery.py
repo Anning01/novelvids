@@ -176,27 +176,13 @@ class ProductionRecovery:
                         blocked = await AiTask.filter(id__in=ids, status__in=[1, 2, 6]).exists()
                     if not blocked:
                         await AiTask.filter(id=waiting.id, status=2, stage='waiting_dependencies').update(status=6, stage='resuming')
-                from services.creation_agent.sessions import agent_configuration
-
-                capacity = (await agent_configuration()).production_concurrency
-                if len(self.running) < capacity:
-                    for task in (
-                        await AiTask.filter(status__in=[1, 6])
-                        .order_by("created_at")
-                        .limit(20)
-                    ):
-                        if task.request_params.get(
-                            "workflow_version"
-                        ) != WORKFLOW_VERSION or task.request_params.get(
-                            "parent_task_id"
-                        ):
-                            continue
-                        if str(task.id) not in self.running:
-                            self.running[str(task.id)] = asyncio.create_task(
-                                ai_task_executor.run(task)
-                            )
-                        if len(self.running) >= capacity:
-                            break
+                # Queue every durable job; actual model calls enforce the model's capacity.
+                queued = await AiTask.filter(status__in=[1, 6]).order_by('created_at')
+                for task in queued:
+                    if task.request_params.get('workflow_version') != WORKFLOW_VERSION or task.request_params.get('parent_task_id'):
+                        continue
+                    if str(task.id) not in self.running:
+                        self.running[str(task.id)] = asyncio.create_task(ai_task_executor.run(task))
             except asyncio.CancelledError:
                 raise
             except Exception as error:

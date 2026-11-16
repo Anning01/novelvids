@@ -25,6 +25,36 @@ async def submit_intent(intent: ProductionIntent, *, request, novel_id: int):
     await validate_intent_scope(intent, request=request, novel_id=novel_id)
     params = execution.params
 
+    from models.agent_operation import AgentOperation
+    receipt = await AgentOperation.get_or_none(task_id=params['task_id'], key='submit:' + str(intent.request_id), state='completed')
+    if receipt:
+        return receipt.result
+
+    if intent.operation in {'image', 'video'}:
+        from services.creation_agent.media_preparation import prepare_planned_media
+        from services.creation_agent.media_execution import prepare_image_prompt
+        from services.creation_agent.skill_execution import SkillExecution
+        target = (await AssetVariant.get(id=intent.variant_id) if intent.variant_id else await Asset.get(id=intent.target_id)) if intent.operation == 'image' else await Scene.get(id=intent.target_id)
+        kind = 'variant' if intent.variant_id else 'asset' if intent.operation == 'image' else 'scene'
+        scoped = SkillExecution({**params, 'media_preparation_key': f'prepare:media:{intent.request_id}',
+            **({'asset_id': intent.target_id, 'variant_id': intent.variant_id} if intent.operation == 'image'
+               else {'video_request': {'scene_id': intent.target_id}})}, execution.message, execution.before_request)
+        if params.get('creation_plan_id'):
+            await prepare_planned_media(scoped, kind=kind, target=target)
+        elif intent.operation == 'image':
+            token = current_execution.set(scoped)
+            try:
+                await prepare_image_prompt(await Asset.get(id=intent.target_id), target if intent.variant_id else None, scoped.params)
+            finally:
+                current_execution.reset(token)
+        elif not (target.prompt or '').strip():
+            from schemas.agent_workflow import CompletePrompt
+            generated = await scoped.generate('video', {'description': target.description,
+                'structure': target.prompt_params, 'duration': target.duration}, CompletePrompt)
+            await execution.before_request()
+            target.prompt = generated.prompt
+            await target.save(update_fields=['prompt', 'updated_at'])
+
     async def submit():
         if intent.operation in {'prepare_export', 'enhance_export'}:
             from controllers.chapter_export import chapter_exports

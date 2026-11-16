@@ -71,10 +71,6 @@ class AiTaskExecutor:
         self._semaphores: dict[AiTaskTypeEnum, asyncio.Semaphore] = {}
         # 同一任务可能因幂等重放被重复投递，进程内只允许一个执行者。
         self._task_locks: dict[str, asyncio.Lock] = {}
-        self._production_condition = asyncio.Condition()
-        self._production_active = 0
-        self._image_active: dict[int, int] = {}
-        self._image_capacity: dict[int, int] = {}
 
     def is_executing(self, task_id) -> bool:
         """An executor lease includes response persistence and usage settlement."""
@@ -184,35 +180,14 @@ class AiTaskExecutor:
         lock = self._task_locks.setdefault(key, asyncio.Lock())
         try:
             async with lock:
-                if task.request_params.get("workflow_version") != "agent-skills-v1":
-                    await self._run_once(task)
-                    return
-                from services.creation_agent.sessions import agent_configuration
-                capacity = (await agent_configuration()).production_concurrency
+                from services.model_concurrency import model_slots
                 params = task.request_params
-                model_id = (params.get("model_config_id") if task.task_type == AiTaskTypeEnum.reference_image
-                            else params.get("cover_model_config_id") if params.get("include_cover") else None)
-                if model_id is not None:
-                    from models.config import AiModelConfig
-                    config = await AiModelConfig.filter(id=model_id).only("concurrency").first()
-                    if config:
-                        self._image_capacity[model_id] = max(1, config.concurrency)
-                    else:
-                        model_id = None
-                async with self._production_condition:
-                    await self._production_condition.wait_for(lambda: self._production_active < capacity and
-                        (model_id is None or self._image_active.get(model_id, 0) < self._image_capacity[model_id]))
-                    if model_id is not None:
-                        self._image_active[model_id] = self._image_active.get(model_id, 0) + 1
-                    self._production_active += 1
-                try:
+                # Text calls acquire their own model slots, including nested skill calls.
+                model_id = (params.get('model_config_id') if task.task_type == AiTaskTypeEnum.reference_image
+                            else params.get('cover_model_config_id') if params.get('operation') == 'project_cover'
+                            else params.get('model_config_id') if params.get('workflow_version') != 'agent-skills-v1' and task.task_type in {1, 3, 5} else None)
+                async with model_slots.hold(model_id):
                     await self._run_once(task)
-                finally:
-                    async with self._production_condition:
-                        if model_id is not None:
-                            self._image_active[model_id] -= 1
-                        self._production_active -= 1
-                        self._production_condition.notify_all()
         finally:
             if not lock.locked():
                 self._task_locks.pop(key, None)
@@ -256,7 +231,8 @@ class AiTaskExecutor:
         timeout = self.run_timeout(task, handler)
 
         # 标记为执行中
-        claimed = await AiTask.filter(id=task.id, status__in=[TaskStatusEnum.pending.value, TaskStatusEnum.queued.value]).update(
+        from services.model_concurrency import claim_task
+        claimed = await claim_task(task,
             status=TaskStatusEnum.running.value,
             started_at=task.started_at if task.request_params.get('operation') == 'creation_plan' and task.started_at else datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc))
@@ -300,6 +276,9 @@ class AiTaskExecutor:
     async def _execute_handler(self, task, handler):
         token = current_task_id.set(task.id)
         try:
+            from services.media_tasks import is_media_task, run_media_task
+            if is_media_task(task.request_params):
+                return await run_media_task(task, handler)
             from services.creation_agent.skill_execution import WORKFLOW_VERSION
             from prompts.skill_pack import use_skill_snapshot
             with use_skill_snapshot(task.request_params.get("skill_snapshot")):

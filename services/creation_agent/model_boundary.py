@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from services.creation_agent.context_budget import ContextBudget, wire_size
+from services.model_concurrency import model_slots
 from schemas.creation_agent import AgentConfiguration
 from pydantic_ai.models.wrapper import WrapperModel
 
@@ -142,23 +143,27 @@ class RecordedAgentModel(WrapperModel):
     async def request(self, messages, model_settings, model_request_parameters):
         messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
-            call, started = await self._begin(messages, model_request_parameters)
+            call = billing_context = None
             response = None
-            billing_context = active_model_call.set((self.message, call))
             try:
-                response = await self.wrapped.request(messages, model_settings, model_request_parameters)
-                return response
+                async with model_slots.hold((getattr(self.message, 'model_snapshot', None) or {}).get('id')):
+                    call, started = await self._begin(messages, model_request_parameters)
+                    billing_context = active_model_call.set((self.message, call))
+                    response = await self.wrapped.request(messages, model_settings, model_request_parameters)
+                    return response
             except Exception as exc:
                 if not self.manage_context or self.overflow_retried or not self._is_context_overflow(exc):
                     raise
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
-                active_model_call.reset(billing_context)
+                if billing_context is not None:
+                    active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response)
-                await self._finish(call, started, response.usage if response else None, response is not None,
-                                   response.finish_reason if response else None)
+                if call is not None:
+                    await self._finish(call, started, response.usage if response else None, response is not None,
+                                       response.finish_reason if response else None)
                 if response is not None and self.phase != 'summary':
                     await self._save_messages([*messages, response])
 
@@ -166,15 +171,17 @@ class RecordedAgentModel(WrapperModel):
     async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
         messages = await self.budget.prepare(messages, model_request_parameters) if self.manage_context else messages
         while True:
-            call, started = await self._begin(messages, model_request_parameters)
+            call = billing_context = None
             response = None
             entered = completed = False
-            billing_context = active_model_call.set((self.message, call))
             try:
-                async with self.wrapped.request_stream(messages, model_settings, model_request_parameters, run_context) as response:
-                    entered = True
-                    yield response
-                completed = True
+                async with model_slots.hold((getattr(self.message, 'model_snapshot', None) or {}).get('id')):
+                    call, started = await self._begin(messages, model_request_parameters)
+                    billing_context = active_model_call.set((self.message, call))
+                    async with self.wrapped.request_stream(messages, model_settings, model_request_parameters, run_context) as response:
+                        entered = True
+                        yield response
+                    completed = True
                 return
             except Exception as exc:
                 # Once streaming starts the caller may have seen tool deltas.
@@ -184,10 +191,12 @@ class RecordedAgentModel(WrapperModel):
                 self.overflow_retried = True
                 messages = await self.budget.prepare(messages, model_request_parameters, force=True)
             finally:
-                active_model_call.reset(billing_context)
+                if billing_context is not None:
+                    active_model_call.reset(billing_context)
                 if response is not None and self.phase != 'summary':
                     await self._save_response(call, response.get())
-                await self._finish(call, started, response.usage() if response else None, completed,
-                                   response.finish_reason if response else None)
+                if call is not None:
+                    await self._finish(call, started, response.usage() if response else None, completed,
+                                       response.finish_reason if response else None)
                 if response is not None and self.phase != 'summary':
                     await self._save_messages([*messages, response.get()])

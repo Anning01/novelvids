@@ -37,5 +37,9 @@ async def cancel_task(
 
 @router.post('/{task_id}/retry', summary='重置失败任务并继续未完成步骤', response_model=ResponseSchema[AiTaskOut])
 async def retry_task(task_id: UUID, ctx: AuthContext = Depends(require_task_access), _: AuthContext = _EDITOR):
+    from services.media_tasks import is_media_task, retry_media_task
+    task = await ai_task_controller.get(task_id)
+    if is_media_task(task.request_params):
+        return ResponseSchema(data=await retry_media_task(task))
     from services.creation_agent.production_resume import resume_production
     return ResponseSchema(data=await resume_production(task_id, ctx))

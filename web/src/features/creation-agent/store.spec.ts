@@ -29,6 +29,17 @@ beforeEach(() => {
 })
 
 describe('creation assistant store', () => {
+  it('allows the next message while a handed-off media plan remains running', async () => {
+    const store = useCreationAgentStore()
+    await store.open(7)
+    vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { ...run, status: 2, background: true } })
+    await store.follow(run.task_id)
+    expect(store.currentRun?.status).toBe(2)
+    expect(store.busy).toBe(false)
+    vi.mocked(agentApi.submit).mockResolvedValue({ code: 0, message: '', data: { ...run, task_id: 'next-run' } })
+    expect(await store.send(input)).toBe(true)
+    expect(agentApi.submit).toHaveBeenCalledTimes(1)
+  })
   it('shares a pending progress request instead of piling up polling requests', async () => {
     const store = useCreationAgentStore()
     store.messages = [{ id: 1, role: 'assistant', task_id: run.task_id, status: 2, content: '', changes: [], usage: {}, created_at: '' }]
