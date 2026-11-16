@@ -77,7 +77,7 @@ async def recovery_summaries(tasks):
         if task.status in {4, 5} and supports_production_resume(task):
             results[str(task.id)] = {'can_resume_production': True, 'can_resume': False,
                 'reusable_count': 0, 'pending_count': 0, 'responses_saved': 0,
-                'failure_step': None, 'error_code': None}
+                'failure_step': 'storyboard' if task.task_type == 3 else None, 'error_code': None}
     if not tasks:
         return results
     owners = await AgentMessage.filter(task_id__in=list(results), role='assistant').select_related('conversation').only(
@@ -132,7 +132,7 @@ async def recovery_summaries(tasks):
         issues = failures[-1].result.get('issues', []) if failures else []
         results[str(task.id)] = {
             **(results[str(task.id)] or {}),
-            'failure_step': failures[-1].result.get('stage') if failures else None,
+            'failure_step': failures[-1].result.get('stage') if failures else (results[str(task.id)] or {}).get('failure_step'),
             'error_code': ('CREATION_OUTPUT_LIMIT' if any(issue.get('code') == 'output_length' for issue in issues) else
                            'CREATION_JSON_INVALID' if any(issue.get('code') == 'json_invalid' for issue in issues)
                            else 'CREATION_VALIDATION_FAILED') if failures and task.status == 4 else None,

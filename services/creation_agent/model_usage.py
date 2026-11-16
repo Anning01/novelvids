@@ -1,5 +1,7 @@
 """Preserve standard Chat Completions totals across usage-library versions."""
 
+import httpx
+
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIStreamedResponse
@@ -27,6 +29,17 @@ def preserve_chat_usage(mapped: RequestUsage, raw: CompletionUsage | None) -> Re
 
 
 class UsagePreservingStreamedResponse(OpenAIStreamedResponse):
+    async def _get_event_iterator(self):
+        try:
+            async for event in super()._get_event_iterator():
+                yield event
+        except httpx.RemoteProtocolError:
+            # A provider finish marker confirms the content ended; a missing HTTP
+            # trailer must not discard it. Schema/content validation still runs.
+            if self.finish_reason not in {'stop', 'tool_call'}:
+                raise
+            self.provider_details = {**(self.provider_details or {}), 'stream_transport_interrupted': True}
+
     def _map_usage(self, response: ChatCompletionChunk) -> RequestUsage:
         return preserve_chat_usage(super()._map_usage(response), response.usage)
 
