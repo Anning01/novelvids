@@ -18,7 +18,7 @@ def supports_production_resume(task):
     return (task.task_type in {1, 2, 3, 5}
             and task.request_params.get('workflow_version') == 'agent-skills-v1'
             and not task.request_params.get('parent_task_id')
-            and task.request_params.get('operation') in {None, 'assets', 'storyboard', 'screenplay', 'story', 'image', 'storyboard_sheet', 'project_cover'})
+            and task.request_params.get('operation') in {None, 'assets', 'storyboard', 'screenplay', 'story', 'image', 'storyboard_sheet', 'storyboard_sheet_edit', 'project_cover'})
 
 
 async def validate_resume_inputs(task, message, operations):

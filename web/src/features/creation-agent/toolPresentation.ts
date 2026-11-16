@@ -1,6 +1,8 @@
 import { tr } from '@/i18n'
 
 const TOOL_LABELS: Record<string, { operation: string; progress: string }> = {
+  read_storyboard_sheet: {operation:'读取线稿与历史',progress:'正在读取线稿与历史'},
+  edit_storyboard_sheet: {operation:'提交线稿修改',progress:'正在提交线稿修改'},
   remember_creation_constraints: { operation: '保存创作要求', progress: '正在保存创作要求' },
   link_scene_references: { operation: '引用已有设定与形态', progress: '正在引用已有设定与形态' },
   read_episode_script: {operation:'读取本集剧本',progress:'正在读取本集剧本'},

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { provide } from 'vue'
+import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
@@ -1839,9 +1840,23 @@ function restoreSheet(scene: Scene) {
 }
 
 function replaceSheetScene(updated: Scene) {
+  const excluded = draftFor(updated).sheetExcluded
   scenes.value = scenes.value.map(scene => scene.id === updated.id ? updated : scene)
-  restoreSheet(updated)
+  if (!excluded) restoreSheet(updated)
 }
+const agentStore = useCreationAgentStore()
+const sheetReceipts = computed(() => agentStore.projectId === projectId.value
+  ? agentStore.messages.flatMap(message => message.production || []).filter(receipt =>
+    receipt.operation === 'storyboard_sheet_edit' && receipt.scene_id && scenes.value.some(scene => scene.id === receipt.scene_id)) : [])
+watch(() => sheetReceipts.value.map(receipt => `${receipt.task_id}:${receipt.status}`).join('|'), async () => {
+  const chapterId = activeChapterId.value
+  for (const id of new Set(sheetReceipts.value.map(receipt => receipt.scene_id!))) {
+    try {
+      const updated = (await api.scene(id)).data
+      if (activeChapterId.value === chapterId) replaceSheetScene(updated)
+    } catch { /* The task receipt remains available; a page reload can retry the scene read. */ }
+  }
+})
 
 function useSavedSheet(scene: Scene) {
   restoreSheet(scene)
