@@ -71,7 +71,7 @@ async def test_studio_video_job_survives_disconnect_and_settles_once(video_api,m
         assert req.url.host=="cdn.example" and req.method=="GET" and "authorization" not in req.headers
         result_files.append(req.url.path)
         return httpx.Response(200,content=b"direct video bytes")
-    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:client_type(**kw,transport=httpx.MockTransport(dispatch)))
+    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:client_type(**{**kw,"transport":httpx.MockTransport(dispatch)}))
     gen=get_generator(local)
     handle=await gen.submit("参考 @图片1",duration=5,resolution="720p",aspect_ratio="16:9",
         reference_images=["https://images.example/shot.png"],platform_request_key=request_key)
