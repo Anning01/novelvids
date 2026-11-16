@@ -82,6 +82,10 @@ async def validate_step_inputs(params, *, include_target=True):
         row = await AgentOperation.get_or_none(task_id=params['creation_run_id'], key=f'plan-step:{dependency}', state='completed')
         if row:
             plan.object_versions.update(row.result.get('object_versions', {}))
+            # Legacy receipts retain strict version checks rather than trusting stale design snapshots.
+            for key in row.result.get('object_versions', {}):
+                plan.storyboard_input_versions.pop(key, None)
+            plan.storyboard_input_versions.update(row.result.get('storyboard_input_versions', {}))
             if step.operation in {'assets', 'storyboard'}:
                 keys.update(key for key in row.result.get('object_versions', {}) if key.startswith(('asset:', 'variant:')))
     target_id = (params.get('asset_id') if step.operation == 'image' else
@@ -98,7 +102,8 @@ async def validate_step_inputs(params, *, include_target=True):
         scene = await Scene.get(id=target_id, chapter__novel_id=plan.novel_id)
         keys.update(f'asset:{identifier}' for identifier in await scene.assets.all().values_list('id', flat=True))
     chapters = [step.target_id] if include_target and step.operation == 'storyboard' else []
-    await validate_objects(plan, keys=keys, chapter_ids=chapters)
+    await validate_objects(plan, keys=keys, chapter_ids=chapters,
+        input_versions=plan.storyboard_input_versions if step.operation == 'storyboard' else None)
 
 
 async def context_assets(params):

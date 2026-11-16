@@ -93,7 +93,7 @@ async def test_actual_model_retry_requests_only_invalid_shot_and_saves_all_other
     shots = await Scene.filter(chapter=chapter).order_by('sequence')
     assert len(shots) == 3
     assert shots[0].description == 'keep-first' and shots[2].description == 'keep-third'
-    checkpoint = await AgentOperation.get(task=task, key='candidate:storyboard:')
+    checkpoint = await AgentOperation.get(task=task, key='candidate:storyboard:episode')
     assert checkpoint.result['pending'] == {}
 
 
