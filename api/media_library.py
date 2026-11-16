@@ -12,7 +12,7 @@ from controllers.media_library import (
 from models.audio_reference import AudioReference
 from models.digital_human import DigitalHuman
 from models.novel import Novel
-from schemas.media_library import AudioReferenceOssFinalizeIn, AudioReferenceOut, AudioReferenceTrimIn, DigitalHumanOut
+from schemas.media_library import AudioReferenceAutoDesignIn, AudioReferenceOssFinalizeIn, AudioReferenceOut, AudioReferenceTrimIn, DigitalHumanOut
 from services.audio_references import (
     audio_reference_accessible,
     audio_reference_scope_query,
@@ -72,6 +72,39 @@ async def list_audio_references(
         query,
     )
     return ResponseSchema(data=data)
+
+
+@router.post(
+    "/audio-references/auto-design",
+    summary="AI 全自动设计音色并绑定角色（LLM 描述 → MiMo VoiceDesign → OSS → 绑定）",
+    response_model=ResponseSchema[dict],
+)
+async def auto_design_audio_reference(
+    payload: AudioReferenceAutoDesignIn,
+    ctx: AuthContext = Depends(get_auth_context),
+    _: AuthContext = _EDITOR,
+):
+    team_id, created_by = await _audio_project_scope(payload.novel_id, ctx)
+    from services.voice_design import auto_design_voice_for_asset
+
+    reference, asset, variant, draft = await auto_design_voice_for_asset(
+        asset_id=payload.asset_id,
+        variant_id=payload.variant_id,
+        novel_id=payload.novel_id,
+        team_id=team_id,
+        created_by=created_by,
+    )
+    return ResponseSchema(
+        data={
+            "reference": AudioReferenceOut.model_validate(reference).model_dump(),
+            "asset_id": asset.id,
+            "asset_metadata": asset.metadata,
+            "variant_id": variant.id if variant else None,
+            "variant_metadata": variant.metadata if variant else None,
+            "voice_description": draft.voice_description,
+            "sample_text": draft.sample_text,
+        }
+    )
 
 
 @router.post(

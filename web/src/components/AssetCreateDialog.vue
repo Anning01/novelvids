@@ -151,6 +151,7 @@ const ownVariants = ref<AssetVariant[]>([])
 const saving = ref(false)
 const autoSaving = ref(false)
 const voiceSaving = ref(false)
+const autoDesigning = ref(false)
 const formHydrated = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 const promptTouched = ref(false)
@@ -1163,6 +1164,32 @@ async function selectVoiceReference(reference: AudioReference | null) {
   }
 }
 
+async function autoDesignVoice() {
+  if (!props.asset?.id || autoDesigning.value || voiceSaving.value) return
+  autoDesigning.value = true
+  try {
+    const result = await api.autoDesignVoice(
+      props.asset.id,
+      !variantDraft.value?.is_new && selectedVariant.value ? selectedVariant.value.id : null,
+      props.asset.novel_id || props.novelId || undefined,
+    )
+    voice.value = result.reference.nickname
+    voiceReferenceId.value = result.reference.id
+    if (result.variant_id && selectedVariant.value) {
+      selectedVariant.value = { ...selectedVariant.value, metadata: (result.variant_metadata ?? selectedVariant.value.metadata) as AssetVariant['metadata'] }
+    } else if (result.asset_metadata) {
+      const updated = { ...(promptSourceAsset.value || props.asset)!, metadata: result.asset_metadata as Asset['metadata'] }
+      promptSourceAsset.value = updated
+      emit('saved', updated)
+    }
+    notice.success(tr('已为“{p0}”设计并绑定音色「{p1}」', { p0: name.value || props.asset.canonical_name, p1: result.reference.nickname }))
+  } catch (error) {
+    notice.error(tr('AI 音色设计失败：{p0}', { p0: (error as Error).message }))
+  } finally {
+    autoDesigning.value = false
+  }
+}
+
 async function persistEdits() {
   if (!props.asset || !formHydrated.value) return
   if (autoSaving.value || voiceSaving.value || saving.value || generationRunning.value) return
@@ -1566,8 +1593,9 @@ onUnmounted(() => {
             <div v-if="kind === 'character' && !isGroupPortrait" class="asset-field" role="group" :aria-label="tr('音色选择')">
               <span>{{ tr('音色选择') }}</span>
               <div class="asset-voice-control">
-                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
-                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
+                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving || autoDesigning" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
+                <AppButton v-if="props.asset?.id" type="button" variant="secondary" class="asset-voice-choice" :loading="autoDesigning" :disabled="voiceSaving || autoDesigning" :title="tr('按角色设定生成专属音色并绑定')" @click="autoDesignVoice"><Sparkles :size="15" aria-hidden="true" /><span>{{ tr('AI 自动设计音色') }}</span></AppButton>
+                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving || autoDesigning" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
               </div>
             </div>
           </div>

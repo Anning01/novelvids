@@ -48,6 +48,14 @@ class AudioReferenceOssFinalizeIn(BaseModel):
         return value.strip()
 
 
+class AudioReferenceAutoDesignIn(BaseModel):
+    """AI 全自动音色链入参：按角色（可选衍生形态）设计并绑定音色。"""
+
+    asset_id: int = Field(ge=1)
+    variant_id: int | None = Field(default=None, ge=1)
+    novel_id: int | None = Field(default=None, ge=1)
+
+
 class AudioReferenceTrimIn(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)

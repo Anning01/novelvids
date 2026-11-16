@@ -484,6 +484,21 @@ export const api = {
     if (!response.ok || payload.code !== 0) throw new Error(payload.message || payload.detail || tr('参考音频上传失败'))
     return payload as SingleResponse<AudioReference>
   },
+  async autoDesignVoice(assetId: number, variantId: number | null, novelId?: number) {
+    const response = await request<SingleResponse<{
+      reference: AudioReference
+      asset_id: number
+      asset_metadata: Record<string, unknown>
+      variant_id: number | null
+      variant_metadata: Record<string, unknown> | null
+      voice_description: string
+      sample_text: string
+    }>>('/media-library/audio-references/auto-design', {
+      method: 'POST',
+      body: JSON.stringify({ asset_id: assetId, variant_id: variantId, novel_id: novelId ?? null }),
+    })
+    return response.data
+  },
   digitalHumans: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}) => request<PaginationResponse<DigitalHuman>>(`/media-library/digital-humans${qs({ page, page_size: 24, search, sort: 'id', ...filters })}`),
   workbenchCapabilities: () => request<SingleResponse<WorkbenchCapabilities>>('/workbench/capabilities'),
   workbenchBootstrap: (novelId: number, chapterId: number, signal?: AbortSignal) => request<SingleResponse<WorkbenchBootstrap>>(`/workbench/bootstrap${qs({ novel_id: novelId, chapter_id: chapterId })}`, signal ? { signal } : undefined),
