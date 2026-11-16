@@ -28,7 +28,12 @@ def preserve_chat_usage(mapped: RequestUsage, raw: CompletionUsage | None) -> Re
     return mapped
 
 
-class UsagePreservingStreamedResponse(OpenAIStreamedResponse):
+class StrictUsagePreservingStreamedResponse(OpenAIStreamedResponse):
+    def _map_usage(self, response: ChatCompletionChunk) -> RequestUsage:
+        return preserve_chat_usage(super()._map_usage(response), response.usage)
+
+
+class UsagePreservingStreamedResponse(StrictUsagePreservingStreamedResponse):
     async def _get_event_iterator(self):
         try:
             async for event in super()._get_event_iterator():
@@ -40,12 +45,11 @@ class UsagePreservingStreamedResponse(OpenAIStreamedResponse):
                 raise
             self.provider_details = {**(self.provider_details or {}), 'stream_transport_interrupted': True}
 
-    def _map_usage(self, response: ChatCompletionChunk) -> RequestUsage:
-        return preserve_chat_usage(super()._map_usage(response), response.usage)
-
 
 class UsagePreservingChatModel(OpenAIChatModel):
     """Use the SDK's documented response hooks without replacing its tool loop."""
+
+    strict_streaming = False
 
     async def _map_video_url_item(self, item):
         return {"type": "video_url", "video_url": {"url": item.url, **(item.vendor_metadata or {})}}
@@ -73,7 +77,7 @@ class UsagePreservingChatModel(OpenAIChatModel):
 
     @property
     def _streamed_response_cls(self) -> type[OpenAIStreamedResponse]:
-        return UsagePreservingStreamedResponse
+        return StrictUsagePreservingStreamedResponse if self.strict_streaming else UsagePreservingStreamedResponse
 
     def _map_usage(self, response: ChatCompletion) -> RequestUsage:
         return preserve_chat_usage(super()._map_usage(response), response.usage)

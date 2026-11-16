@@ -213,8 +213,6 @@ class CreationPlanRunner:
                 target = await AssetVariant.get(id=identifier)
                 versions[f'variant:{identifier}'] = await object_version(target)
             result['object_versions'] = versions
-            from services.creation_agent.input_versions import storyboard_input_versions
-            result['storyboard_input_versions'] = await storyboard_input_versions(versions)
         row, _ = await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'plan-step:{step.id}',
             defaults={'state': 'completed', 'result': result})
         await plan_activity(self.execution, f'step:{step.id}', step.label,

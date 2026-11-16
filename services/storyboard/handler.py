@@ -49,9 +49,6 @@ class StoryboardTaskHandler(BaseTaskHandler):
         max_tokens = request_params.get("max_tokens")
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
 
-        from services.creation_agent.step_context import validate_step_inputs
-        await validate_step_inputs(request_params)
-
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
         strategy = storyboard_strategy_factory.resolve(
