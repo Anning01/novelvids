@@ -168,6 +168,9 @@ class Settings:
     OSS_ACCESS_KEY_ID: str = os.getenv("OSS_ACCESS_KEY_ID", "")
     OSS_ACCESS_KEY_SECRET: str = os.getenv("OSS_ACCESS_KEY_SECRET", "")
 
+    # ---- MiMo（小米）自动音色设计：mimo-v2.5-tts-voicedesign ----
+    MIMO_API_KEY: str = os.getenv("MIMO_API_KEY", "")
+
     # Private temporary-object bucket on the platform; the local studio needs only its scoped API key.
     STUDIO_TEMP_BUCKET = os.getenv("STUDIO_TEMP_BUCKET", "")
     STUDIO_TEMP_REGION = os.getenv("STUDIO_TEMP_REGION", "")

@@ -1,11 +1,11 @@
-"""全自动音色链：LLM 生成音色描述 → MiMo TTS 设计音色 → 入库 R2 → 绑定角色。
+"""全自动音色链：LLM 生成音色描述 → MiMo TTS 设计音色 → 上传对象存储 → 绑定角色。
 
 链路（对应「逐角色按钮触发」的前端入口）：
 1. 读取角色资产（名称/性别/年龄/人设描述/底色），调用项目分析同款 LLM
    生成一段中文音色描述与一句示例台词；
 2. 调用小米 MiMo `mimo-v2.5-tts-voicedesign`（OpenAI 对话格式，
    api-key 鉴权）按描述合成 WAV 试听样本；
-3. 样本校验（1-30 秒，与参考音频入库规则一致）后上传对象存储（R2），
+3. 样本校验（1-30 秒，与参考音频入库规则一致）后上传对象存储，
    创建 AudioReference（source=upload，可复用可裁剪）；
 4. 把 voice_reference_id 写回角色（或衍生形态）metadata，完成绑定。
 """
@@ -214,7 +214,7 @@ async def auto_design_voice_for_asset(
     draft = await _llm_voice_draft(facts, novel_name, team_id=team_id)
     wav_bytes = await _mimo_design_voice(draft)
 
-    # 校验（与参考音频同一套规则：1-30 秒、<=15MB）后入库 R2
+    # 校验（与参考音频同一套规则：1-30 秒、<=15MB）后上传对象存储
     with tempfile.TemporaryDirectory(prefix="voice-design-") as temporary:
         sample = Path(temporary) / "sample.wav"
         sample.write_bytes(wav_bytes)
