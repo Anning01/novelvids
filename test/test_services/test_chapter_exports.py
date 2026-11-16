@@ -78,7 +78,7 @@ async def test_old_source_version_is_rejected_before_task_admission():
 
 
 @pytest.mark.asyncio
-async def test_preparation_runs_through_existing_assistant_without_llm_or_media_provider():
+async def test_preparation_runs_as_background_media_without_llm_or_media_provider():
     _, chapter, _=await enabled_project()
     from services.ai_task_executor import ai_task_executor
     scene = await Scene.create(chapter=chapter, sequence=1)
@@ -92,7 +92,8 @@ async def test_preparation_runs_through_existing_assistant_without_llm_or_media_
         await ai_task_executor.run(task)
     await task.refresh_from_db();await export.refresh_from_db()
     assert task.status == 3,task.error_message
-    assert task.request_params['conversation_id']
+    assert 'conversation_id' not in task.request_params
+    assert task.request_params['execution_mode'] == 'media'
     assert export.media_ref == result['ref']
     assert export.source_sha256 == result['sha256']
     compose.assert_awaited_once()

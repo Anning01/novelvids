@@ -173,6 +173,7 @@ async def analyze_novel(
     bg: BackgroundTasks,
     cover_model_config_id: int | None = Query(default=None, gt=0),
     assistant_model_config_id: int | None = Query(default=None, gt=0),
+    skill_id: int | None = Query(default=None, ge=0),
     ctx: AuthContext = Depends(require_team_access),
     _: AuthContext = _EDITOR,
 ):
@@ -181,6 +182,7 @@ async def analyze_novel(
         team_id=ctx.team_id,
         cover_model_config_id=cover_model_config_id,
         assistant_model_config_id=assistant_model_config_id,
+        skill_id=skill_id,
         user_id=ctx.user.id if ctx.user else None,
     )
     bg.add_task(ai_task_executor.run, task)

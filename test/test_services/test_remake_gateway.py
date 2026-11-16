@@ -131,7 +131,7 @@ async def test_gateway_omits_optional_provider_parameters_when_capabilities_are_
 
 
 @pytest.mark.asyncio
-async def test_gateway_sends_reasoning_only_when_thinking_is_enabled(tmp_path: Path):
+async def test_gateway_does_not_invent_reasoning_effort_when_thinking_is_enabled(tmp_path: Path):
     video = tmp_path / "scene.mp4"
     video.write_bytes(b"video")
     client = _Client([_completion({"ok": True})])
@@ -150,7 +150,8 @@ async def test_gateway_sends_reasoning_only_when_thinking_is_enabled(tmp_path: P
 
     request = client.endpoint.requests[0]
     assert request["extra_body"] == {"thinking": {"type": "enabled"}}
-    assert request["reasoning_effort"] == "minimal"
+    assert 'reasoning_effort' not in request
+    assert 'reasoning_effort' not in request['extra_body']
 
 
 @pytest.mark.asyncio

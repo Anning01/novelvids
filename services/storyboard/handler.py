@@ -51,6 +51,11 @@ class StoryboardTaskHandler(BaseTaskHandler):
 
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
+        if request_params.get('output_contract') and 'replace_versions' not in request_params:
+            existing = await Scene.filter(chapter=chapter).order_by('sequence')
+            if existing:
+                return {'chapter_id': chapter_id, 'scene_ids': [scene.id for scene in existing],
+                        'scenes_created': 0, 'total_shots': len(existing), 'preserved_existing': True}
         strategy = storyboard_strategy_factory.resolve(
             request_params.get("storyboard_strategy")
             or chapter.novel.storyboard_strategy
@@ -81,7 +86,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
         start_time = time.time()
 
         try:
-            client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+            client = None if request_params.get('output_contract') else AsyncOpenAI(base_url=base_url, api_key=api_key)
             
             storyboard, api_metadata = await generate_storyboard(
                 client=client,
@@ -94,6 +99,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 prompt_language=prompt_language,
                 max_context_characters=max_context_characters,
                 thinking=thinking,
+                reasoning_effort=request_params.get('reasoning_effort'),
                 max_tokens=max_tokens,
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
@@ -181,26 +187,36 @@ class StoryboardTaskHandler(BaseTaskHandler):
         from services.creation_agent.operation_receipts import execute_step
         execution = current_execution.get()
         if execution:
-            # Validate all candidate shots before any persistent changes.
-            from services.creation_agent.prompt_edits import validate_prompt_dependencies
-            from services.creation_agent.operations import CreationOperations
-            from services.storyboard.validation import validate_skill_storyboard_shot
-            for shot in storyboard.shots:
-                validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
-                validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
-                validate_prompt_dependencies(shot.prompt, entities or [])
-                CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
+            strict = bool(execution.params.get('output_contract'))
+            if not strict:
+                # Validate all candidate shots before any persistent changes.
+                from services.creation_agent.prompt_edits import validate_prompt_dependencies
+                from services.creation_agent.operations import CreationOperations
+                from services.storyboard.validation import validate_skill_storyboard_shot
+                for shot in storyboard.shots:
+                    validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
+                    validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
+                    validate_prompt_dependencies(shot.prompt, entities or [])
+                    CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
             async def persist():
                 async with project_write(chapter.novel_id):
+                    await execution.before_request()
+                    if strict:
+                        from services.creation_agent.strict_text import verify_chapter_input
+                        await verify_chapter_input(execution.params)
                     from services.creation_agent.step_context import validate_step_inputs
                     await validate_step_inputs(execution.params)
                     from models.ai_task import AiTask
                     from services.creation_agent.object_state import object_version
                     task = await AiTask.get(id=execution.params['task_id'])
+                    if strict and 'scene_input_versions' in execution.params:
+                        current = {str(row.id): await object_version(row) for row in await Scene.filter(chapter_id=chapter_id)}
+                        if current != execution.params['scene_input_versions']:
+                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
                     before = execution.params.get('replace_versions')
                     if before is not None:
                         old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
-                        if {str(row.id): await object_version(row) for row in old_scenes} != before:
+                        if not strict and {str(row.id): await object_version(row) for row in old_scenes} != before:
                             raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
                         objects = CreationObjects(chapter.novel_id)
                         snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
@@ -303,14 +319,17 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 scene_metadata["refusal"] = api_metadata["refusal"]
             from utils.prompt_language import skill_workflow
             if skill_workflow.get():
-                from services.creation_agent.prompt_edits import validate_prompt_dependencies
-                from services.creation_agent.operations import CreationOperations
                 prompt = shot.prompt
-                validate_prompt_dependencies(prompt, entities or [])
-                CreationOperations.validate_timing(prompt, duration_value)
+                if not (execution and execution.params.get('output_contract')):
+                    from services.creation_agent.prompt_edits import validate_prompt_dependencies
+                    from services.creation_agent.operations import CreationOperations
+                    validate_prompt_dependencies(prompt, entities or [])
+                    CreationOperations.validate_timing(prompt, duration_value)
                 prompt_params['prompt_language'] = prompt_language
                 prompt_params['rendering_version'] = 'agent-skills-v1'
-                if execution and "storyboard_contract" in execution.snapshot.contents:
+                if execution and execution.params.get('output_contract'):
+                    prompt_params['prompt_contract_version'] = execution.params['output_contract']['version']
+                elif execution and "storyboard_contract" in execution.snapshot.contents:
                     import json
                     prompt_params['prompt_contract_version'] = json.loads(execution.snapshot.read("storyboard_contract"))["version"]
             else:

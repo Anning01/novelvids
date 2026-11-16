@@ -12,6 +12,13 @@ def cover_warning(language: str | None = None) -> str:
 
 
 async def expose_saved_analysis(task: AiTask | None) -> AiTask | None:
+    if task and task.response_data and task.response_data.get('cover_task_id'):
+        cover = await AiTask.get_or_none(id=task.response_data['cover_task_id'])
+        if cover:
+            state = 'ready' if cover.status == 3 else 'pending' if cover.status in {1, 2, 6} else 'failed'
+            task.response_data = {**task.response_data, 'cover_status': state,
+                **{key: value for key, value in (cover.response_data or {}).items()
+                   if key in {'cover', 'cover_status', 'cover_error', 'cover_warning'}}}
     if task is None or not task.response_data or task.response_data.get('analysis_completed'):
         return task
     # Old failures already saved story results before attempting the cover.

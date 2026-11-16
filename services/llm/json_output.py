@@ -79,6 +79,7 @@ async def create_json_completion(
     supports_json_output: bool = False,
     timeout: float | None = None,
     thinking: str | None = None,
+    reasoning_effort: str | None = None,
     max_tokens: int | None = None,
     prompt_language: str = "zh",
 ) -> tuple[BaseModel, Any]:
@@ -87,8 +88,7 @@ async def create_json_completion(
     支持结构化输出的模型使用 ``json_object``；其他模型仅通过提示词约束，
     不发送可能被兼容服务拒绝的 ``response_format`` 参数。
 
-    ``thinking``（enabled/disabled）与 ``max_tokens`` 用于控制深度思考模型：
-    关闭思考可显著降低 latency 并避免 reasoning 耗尽正文空间。
+    仅发送显式配置的 thinking / reasoning_effort，不推测上游支持的档位。
     """
     controlled_messages = [dict(message) for message in messages]
     instruction = _json_instruction(response_model, prompt_language)
@@ -109,8 +109,10 @@ async def create_json_completion(
     }
     if supports_json_output:
         request["response_format"] = {"type": "json_object"}
-    if thinking in ("enabled", "disabled"):
-        request["thinking"] = {"type": thinking}
+    from utils.model_reasoning import reasoning_parameters
+    options = reasoning_parameters(thinking, reasoning_effort)
+    if options:
+        request['extra_body'] = options
     from utils.model_limits import DEFAULT_OUTPUT_TOKENS
     request["max_tokens"] = max_tokens if max_tokens is not None else DEFAULT_OUTPUT_TOKENS
     if timeout is not None:

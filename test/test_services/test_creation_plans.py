@@ -378,22 +378,20 @@ async def test_plan_rejects_unrequested_operations_and_fabricated_references(vio
 
 
 @pytest.mark.asyncio
-async def test_existing_storyboard_is_not_reported_as_fulfilling_a_missing_requirement():
-    from schemas.creation_plan import CreativeCheck
+async def test_existing_storyboard_is_reported_as_preserved_without_editorial_review():
     from services.creation_agent.plan_execution import CreationPlanRunner
     _, _, plan, _, execution = await confirmed_fixture()
     plan.steps[0].mode = 'fill_missing'
     await AgentOperation.filter(task_id=execution.params['creation_plan_id'], key='creation:plan').update(result=plan.model_dump(mode='json'))
-    report = CreativeCheck(plan_followed=False, findings=[{'requirement_id': 'opening', 'passed': False,
-        'location': '未找到', 'detail': '旧分镜没有倒叙开场'}], issues=['缺少倒叙开场'])
-    with patch.object(SkillExecution, '_generate', AsyncMock(return_value=report)), \
+    with patch.object(SkillExecution, '_generate', AsyncMock(side_effect=AssertionError('No automatic editorial review'))) as reviewer, \
          patch('services.creation_agent.plan_execution.submit_intent', AsyncMock()) as submitter:
         result = await CreationPlanRunner(execution).run()
-    assert result['partial'] is False and result['needs_revision'] is True
+    assert result['partial'] is False and 'needs_revision' not in result
     assert result['steps'][0]['status'] == 'skipped'
-    assert '缺少倒叙开场' in result['review_notes']
+    assert 'review_notes' not in result
     await execution.message.refresh_from_db()
-    assert '待完善' in execution.message.content
+    assert '已保留已有成果' in execution.message.content
+    reviewer.assert_not_called()
     submitter.assert_not_called()
 
 

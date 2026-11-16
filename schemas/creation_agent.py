@@ -38,7 +38,6 @@ class AgentConfiguration(BaseModel):
     # Legacy configuration field retained for stored snapshots and older API clients.
     enabled: bool = False
     runtime: Literal["deepagents", "pydantic_ai"] = "deepagents"
-    production_concurrency: int = Field(4, ge=1, le=20)
     request_limit: int | None = Field(None, ge=1, le=30)
     tool_calls_limit: int | None = Field(None, ge=1, le=100)
     max_targets: int = Field(32, ge=1, le=100)
@@ -56,6 +55,14 @@ class AgentConfiguration(BaseModel):
     history_runs: int = Field(12, ge=1, le=100)
     max_output_tokens: int | None = Field(None, ge=256, le=384000)
     total_tokens_limit: int | None = Field(None, ge=1000, le=10_000_000)
+
+    @model_validator(mode='before')
+    @classmethod
+    def retire_task_concurrency(cls, value):
+        # Older saved snapshots remain readable; model configuration owns capacity.
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != 'production_concurrency'}
+        return value
 
     @field_validator('timeout_seconds', 'summary_timeout_seconds')
     @classmethod
@@ -196,6 +203,7 @@ class AgentActivityOut(BaseModel):
 
 
 class AgentRunOut(BaseModel):
+    background: bool = False
     @field_serializer('error_message')
     def public_error(self, value):
         from utils.messages import public_generation_error

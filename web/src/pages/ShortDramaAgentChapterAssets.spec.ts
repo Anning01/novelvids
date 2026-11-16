@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { api } from '@/api'
 import { agentApi } from '@/features/creation-agent/api'
+import { skillsApi } from '@/features/creation-agent/skillsApi'
 import ImageModelSelect from '@/components/ImageModelSelect.vue'
 import AppButton from '@/components/AppButton.vue'
 import { AssetTypeEnum, TaskStatusEnum, type Novel } from '@/types'
@@ -61,9 +62,12 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   vi.clearAllMocks()
+  vi.spyOn(skillsApi, 'models').mockResolvedValue({ code: 0, message: '', data: [
+    { id: 11, name: '豆包', model: 'doubao' }, { id: 12, name: 'DeepSeek', model: 'deepseek' },
+  ] })
   vi.spyOn(agentApi, 'capabilities').mockResolvedValue({code: 0, message: '', data: {
     enabled: true, can_write: true, max_targets: 32, models: [
-      { id: 11, name: '豆包', model: 'doubao' }, { id: 12, name: 'DeepSeek', model: 'deepseek' },
+      { id: 11, name: '豆包', model: 'doubao', concurrency: 4 }, { id: 12, name: 'DeepSeek', model: 'deepseek', concurrency: 4 },
     ],
   }})
   vi.mocked(api.imageGenerationModels).mockResolvedValue({code: 0, message: '', data: []})
@@ -170,6 +174,8 @@ it('shows extracted person assets in the selected chapter footer instead of stal
   })
   await flushPromises()
 
+  expect(wrapper.find('.analysis-hero-actions .story-generation-controls .task-skill-picker').exists()).toBe(true)
+  expect(wrapper.find('.episode-doc-tools > .episode-skill-picker').exists()).toBe(true)
   const footer = wrapper.get('.episode-content footer')
   expect(footer.text()).toContain('宫平')
   expect(footer.text()).not.toContain('旧人物')
@@ -234,7 +240,7 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   option.click()
   await flushPromises()
   await analyze.trigger('click')
-  expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9, undefined, 12)
+  expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9, undefined, 12, undefined)
   expect(wrapper.get('.secondary-action').attributes('disabled')).toBeDefined()
   admit({ code: 0, message: '', data: { id: 'new-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '' } })
   await flushPromises()
@@ -379,7 +385,7 @@ it('opens the original and generates only when the user clicks, preserving both 
   await flushPromises()
   await adapt.trigger('click')
   await flushPromises()
-  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id, undefined, 12)
+  expect(api.generateScreenplay).toHaveBeenCalledExactlyOnceWith(chapter.id, undefined, 12, undefined)
   expect(wrapper.get('.episode-doc-tabs [aria-pressed="true"]').text()).toBe('导演剧本')
   expect(wrapper.get('.scene-heading').text()).toBe('1-1　徐家村泥路　外　黄昏')
   await wrapper.get('.episode-doc-tabs button').trigger('click')
@@ -397,7 +403,7 @@ it('saves pacing for the selected episode and retains the draft on a save failur
     await flushPromises()
     const trigger = wrapper.get<HTMLButtonElement>('.pacing-trigger')
     expect(trigger.text()).toBe('智能时长')
-    const dialog = new DOMWrapper(document.body.querySelector<HTMLDialogElement>('dialog')!)
+    const dialog = new DOMWrapper(document.body.querySelector<HTMLDialogElement>('dialog[aria-label="本集时长与节奏"]')!)
     if (!dialog.element.showModal) dialog.element.showModal = () => { dialog.element.open = true }
     await trigger.trigger('click')
     expect(dialog.element.open).toBe(true)

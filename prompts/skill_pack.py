@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict
 
 ROOT = Path(__file__).with_name("skills")
 FILES = {
+    'strict_assets': 'runtime/strict_assets.md',
+    'strict_storyboard': 'runtime/strict_storyboard.md',
     "asset_contract": "novelvids-assets/references/asset_contract.json",
     "asset_lifecycle": "novelvids-assets/references/asset_lifecycle.md",
     "asset_templates": "novelvids-assets/references/asset_templates.json",

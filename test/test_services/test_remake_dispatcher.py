@@ -27,21 +27,21 @@ class FakeExecutor:
 
 
 @pytest.mark.asyncio
-async def test_remake_task_dispatcher_limits_project_batch_concurrency():
+async def test_remake_dispatcher_leaves_capacity_to_the_configured_model():
     executor = FakeExecutor()
-    dispatcher = RemakeTaskDispatcher(executor=executor, concurrency=2)
+    dispatcher = RemakeTaskDispatcher(executor=executor)
 
     await dispatcher.run([1, 2, 3, 4, 5])
 
     assert sorted(executor.completed) == [1, 2, 3, 4, 5]
-    assert executor.max_active == 2
+    assert executor.max_active == 5
 
 
 @pytest.mark.asyncio
 async def test_dispatch_failure_is_isolated_and_marked_for_retry():
     executor = FakeExecutor()
     executor.raise_for = {2}
-    dispatcher = RemakeTaskDispatcher(executor=executor, concurrency=2)
+    dispatcher = RemakeTaskDispatcher(executor=executor)
 
     await dispatcher.run([1, 2, 3])
 

@@ -7,7 +7,7 @@ from models.ai_task import AiTask
 from models.scene import Scene
 from models.video import Video
 from services.creation_objects import project_write as creation_write
-from services.creation_agent.skill_execution import prepare_workflow
+from services.media_tasks import prepare_media_task
 from utils.enums import AiTaskTypeEnum
 
 
@@ -58,7 +58,7 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
         raise HTTPException(
             400, localized_message("首尾帧模式需要两张关键帧且不能使用参考素材")
         )
-    params = await prepare_workflow(
+    params = await prepare_media_task(
         {
             "novel_id": scene.chapter.novel_id,
             "chapter_id": scene.chapter_id,
@@ -159,10 +159,10 @@ class VideoProductionHandler:
             raise WaitingForMedia(completed.result)
         req = VideoGenerateRequest.model_validate(params["video_request"])
         scene = await Scene.get(id=req.scene_id)
-        if params.get('creation_plan_id'):
+        if execution and params.get('creation_plan_id'):
             from services.creation_agent.media_preparation import prepare_planned_media
             await prepare_planned_media(execution, kind='scene', target=scene)
-        if not (scene.prompt or "").strip():
+        if not (scene.prompt or "").strip() and execution:
             generated = await execution.generate(
                 "video",
                 {
@@ -174,13 +174,17 @@ class VideoProductionHandler:
             )
             async with creation_write(params["novel_id"]):
                 await scene.refresh_from_db()
-                if not (scene.prompt or "").strip():
+                if not (scene.prompt or "").strip() and execution:
                     scene.prompt = generated.prompt
                     await scene.save(update_fields=["prompt", "updated_at"])
 
         async def invoke():
-            await execution.before_request()
-            if params.get('creation_plan_id'):
+            if execution:
+                await execution.before_request()
+            else:
+                from services.media_tasks import check_media_task
+                await check_media_task(params)
+            if execution and params.get('creation_plan_id'):
                 from services.creation_agent.media_preparation import validate_prepared_media
                 await validate_prepared_media(execution, scene)
             video = await video_controller._submit_generation(

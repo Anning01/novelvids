@@ -3,10 +3,8 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import AppSelect from './AppSelect.vue'
 import StoryboardSheetCard from './StoryboardSheetCard.vue'
 import { api } from '@/api'
-import { agentApi } from '@/features/creation-agent/api'
-vi.mock('@/features/creation-agent/api', () => ({agentApi:{resume:vi.fn()}}))
 import type { Scene } from '@/types'
-vi.mock('@/api', () => ({api: {generateStoryboardSheet: vi.fn(), imageGenerationModels: vi.fn(), task: vi.fn(), scene: vi.fn()}, mediaUrl: (url: string) => url, sleep: vi.fn()}))
+vi.mock('@/api', () => ({api: {generateStoryboardSheet: vi.fn(), retryTask: vi.fn(), imageGenerationModels: vi.fn(), task: vi.fn(), scene: vi.fn()}, mediaUrl: (url: string) => url, sleep: vi.fn()}))
 const scene: Scene = {id: 3, sequence: 1, prompt: '已确认视频稿', created_at: '', updated_at: ''}
 beforeEach(() => {
   vi.clearAllMocks()
@@ -80,12 +78,12 @@ it('retries a failed sheet edit with its frozen source instead of regenerating f
   vi.mocked(api.task).mockResolvedValueOnce({code:0,message:'',data:{id:'edit-job',task_type:2,status:4,error_message:'temporary failure',
     request_params:{operation:'storyboard_sheet_edit',model_config_id:23},created_at:''}})
     .mockResolvedValueOnce({code:0,message:'',data:{id:'edit-job',task_type:2,status:3,response_data:{saved:true},created_at:''}})
-  vi.mocked(agentApi.resume).mockResolvedValue({data:{task_id:'edit-job'}} as never)
+  vi.mocked(api.retryTask).mockResolvedValue({data:{task_id:'edit-job'}} as never)
   vi.mocked(api.scene).mockResolvedValue({code:0,message:'',data:scene})
   const wrapper=mount(StoryboardSheetCard,{props:{scene:{...scene,metadata:{storyboard_sheet:{task_id:'edit-job',status:'pending',image_url:'/old.png'}}},enabled:true}})
   await flushPromises()
   await wrapper.get('[aria-label="重置并重试"]').trigger('click')
   await flushPromises()
-  expect(agentApi.resume).toHaveBeenCalledWith('edit-job')
+  expect(api.retryTask).toHaveBeenCalledWith('edit-job')
   expect(api.generateStoryboardSheet).not.toHaveBeenCalled()
 })

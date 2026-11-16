@@ -110,6 +110,8 @@ class NovelPatch(NovelFullProperties):
 class NovelMetaOut(NovelProperties, BaseResponse):
     """轻量元信息：不含书稿正文，供剧本/分镜页面入口使用。"""
 
+    active_cover_task_id: str | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

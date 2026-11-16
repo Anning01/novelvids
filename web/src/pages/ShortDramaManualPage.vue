@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import { tr } from '@/i18n'
 
@@ -68,6 +69,7 @@ function readProjectMeta(): ManualProjectMeta {
 const route = useRoute()
 const router = useRouter()
 const agentStore = useCreationAgentStore()
+const assetSkillId = ref<number>()
 const stageModelId = ref('')
 const projectId = computed(() => Number(route.params.projectId))
 const workspaceShell = ref<InstanceType<typeof ShortDramaWorkspaceShell> | null>(null)
@@ -379,7 +381,7 @@ async function extractSelectedChapterAssets() {
   extractionSubmissionError.value = ''
   try {
     const conversationId = agentStore.projectId === projectId.value ? agentStore.conversationId : null
-    const task = (await api.extract(chapter.id, conversationId ?? undefined, Number(stageModelId.value))).data
+    const task = (await api.extract(chapter.id, conversationId ?? undefined, Number(stageModelId.value), assetSkillId.value)).data
     extractionTask.value = task
     await monitorExtractionTask(task.id, true)
   } catch (error) {
@@ -786,6 +788,7 @@ onBeforeUnmount(() => {
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'project'" @click="setAssetScope('project')">{{ tr('全部项目') }}</AppButton>
             <AppButton type="button" variant="ghost" size="xs" :active="assetScope === 'chapter'" @click="setAssetScope('chapter')">{{ tr('当前章节') }}</AppButton>
           </div>
+          <TaskSkillPicker v-if="project.creationMode === 'agent' && (visibleAssets.length || loading)" v-model="assetSkillId" task="assets" :disabled="extractionBusy" class="asset-skill-picker" />
           <StageModelSelect v-if="project.creationMode === 'agent' && (visibleAssets.length || loading)" v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
           <AppButton
             v-if="(visibleAssets.length || loading) && project.creationMode === 'agent'"
@@ -836,6 +839,7 @@ onBeforeUnmount(() => {
         <strong>{{ tr('暂无') }}{{ activeTabConfig.label }}</strong>
         <p>{{ project.creationMode === 'agent' ? tr('从本章正文提取角色、场景与道具，再和助手一起完善画面。') : tr('添加第一个{p0}，开始搭建你的短剧世界。', { p0: activeTabConfig.label }) }}</p>
         <div v-if="project.creationMode === 'agent'" class="stage-actions">
+          <TaskSkillPicker v-model="assetSkillId" task="assets" :disabled="extractionBusy" class="asset-skill-picker" />
           <StageModelSelect v-model="stageModelId" :project-id="projectId" stage="assets" :label="tr('选择资产提取模型')" :disabled="extractionBusy" />
           <AppButton type="button" variant="primary" size="sm" :loading="extractionBusy" :disabled="!selectedChapter || !stageModelId || extractionBusy" @click="extractSelectedChapterAssets"><Boxes :size="15" />{{ tr('提取本章资产') }}</AppButton>
         </div>
@@ -958,13 +962,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.stage-actions { display: flex; align-items: flex-start; justify-content: center; flex-wrap: wrap; gap: 8px; max-inline-size: 100%; }
 .manual-page { min-height: 100%; color: #303442; background: #f8f9fc; }
 .project-name-line { display: flex; align-items: center; gap: 5px; min-height: 25px; }
 .project-name-line strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .project-name-line button { display: grid; place-items: center; color: #8a91a1; background: transparent; }
 .project-name-line input { width: min(320px,45vw); height: 30px; padding: 0 9px; border: 1px solid #6b6df6; border-radius: 7px; outline: none; font: inherit; }
 .manual-workspace { padding: 24px 32px 32px; min-height: calc(100dvh - var(--short-drama-header-height,72px) - 80px); }
+.asset-skill-picker { width: auto; max-inline-size: 100%; text-align: start; }
 .asset-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; min-height: 50px; }
 .asset-toolbar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .asset-toolbar nav button { position: relative; display: flex; align-items: center; gap: 7px; height: 42px; color: #6f7686; background: transparent; font-size: 15px; font-weight: 700; }

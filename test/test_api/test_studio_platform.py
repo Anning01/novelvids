@@ -51,7 +51,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "")
     await StudioPlatformConnection.all().delete()
     models = [
-        {"id": "nv-1", "name": "文本", "task_types": [1, 7], "concurrency": 5, "tool_calls": True, "json_output": True},
+        {"id": "nv-1", "name": "文本", "task_types": [1, 7], "concurrency": 5, "tool_calls": True, "json_output": True, "strict_output": True},
         {"id": "nv-2", "name": "视频", "task_types": [4], "video_model_type": "seedance_2"},
     ]
     calls = []
@@ -85,6 +85,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     assert model.api_key == "nv_original"
     assert model.pricing == {"type": "text", "currency": "CNY", "input_price_per_1m": 2, "output_price_per_1m": 4}
     assert model.base_url == "https://platform.example/v1" and model.supports_tool_calls
+    assert model.supports_strict_output is True
     for route in (path, "/api/config", f"/api/config/{model.id}"):
         response = await client.get(route)
         assert all(secret not in response.text for secret in ("provider-secret", "nv_original", "supplier.example"))
@@ -93,7 +94,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     assert failed.json()["code"] == 422 and "nv_invalid" not in failed.text
     assert (await StudioPlatformConnection.get(id=1)).api_key == "nv_original"
     local_prices = {**model.pricing, "input_price_per_1m": 8}
-    saved = await client.patch(f"/api/config/{model.id}", json={"pricing": local_prices})
+    saved = await client.patch(f"/api/config/{model.id}", json={"pricing": local_prices, 'thinking': 'low', 'reasoning_effort': 'max'})
     assert saved.json()["code"] == 0
     models[0]["concurrency"] = 3
     models.pop()
@@ -104,6 +105,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     assert model.api_key == "nv_replacement"
     assert model.concurrency == 3
     assert model.pricing == local_prices
+    assert model.thinking == 'low' and model.reasoning_effort == 'max'
     assert not await AiModelConfig.filter(scope=studio_platform.SYNC_SCOPE, model="nv-2").exists()
 
 

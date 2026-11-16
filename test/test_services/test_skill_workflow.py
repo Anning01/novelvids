@@ -9,7 +9,7 @@ from models.creation_agent import AgentSettings
 from prompts.skill_pack import SkillSnapshot, snapshot_skills
 from services.creation_agent.operation_receipts import execute_step, SubmissionUncertain
 from services.creation_agent.skill_execution import prepare_workflow
-from utils.enums import TaskStatusEnum
+from utils.enums import TaskStatusEnum, AiTaskTypeEnum
 
 
 @pytest.mark.asyncio
@@ -252,6 +252,8 @@ async def enabled_project():
         api_key="test",
         base_url="https://example.test",
         supports_tool_calls=True,
+        supports_strict_output=True,
+        supports_json_output=True,
         is_active=True,
     )
     novel = await Novel.create(name="Story")
@@ -307,13 +309,14 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
 @pytest.mark.asyncio
 @pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
 @pytest.mark.parametrize("response", ["freeform", "repair_empty", "empty"])
-async def test_new_text_generation_uses_snapshot_and_preserves_model_wording(language, custom_style, response):
+async def test_legacy_text_generation_uses_snapshot_and_preserves_model_wording(language, custom_style, response):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from models.asset import Asset
 
     novel, chapter, assistant = await enabled_project()
+    await AiModelConfig.filter(id=assistant.id).update(supports_json_output=False)  # Historical tool-output transport.
     novel.style_key = "realistic-general"
     novel.custom_style_prompt = custom_style
     await novel.save()
@@ -366,7 +369,9 @@ async def test_new_text_generation_uses_snapshot_and_preserves_model_wording(lan
     model = streaming_model(respond)
     model.client = AsyncMock()
     with patch("services.creation_agent.handler.configured_model", return_value=model):
-        task = await chapter_controller.extract(chapter.id)
+        workflow = await prepare_workflow({'chapter_id': chapter.id, 'novel_id': novel.id,
+            'model_config_id': assistant.id, 'assistant_model_config_id': assistant.id, 'prompt_language': language})
+        task = await ai_task_executor.submit(AiTaskTypeEnum.extraction, workflow)
         task.request_params["skill_snapshot"] = snapshot
         await task.save()
         await ai_task_executor.run(task)
@@ -435,33 +440,14 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
         duration=4,
     )
 
-    durations = []
-
-    def respond(messages, info):
-        user_part = next(part for message in messages for part in message.parts if isinstance(part, UserPromptPart))
-        facts = json.loads(user_part.content)["untrusted_task_facts"]["input"]
-        assert "shot_duration_range" in info.instructions
-        if maximum is None:
-            assert facts["shot_duration_range"] == [1, 15]
-        else:
-            assert facts["shot_duration_range"][1] == maximum
-        shot = candidate.model_dump(exclude={"prompt"})
-        if maximum == 15 and not durations:
-            shot["duration"] = "20s"
-        elif maximum == 15:
-            retry = next(part for message in messages for part in message.parts if isinstance(part, RetryPromptPart))
-            assert "20s" in str(retry.content) and "15" in str(retry.content)
-        durations.append(shot["duration"])
-        return ModelResponse(
-            parts=[ToolCallPart(info.output_tools[0].name, {"shots": [shot]})]
-        )
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch("services.creation_agent.handler.configured_model", return_value=model):
-        task = await scene_controller.generate(chapter.id, replace_existing=True)
-        assert await Scene.filter(id=old.id).exists()
-        await ai_task_executor.run(task)
+    from test.test_services.test_strict_text_tasks import mock_model
+    wire = candidate.model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
+    wire.update(duration=float(candidate.duration.removesuffix('s')), visible_asset_names=[],
+                actions=[{'start': 0, 'end': 4, 'text': 'rain falls.'}])
+    requests = mock_model(monkeypatch, {'shots': [wire]})
+    task = await scene_controller.generate(chapter.id, replace_existing=True)
+    assert await Scene.filter(id=old.id).exists()
+    await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     assert not await Scene.filter(id=old.id).exists()
@@ -471,7 +457,10 @@ async def test_storyboard_replacement_keeps_original_until_candidate_saves_atomi
     saved = await Scene.get(chapter=chapter)
     assert saved.prompt == expected_prompt
     assert saved.duration == float(candidate.duration.removesuffix("s"))
-    assert len(durations) == (2 if maximum == 15 else 1)
+    assert len(requests) == 1
+    from test.test_services.test_strict_text_tasks import request_schema
+    definition = request_schema(requests[0])['properties']['shots']['items']
+    assert definition['properties']['duration']['maximum'] == (maximum or 15)
 
 
 @pytest.mark.asyncio
@@ -483,7 +472,7 @@ async def test_failed_storyboard_generation_never_removes_existing_shots():
     novel, chapter, _ = await enabled_project()
     old = await Scene.create(chapter=chapter, sequence=1, prompt="Keep me", duration=4)
     with patch(
-        "services.creation_agent.skill_execution.SkillExecution.generate",
+        "services.creation_agent.skill_execution.SkillExecution.generate_strict",
         new=AsyncMock(side_effect=ValueError("bad candidate")),
     ):
         task = await scene_controller.generate(chapter.id, replace_existing=True)
@@ -494,7 +483,7 @@ async def test_failed_storyboard_generation_never_removes_existing_shots():
 
 
 @pytest.mark.asyncio
-async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_replay():
+async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_replay(monkeypatch):
     from controllers.chapter import chapter_controller
     from services.ai_task_executor import ai_task_executor
     from services.billing.recorder import record_ai_task_usage
@@ -511,23 +500,11 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     }
     await assistant.save()
 
-    def respond(messages, info):
-        payload = {"persons": [], "scenes": [], "items": []}
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    info.output_tools[0].name,
-                    payload,
-                )
-            ],
-            usage=RequestUsage(input_tokens=100, output_tokens=20),
-        )
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch("services.creation_agent.handler.configured_model", return_value=model):
-        task = await chapter_controller.extract(chapter.id)
-        await ai_task_executor.run(task)
+    from test.test_services.test_strict_text_tasks import mock_model
+    requests = mock_model(monkeypatch, {'persons': [], 'scenes': [], 'items': []})
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    assert len(requests) == 1
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     children = [
@@ -543,7 +520,7 @@ async def test_only_child_model_usage_is_charged_once_on_parent_completion_and_r
     records = await ModelUsageRecord.filter(novel_id=novel.id)
     assert len(records) == 1
     assert {record.ai_task_id for record in records} == {child.id for child in children}
-    assert all(record.usage["input_tokens"] == 100 and record.usage["output_tokens"] == 20 for record in records)
+    assert all(record.usage["input_tokens"] == 24 and record.usage["output_tokens"] == 12 for record in records)
     assert "api_key" not in str(task.request_params)
     assert "api_key" not in str(children[0].request_params)
 
@@ -665,9 +642,10 @@ async def test_chat_submission_uses_same_image_admission_and_reuses_receipt(
         assert child.request_params.get("variant_id") == (
             variant.id if variant else None
         )
-        assert child.request_params["origin_run_id"] == str(parent.id)
+        assert child.request_params["execution_mode"] == "media"
+        assert "origin_run_id" not in child.request_params
         assert child.request_params["prompt_language"] == "zh"
-        assert child.request_params["skill_snapshot"] == workflow["skill_snapshot"]
+        assert "skill_snapshot" not in child.request_params
         assert child.request_params["model_config_id"] == image_model.id
         assert await AiTask.filter(task_type=2).count() == 1
     finally:
@@ -744,6 +722,7 @@ async def test_story_write_receipt_preserves_later_edits_and_no_unrequested_cove
     params = {**workflow, "task_id": str(task.id)}
     execution = SimpleNamespace(
         params=params,
+        before_request=AsyncMock(),
         generate=AsyncMock(
             return_value=BookAnalysis(
                 book_types=["Drama"], story_outline="An arrival", key_characters=[]
@@ -795,10 +774,11 @@ async def test_cancelled_queued_video_has_terminal_pollable_record():
 
 
 @pytest.mark.asyncio
-async def test_button_and_worker_share_production_concurrency_limit():
+async def test_button_and_worker_share_the_image_model_concurrency_limit():
     from services.ai_task_executor import AiTaskExecutor
     from schemas.creation_agent import AgentConfiguration
 
+    model = await AiModelConfig.create(name='image-slots', task_type=2, model='test', base_url='https://example.invalid', api_key='synthetic', concurrency=1)
     executor = AiTaskExecutor()
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -818,7 +798,7 @@ async def test_button_and_worker_share_production_concurrency_limit():
         await AiTask.create(
             task_type=2,
             status=1,
-            request_params={"workflow_version": "agent-skills-v1"},
+            request_params={"workflow_version": "agent-skills-v1", "model_config_id": model.id},
         )
         for _ in range(3)
     ]
@@ -988,6 +968,7 @@ async def test_chat_authorization_uses_only_current_input_and_reuses_its_grant(
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     novel, chapter, _ = await enabled_project()
+    await AiModelConfig.filter(task_type=7).update(supports_json_output=False)  # Exercise the historical tool-output classifier.
     novel.custom_style_prompt = "PRIVATE_PROJECT_INSTRUCTION_GENERATE_EVERYTHING"
     await novel.save()
     asset = await Asset.create(
@@ -1389,11 +1370,18 @@ async def test_failed_cover_keeps_story_result_and_allows_an_explicit_new_attemp
 
     monkeypatch.setattr(SkillExecution, "generate", generate)
     submit = AsyncMock(side_effect=TimeoutError("Lost response"))
+    monkeypatch.setattr(SkillExecution, 'generate_strict', AsyncMock(return_value={
+        'book_types': ['Drama'], 'story_outline': 'Preserved outline', 'key_characters': []}))
     monkeypatch.setattr("services.project_analysis.handler.generate_images", submit)
     task = await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.stage == "needs_review"
+    assert task.status == 3
+    submit.assert_not_awaited()
+    cover = await AiTask.get(id=task.response_data['cover_task_id'])
+    await ai_task_executor.run(cover)
+    await cover.refresh_from_db()
+    assert cover.stage == 'needs_review'
     assert task.response_data["story_outline"] == "Preserved outline"
     assert (await Novel.get(id=novel.id)).story_outline == "Preserved outline"
     retry = await novel_controller.analyze(novel.id, cover_only=True, cover_model_config_id=image_config.id)
@@ -1467,8 +1455,7 @@ async def test_started_model_failure_remains_uncertain_and_cannot_replay():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('explicit_cap', [None, 64000, 2000])
-async def test_large_story_input_uses_model_limit_and_never_marks_local_rejection_uncertain(explicit_cap):
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
+async def test_large_story_input_uses_model_limit_and_never_marks_local_rejection_uncertain(explicit_cap, monkeypatch):
     from models.chapter import Chapter
     from models.novel import Novel
     from models.creation_agent import AgentMessage
@@ -1487,23 +1474,15 @@ async def test_large_story_input_uses_model_limit_and_never_marks_local_rejectio
     settings = await AgentSettings.get(id=1)
     settings.configuration = {'enabled': True, 'request_limit': 9, 'max_context_characters': explicit_cap}
     await settings.save()
-    calls = []
-
-    def respond(messages, info):
-        calls.append(messages)
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
-            'book_types': ['冒险'], 'story_outline': 'A complete story outline.', 'key_characters': [],
-        })])
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch('services.creation_agent.handler.configured_model', return_value=model):
-        task = await novel_controller.analyze(novel.id)
-        task.request_params['include_cover'] = False
-        await task.save()
-        await ai_task_executor.run(task)
+    from test.test_services.test_strict_text_tasks import mock_model
+    calls = mock_model(monkeypatch, {
+        'book_types': ['冒险'], 'story_outline': 'A complete story outline.', 'key_characters': []})
+    task = await novel_controller.analyze(novel.id)
+    task.request_params['include_cover'] = False
+    await task.save()
+    await ai_task_executor.run(task)
     await task.refresh_from_db()
-    receipt = await AgentOperation.get(task=task, key='model:story:BookAnalysis:')
+    receipt = await AgentOperation.get(task=task, key='model:strict:story')
     if explicit_cap in (None, 64000):
         assert task.status == 3, task.error_message
         assert calls
@@ -1511,7 +1490,7 @@ async def test_large_story_input_uses_model_limit_and_never_marks_local_rejectio
     else:
         assert task.status == 4
         assert task.stage != 'needs_review'
-        assert any(text in task.error_message for text in ('上下文超过配置上限', 'Context exceeds the limit'))
+        assert any(text in task.error_message for text in ('上下文超过配置上限', 'Context exceeds the limit', 'Context limit exceeded')), task.error_message
         assert not calls
         assert receipt.state == 'failed'
         child = await AgentMessage.filter(role='assistant').exclude(task_id=task.id).get()
@@ -1535,6 +1514,8 @@ async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_ap
     async def generate(self, skill, facts, output_type, **kwargs):
         return BookAnalysis(book_types=['冒险'],story_outline='已保存的故事大纲',key_characters=[]) if output_type is BookAnalysis else CompletePrompt(prompt='Cover')
     monkeypatch.setattr(SkillExecution,'generate',generate)
+    monkeypatch.setattr(SkillExecution, 'generate_strict', AsyncMock(return_value={
+        'book_types': ['冒险'], 'story_outline': '已保存的故事大纲', 'key_characters': []}))
     submit=AsyncMock(side_effect=TimeoutError('Lost image response'))
     monkeypatch.setattr('services.project_analysis.handler.generate_images',submit)
     task=await novel_controller.analyze(novel.id, cover_model_config_id=image_config.id)
@@ -1542,9 +1523,13 @@ async def test_cover_failure_preserves_usable_analysis_in_the_latest_analysis_ap
     await task.save()
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.stage == 'needs_review'
+    assert task.status == 3
+    cover = await AiTask.get(id=task.response_data['cover_task_id'])
+    await ai_task_executor.run(cover)
+    await cover.refresh_from_db()
+    assert cover.stage == 'needs_review'
     assert task.response_data['analysis_completed'] is True
-    assert task.response_data['cover_status'] == 'needs_review'
+    assert task.response_data['cover_status'] == 'pending'
     response=(await client.get(f'/api/novel/{novel.id}/analysis')).json()['data']
     assert response['response_data']['analysis_completed'] is True
     assert response['response_data']['story_outline'] == '已保存的故事大纲'

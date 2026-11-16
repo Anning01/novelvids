@@ -39,7 +39,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   const nextBefore = ref<number | null>(null)
   const changesRevision = ref(0)
   const latestChanges = ref<AgentChange[]>([])
-  const busy = computed(() => submitting.value || Boolean(currentRun.value && isAgentRunning(currentRun.value.status)))
+  const busy = computed(() => submitting.value || Boolean(currentRun.value && !currentRun.value.background && isAgentRunning(currentRun.value.status)))
   let subscription: HttpAgent | null = null
   let epoch = 0
   let subscriptionAttempt = 0
@@ -73,7 +73,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         ? mergeActivity(run.activity || [], message.activity || [])
         : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
     reportChanges(run.changes)
-    if (isAgentRunning(run.status)) {
+    if (run.background) {
+      statusText.value = tr('任务已提交，正在等待模型执行。')
+      error.value = run.error_message || ''
+    } else if (isAgentRunning(run.status)) {
       // A successful snapshot proves the job is alive even if its event stream
       // disconnected. Do not keep a transport error displayed as a task failure.
       error.value = run.error_message || ''

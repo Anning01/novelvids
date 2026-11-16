@@ -24,7 +24,7 @@ export interface ClipSession extends ClipInput, ClipSummary {
   asset_id: number | null
   conversation_id: number
   model_name: string
-  assistant_model_config_id: number
+  assistant_model_config_id: number | null
   image_model_config_id: number | null
 }
 export interface ClipQuote {
@@ -47,5 +47,5 @@ export const clipApi = {
   create: (input: ClipInput) => request<SingleResponse<ClipSession>>('/experience/generate', { method: 'POST', body: JSON.stringify(input) }),
   recent: () => request<SingleResponse<ClipSummary[]>>('/experience/sessions'),
   session: (id: number) => request<SingleResponse<ClipSession>>(`/experience/sessions/${id}`, { signal: AbortSignal.timeout(CLIP_SESSION_TIMEOUT_MS) }),
-  start: (id: number) => request<SingleResponse<AgentRun>>(`/experience/sessions/${id}/start`, { method: 'POST', signal: AbortSignal.timeout(CLIP_START_TIMEOUT_MS) }),
+  start: (id: number) => request<SingleResponse<AgentRun | { task_id: string; status: number; conversation_id: number; background: true }>>(`/experience/sessions/${id}/start`, { method: 'POST', signal: AbortSignal.timeout(CLIP_START_TIMEOUT_MS) }),
 }

@@ -25,7 +25,7 @@ vi.mock('vue-element-plus-x', () => ({ XSender: defineComponent({
 }) }))
 
 it('restores an existing draft into the editor and emits text changes for persistence', async () => {
-  const wrapper = mount(AgentComposer, { props: { modelValue: '保留人物的灰色风衣', modelId: '1', models: [{ id: 1, name: '助手模型', model: 'model' }], disabled: false, busy: false, submitting: false } })
+  const wrapper = mount(AgentComposer, { props: { modelValue: '保留人物的灰色风衣', modelId: '1', models: [{ id: 1, name: '助手模型', model: 'model', concurrency: 4 }], disabled: false, busy: false, submitting: false } })
   await flushPromises()
   const editor = wrapper.get('[role="textbox"]')
   expect(editor.text()).toBe('保留人物的灰色风衣')

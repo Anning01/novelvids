@@ -226,7 +226,9 @@ async def test_analyze_novel_submits_one_safe_task(configured_creation_agent):
         "prompt_language": "en",
     }
     assert first.request_params["workflow_version"] == "agent-skills-v1"
-    assert first.request_params["skill_snapshot"]["revision"]
+    assert first.request_params["creative_method"]["revision"]
+    assert first.request_params["output_contract"]["name"] == "story"
+    assert "skill_snapshot" not in first.request_params
     assert "api_key" not in first.request_params
 
 
@@ -234,7 +236,7 @@ async def test_analyze_novel_submits_one_safe_task(configured_creation_agent):
 async def test_analysis_uses_explicit_team_model_and_rejects_conflicting_run(configured_creation_agent):
     novel = await Novel.create(name="模型选择", content="书稿")
     other = await AiModelConfig.create(name="Another assistant", model="another", task_type=7,
-        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, is_active=True)
+        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, supports_json_output=True, supports_strict_output=True, is_active=True)
     selected = configured_creation_agent.id
     task = await novel_controller.analyze(novel.id, assistant_model_config_id=selected)
     assert task.request_params["assistant_model_config_id"] == selected

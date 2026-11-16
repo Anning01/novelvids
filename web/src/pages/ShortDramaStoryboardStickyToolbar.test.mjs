@@ -7,7 +7,11 @@ it('keeps the current chapter toolbar below the shared fixed header while scenes
   const toolbarStyle = source.match(/\.chapter-toolbar \{([^}]+)\}/)?.[1] || ''
   expect(toolbarStyle).toContain('position: sticky;')
   expect(toolbarStyle).toContain('top: var(--short-drama-header-height,72px);')
-  expect(toolbarStyle).toContain('flex-wrap: wrap;')
+  expect(toolbarStyle).toContain('display: grid;')
+  expect(toolbarStyle).toContain('grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);')
+  const actionsStyle = source.match(/\.chapter-actions \{([^}]+)\}/)?.[1] || ''
+  expect(actionsStyle).toContain('display: flex;')
+  expect(actionsStyle).toContain('flex-wrap: wrap;')
   expect(source).toContain('scroll-margin-top: calc(var(--short-drama-header-height,72px) + 116px)')
   expect(source).toContain("document.querySelector<HTMLElement>('.app-content')")
   expect(source).toContain('if (programmaticSceneId)')
@@ -36,10 +40,10 @@ it('keeps creation actions local to each scene and exposes configured batch gene
   expect(source).toContain('<ShortDramaBatchVideoDialog')
   expect(source).toContain('@generate="batchGenerateVideos"')
   expect(source).toContain('批量生视频')
-  expect(source).toContain('if (request.returnLastFrame)')
+  expect(source).toContain('return_last_frame: request.returnLastFrame')
   expect(source).toContain('api.generateVideoBatch(requests)')
-  expect(source).toContain('await monitorVideoBatch(task.id)')
-  expect(source).toMatch(
+  expect(source).toContain('void monitorVideoBatch(task.id)')
+  expect(source).not.toMatch(
     /runVideoGenerationQueue\(\s*targets,\s*model\.concurrency,\s*false,/
   )
   expect(source).not.toContain('class="chapter-model-select"')

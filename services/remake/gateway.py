@@ -207,11 +207,10 @@ class RemakeVideoAnalysisGateway:
         }
         if bool(getattr(self.config, "supports_json_output", False)):
             request["response_format"] = {"type": "json_object"}
-        thinking = getattr(self.config, "thinking", None)
-        if thinking in {"enabled", "disabled"}:
-            request["extra_body"] = {"thinking": {"type": thinking}}
-            if thinking == "enabled":
-                request["reasoning_effort"] = "minimal"
+        from utils.model_reasoning import reasoning_parameters
+        options = reasoning_parameters(getattr(self.config, 'thinking', None), getattr(self.config, 'reasoning_effort', None))
+        if options:
+            request['extra_body'] = options
         from utils.model_limits import DEFAULT_OUTPUT_TOKENS
         output_limit = getattr(self.config, "max_tokens", None)
         request["max_tokens"] = output_limit if output_limit is not None else DEFAULT_OUTPUT_TOKENS
@@ -219,7 +218,9 @@ class RemakeVideoAnalysisGateway:
         attempts = len(self.retry_delays) + 1
         for attempt in range(attempts):
             try:
-                completion = await self.client.chat.completions.create(**request)
+                from services.model_concurrency import model_slots
+                async with model_slots.hold(getattr(self.config, 'id', None)):
+                    completion = await self.client.chat.completions.create(**request)
                 self._add_usage(completion_usage(completion))
                 result = _completion_json(completion)
                 if include_segment_metadata:

@@ -144,6 +144,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         user_id: int | None = None,
         *, assistant_model_config_id: int | None = None, sheet_model_config_id: int | None = None,
         generate_blocking_maps: bool | None = None,
+        skill_id: int | None = None,
     ):
         """提交分镜生成任务，返回任务记录供前端轮询。
 
@@ -163,7 +164,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
 
         # 1. 获取分镜生成任务的启用配置（团队自定义优先，官方兜底）
         from services.creation_agent.skill_execution import require_agent
-        config, _ = await require_agent(team_id, assistant_model_config_id)
+        config, _ = await require_agent(team_id, assistant_model_config_id, strict_output=True)
 
         # 2. 先清理超时异常任务
         await ai_task_executor.cleanup_stale_tasks(AiTaskTypeEnum.storyboard)
@@ -185,6 +186,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
         }
         if getattr(config, "thinking", None):
             request_params["thinking"] = config.thinking
+        if config.reasoning_effort:
+            request_params['reasoning_effort'] = config.reasoning_effort
         if getattr(config, "max_tokens", None):
             request_params["max_tokens"] = config.max_tokens
         if team_id is not None:
@@ -223,11 +226,17 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                         raise HTTPException(409, localized_message('请等待当前任务完成后再切换空间定位图设置'))
                     if assistant_model_config_id is not None and t.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
+                    from services.user_skills import snapshot_method
+                    selected_method = await snapshot_method(user_id or 0, 'storyboard', skill_id)
+                    previous_method = t.request_params.get('creative_method')
+                    if (previous_method and previous_method != selected_method) or (not previous_method and selected_method['id'] != 0):
+                        raise HTTPException(409, localized_message('已有任务正在运行，请等待完成后再切换技能'))
                     return await bind_submission(t, {**request_params, "team_id": team_id, "user_id": user_id})
 
+            from services.creation_agent.object_state import object_version
+            request_params['scene_input_versions'] = {str(scene.id): await object_version(scene) for scene in await Scene.filter(chapter_id=chapter_id)}
             if replace_existing:
-                from services.creation_agent.object_state import object_version
-                request_params['replace_versions'] = {str(scene.id): await object_version(scene) for scene in await Scene.filter(chapter_id=chapter_id)}
+                request_params['replace_versions'] = request_params['scene_input_versions']
             if chapter.novel.video_model_config_id is not None:
                 video_model = await ai_model_config_controller.get_active(
                     AiTaskTypeEnum.video.value, chapter.novel.video_model_config_id, team_id=team_id
@@ -240,8 +249,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 request_params["shot_duration_range"] = [capabilities.duration_min, min(capabilities.duration_max, chapter.novel.shot_duration_max)]
                 if request_params["shot_duration_range"][0] > request_params["shot_duration_range"][1]:
                     raise HTTPException(422, localized_message("单分镜最长时长低于所选模型支持的最短时长"))
-            from services.creation_agent.skill_execution import prepare_workflow
-            request_params = await prepare_workflow(request_params)
+            from services.creation_agent.strict_text import prepare_text_workflow
+            request_params = await prepare_text_workflow(request_params, 'storyboard', skill_id)
             task = await ai_task_executor.submit(
                 AiTaskTypeEnum.storyboard,
                 request_params,

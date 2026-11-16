@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
 import { agentApi } from '@/features/creation-agent/api'
+import { skillsApi } from '@/features/creation-agent/skillsApi'
 import { api } from '@/api'
 
 vi.mock('@/api', async (importOriginal) => {
@@ -59,6 +60,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.spyOn(skillsApi, 'models').mockResolvedValue({ code: 0, message: '', data: [{ id: 33, name: 'Storyboard text', model: 'c' }] })
     sessionStorage.clear()
     vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data: {models: [{id: 33, name: 'Storyboard text', model: 'c'}]}} as never)
     vi.mocked(api.novelMeta).mockResolvedValue({
@@ -122,7 +124,8 @@ describe('人工模式无章节时创建第一个分镜', () => {
     await wrapper.get('[aria-label="选择分镜模型"]').trigger('click')
     document.querySelector<HTMLElement>('[role="option"] [title="Storyboard text"]')!.click()
     await flushPromises()
-    await wrapper.findAll('button').find(button => button.text() === '重试')!.trigger('click')
+    expect(wrapper.find('.storyboard-state.is-error .stage-actions > .storyboard-skill-picker').exists()).toBe(true)
+    await wrapper.get('.storyboard-state.is-error .stage-actions > .app-button--primary').trigger('click')
     await flushPromises()
     expect(api.generateScenes).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('项目分析失败')
@@ -145,7 +148,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     await toggle.setValue(blocking)
     await wrapper.findAll('button').find(button => button.text() === '生成全部分镜')!.trigger('click')
     await flushPromises()
-    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, undefined, blocking)
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, undefined, blocking, undefined)
     wrapper.unmount()
   })
 
@@ -167,7 +170,7 @@ describe('人工模式无章节时创建第一个分镜', () => {
     }
     await button.trigger('click')
     await flushPromises()
-    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, 42, false)
+    expect(api.generateScenes).toHaveBeenCalledWith(chapter.id, false, 33, 42, false, undefined)
     wrapper.unmount()
   })
 

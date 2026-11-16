@@ -23,6 +23,8 @@ def wire_size(messages, parameters) -> dict:
                          if isinstance(m, ModelRequest) and m.instructions), '')
     tools = [dict(name=t.name, description=t.description, parameters=t.parameters_json_schema)
              for t in [*parameters.function_tools, *parameters.output_tools]]
+    if parameters.output_mode == 'native' and parameters.output_object is not None:
+        tools.append({'name': parameters.output_object.name, 'schema': parameters.output_object.json_schema})
     segments = {'instructions': len(instructions or ''), 'tools': len(encode(tools)),
                 'history': 0, 'objects': 0}
     for message in messages:

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch, ref } from 'vue'
 import { api, sleep } from '@/api'
-import { agentApi } from '@/features/creation-agent/api'
 import { tr } from '@/i18n'
 import { GalleryHorizontalEnd } from 'lucide-vue-next'
 import AppButton from './AppButton.vue'
@@ -66,7 +65,7 @@ async function generate() {
   try {
     await props.beforeGenerate?.()
     if (restart && retryEdit) {
-      await agentApi.resume(retryEdit)
+      await api.retryTask(retryEdit)
       emit('submitted', retryEdit)
       await follow(retryEdit)
       return

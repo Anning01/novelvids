@@ -449,4 +449,5 @@ async def test_storyboard_parent_queues_sheets_on_completion_with_selected_image
     child = await AiTask.get(id=parent.response_data['storyboard_sheet_task_ids'][0])
     assert child.status == 1 and child.request_params['scene_id'] == scene.id
     assert child.request_params['model_config_id'] == image.id
-    assert child.request_params['origin_run_id'] == str(parent.id)
+    assert child.request_params['execution_mode'] == 'media'
+    assert 'origin_run_id' not in child.request_params

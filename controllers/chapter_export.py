@@ -6,7 +6,7 @@ from auth.deps import AuthContext, ensure_novel_access, require_roles
 from controllers.config import ai_model_config_controller
 from models.chapter import Chapter
 from models.chapter_export import ChapterExport
-from services.creation_agent.skill_execution import prepare_workflow, require_agent
+from services.media_tasks import prepare_media_task
 from services.creation_agent.submissions import bind_submission, previous_submission
 from services.creation_objects import project_write
 from services.video_enhancement.contract import EnhancementOptions, MediaProbe, enhancement_cost, validate_source, require_upscale, RESOLUTION_SHORT_SIDE
@@ -43,7 +43,6 @@ class ChapterExports:
             raise HTTPException(404, localized_message('章节不存在'))
         await ensure_novel_access(chapter.novel_id, ctx)
         await require_generation_scope(chapter.novel_id, ctx.team_id)
-        await require_agent(ctx.team_id)
         manifest, version = await freeze_chapter(chapter_id)
         if expected_version is not None and expected_version != version:
             raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
@@ -60,14 +59,13 @@ class ChapterExports:
         chapter = await Chapter.get(id=scene.chapter_id)
         await ensure_novel_access(chapter.novel_id, ctx)
         await require_generation_scope(chapter.novel_id, ctx.team_id)
-        await require_agent(ctx.team_id)
         manifest, version = await freeze_video(video, scene)
         return await self._prepare(chapter, manifest, version, ctx, video_id=video.id)
 
     async def _prepare(self, chapter, manifest, version, ctx, *, video_id=None):
         chapter_id = chapter.id
         identity = digest(['source', chapter.novel_id, ctx.team_id, version])
-        params = await prepare_workflow({'operation': 'prepare_export', 'novel_id': chapter.novel_id,
+        params = await prepare_media_task({'operation': 'prepare_export', 'novel_id': chapter.novel_id,
             'chapter_id': chapter_id, 'source_video_id':video_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None})
         from services.ai_task_executor import ai_task_executor
         from models.ai_task import AiTask
@@ -152,7 +150,7 @@ class ChapterExports:
         async with export_media.materialize(ref) as path:
             if await asyncio.to_thread(file_digest, path) != sha:
                 raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
-        params = await prepare_workflow({'operation': 'enhance_export', 'novel_id': source.novel_id,
+        params = await prepare_media_task({'operation': 'enhance_export', 'novel_id': source.novel_id,
             'chapter_id': source.chapter_id, 'source_video_id':source.source_video_id, 'team_id': ctx.team_id, 'user_id': ctx.user.id if ctx.user else None,
             'model_config_id': request.model_config_id, 'resolution': request.resolution,
             'source_export_id': source.id, 'source_sha256': sha, 'config_snapshot': quote['config_snapshot']})

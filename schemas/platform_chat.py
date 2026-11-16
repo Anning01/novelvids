@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 
@@ -36,7 +36,7 @@ class ChatRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
-    stream_options: dict[str, bool] | None = None
+    stream_options: dict[str, Any] | None = None
     max_tokens: int | None = Field(None, gt=0)
     max_completion_tokens: int | None = Field(None, gt=0)
     temperature: float | None = None
@@ -45,8 +45,8 @@ class ChatRequest(BaseModel):
     seed: int | None = None
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
-    reasoning_effort: str | None = None
-    thinking: dict | None = None
+    reasoning_effort: Any = Field(None, description='按上游协议原样透传，支持的档位由所选模型决定')
+    thinking: Any = Field(None, description='按上游协议原样透传，可为字符串或对象等 JSON 值')
     tools: list[dict] | None = None
     tool_choice: str | dict | None = None
     parallel_tool_calls: bool | None = None
@@ -56,8 +56,4 @@ class ChatRequest(BaseModel):
     def validate_options(self):
         if "audio" in ((self.model_extra or {}).get("modalities") or []):
             raise ValueError("Inline audio output is not supported; use media URLs")
-        if self.stream_options is not None and not self.stream:
-            raise ValueError("stream_options requires stream=true")
-        if self.max_completion_tokens and self.max_tokens:
-            raise ValueError("Choose one token limit")
         return self

@@ -6,7 +6,7 @@ from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.novel import Novel
 from services.ai_task_executor import ai_task_executor
-from services.chapter_screenplay import EpisodeScript, submit_screenplay
+from services.chapter_screenplay import submit_screenplay
 from services.creation_agent.skill_execution import SkillExecution
 from services.extraction.context import ExtractionContextLoader
 
@@ -16,8 +16,8 @@ async def test_explicit_adaptation_deduplicates_and_preserves_source(configured_
     novel = await Novel.create(name="救人")
     chapter = await Chapter.create(novel=novel, number=1, name="救人", content="徐长寿牵牛走在泥路上。")
     text = "1-1　泥路　外　黄昏\n出场：徐长寿、老黄牛\n△ 徐长寿牵牛停下。"
-    generate = AsyncMock(return_value=EpisodeScript(screenplay=text))
-    monkeypatch.setattr(SkillExecution, 'generate', generate)
+    generate = AsyncMock(return_value={'screenplay': text})
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     assert not await AiTask.all().exists()
     from controllers.chapter import chapter_controller
     from schemas.chapter import ChapterPatch
@@ -30,9 +30,8 @@ async def test_explicit_adaptation_deduplicates_and_preserves_source(configured_
     assert task.status == 3, task.error_message
     await chapter.refresh_from_db()
     assert chapter.content == "徐长寿牵牛走在泥路上。" and chapter.screenplay == text
-    assert generate.await_args.args[0] == "screenplay"
-    assert generate.await_args.args[1]["source_text"] == chapter.content
-    assert generate.await_args.args[1]["episode_pacing"] == pacing
+    assert generate.await_args.args[0]["source_text"] == chapter.content
+    assert generate.await_args.args[0]["episode_pacing"] == pacing
     context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
     assert context.chapter.content == text
 
@@ -43,8 +42,8 @@ async def test_changed_source_is_not_overwritten(configured_creation_agent, monk
     chapter = await Chapter.create(novel=novel, number=1, name="救人", content="初稿")
     async def generate(*args, **kwargs):
         await Chapter.filter(id=chapter.id).update(content="用户修订")
-        return EpisodeScript(screenplay="# 第1集 救人\n本集时长上限：90 秒\n迟到的导演稿")
-    monkeypatch.setattr(SkillExecution, 'generate', generate)
+        return {"screenplay": "# 第1集 救人\n本集时长上限：90 秒\n迟到的导演稿"}
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     task = await submit_screenplay(chapter.id, AuthContext())
     await ai_task_executor.run(task)
     await task.refresh_from_db()
@@ -96,8 +95,8 @@ async def test_regenerate_requires_the_confirmed_script_and_protects_later_edits
     async def generate(*args):
         if concurrent_edit:
             await Chapter.filter(id=chapter.id).update(screenplay="手动改稿")
-        return EpisodeScript(screenplay="# 第1集 救人\n本集时长上限：90 秒\n新导演稿")
-    monkeypatch.setattr(SkillExecution, "generate", generate)
+        return {"screenplay": "# 第1集 救人\n本集时长上限：90 秒\n新导演稿"}
+    monkeypatch.setattr(SkillExecution, "generate_strict", generate)
     task = await submit_screenplay(chapter.id, AuthContext(), "原导演稿")
     await ai_task_executor.run(task)
     await chapter.refresh_from_db()
@@ -111,14 +110,14 @@ async def test_regenerate_requires_the_confirmed_script_and_protects_later_edits
 async def test_smart_pacing_saves_script_without_duration_header(configured_creation_agent, monkeypatch, pacing):
     novel = await Novel.create(name="自动估时")
     chapter = await Chapter.create(novel=novel, number=1, name="救人", content="小说", screenplay="原导演稿", episode_pacing=pacing)
-    generate = AsyncMock(return_value=EpisodeScript(screenplay="没有时长的新导演稿"))
-    monkeypatch.setattr(SkillExecution, "generate", generate)
+    generate = AsyncMock(return_value={'screenplay': '没有时长的新导演稿'})
+    monkeypatch.setattr(SkillExecution, "generate_strict", generate)
     task = await submit_screenplay(chapter.id, AuthContext(), "原导演稿")
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     await chapter.refresh_from_db()
     generate.assert_awaited_once()
-    assert generate.await_args.args[1]["episode_pacing"] == (pacing or {"preset": "smart"})
+    assert generate.await_args.args[0]["episode_pacing"] == (pacing or {"preset": "smart"})
     assert task.status == 3, task.error_message
     assert chapter.screenplay == "没有时长的新导演稿"
 
@@ -138,7 +137,8 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
         requests.append(json.loads(request.content))
         return completion_stream_response({
             "id": "screenplay", "created": 1, "model": "mock-model", "object": "chat.completion",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "{unfinished"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
         })
 
     monkeypatch.setattr("services.creation_agent.handler.AsyncOpenAI", lambda **kwargs: AsyncOpenAI(
@@ -151,6 +151,7 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
 
     assert task.status == 4
     assert len(requests) == 1 and not requests[0].get("tools")
+    assert requests[0]["response_format"] == {"type": "json_object"}
     messages = str(requests[0]["messages"])
     assert "episode_pacing" in messages and "本集按剧情自然展开" in messages
     assert "Target episode duration:" in messages
@@ -165,7 +166,7 @@ async def test_adaptation_runs_with_selected_model_and_rejects_switch_while_runn
     novel = await Novel.create(name="选择改编模型")
     chapter = await Chapter.create(novel=novel, number=1, name="本集", content="原文")
     other = await AiModelConfig.create(name="另一模型", model="other", task_type=7,
-        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, is_active=True)
+        base_url="https://example.invalid", api_key="test", supports_tool_calls=True, supports_json_output=True, supports_strict_output=True, is_active=True)
     selected = configured_creation_agent.id
     task = await submit_screenplay(chapter.id, AuthContext(), assistant_model_config_id=selected)
     assert task.request_params["assistant_model_config_id"] == selected

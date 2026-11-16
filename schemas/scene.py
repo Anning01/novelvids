@@ -342,6 +342,7 @@ class SceneFullProperties(SceneProperties):
 
 
 class SceneGenerateCreate(BaseModel):
+    skill_id: int | None = Field(None, ge=0)
     sheet_model_config_id: int | None = Field(None, gt=0)
     generate_blocking_maps: bool = Field(False, strict=True)
     assistant_model_config_id: int | None = Field(None, gt=0)

@@ -85,115 +85,135 @@ class ExtractionTaskHandler(BaseTaskHandler):
         execution = current_execution.get()
         reusable = None
         plan_context = await step_context(request_params) if execution else None
-        targeted = bool(plan_context and plan_context.step.asset_scope == 'targeted')
-        if plan_context and plan_context.step.mode == 'fill_missing' and not targeted:
-            from services.extraction.reuse import extraction_reuse
-            reusable = await extraction_reuse.find(execution, chapter_id)
-            if reusable and reusable.complete:
-                return {**reusable.summary, 'preserved_existing': True}
-        if execution:
-            from services.extraction.reuse import extraction_reuse
-            await extraction_reuse.remember_inputs(execution, context, targeted=targeted)
-        messages = self.message_builder.build(
-            context,
-            prompt_language=prompt_language,
-        )
-        message_roles = _derive_message_roles(messages)
-        formatted_message_roles = _format_message_roles(message_roles)
-        if message_roles != EXPECTED_EXTRACTION_MESSAGE_ROLES:
-            logger.warning(
-                "Extraction model call: novel_id=%s chapter_id=%s "
-                "roles=%s call_status=failed "
-                "error_type=AssetExtractionGatewayError error_code=%s",
-                novel_id,
-                chapter_id,
-                formatted_message_roles,
-                ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE,
+        strict = bool(request_params.get('output_contract'))
+        extractor = None
+        if strict:
+            import json
+            from models.chapter import Chapter
+            from models.asset import Asset
+            from services.creation_agent.strict_text import verify_chapter_input
+            from services.creation_agent.memory import creation_memory
+            from services.extraction.strict_result import extraction_result
+            await verify_chapter_input(request_params)
+            messages = self.message_builder.build(context, prompt_language=prompt_language)
+            chapter = await Chapter.get(id=chapter_id, novel_id=novel_id)
+            assets = await Asset.filter(novel_id=novel_id)
+            payload = await execution.generate_strict({
+                'project': json.loads(messages[1]['content']), 'known_assets': json.loads(messages[2]['content']),
+                'chapter': json.loads(messages[3]['content']),
+                'constraints': await creation_memory.for_generation(chapter, assets),
+                **({'step_context': plan_context.model_dump(mode='json')} if plan_context else {}),
+            })
+            result = extraction_result(payload, request_params['output_contract']['rendering'])
+        else:
+            targeted = bool(plan_context and plan_context.step.asset_scope == 'targeted')
+            if plan_context and plan_context.step.mode == 'fill_missing' and not targeted:
+                from services.extraction.reuse import extraction_reuse
+                reusable = await extraction_reuse.find(execution, chapter_id)
+                if reusable and reusable.complete:
+                    return {**reusable.summary, 'preserved_existing': True}
+            if execution:
+                from services.extraction.reuse import extraction_reuse
+                await extraction_reuse.remember_inputs(execution, context, targeted=targeted)
+            messages = self.message_builder.build(
+                context,
+                prompt_language=prompt_language,
             )
-            raise AssetExtractionGatewayError() from None
+            message_roles = _derive_message_roles(messages)
+            formatted_message_roles = _format_message_roles(message_roles)
+            if message_roles != EXPECTED_EXTRACTION_MESSAGE_ROLES:
+                logger.warning(
+                    "Extraction model call: novel_id=%s chapter_id=%s "
+                    "roles=%s call_status=failed "
+                    "error_type=AssetExtractionGatewayError error_code=%s",
+                    novel_id,
+                    chapter_id,
+                    formatted_message_roles,
+                    ASSET_EXTRACTION_MESSAGE_PROTOCOL_ERROR_CODE,
+                )
+                raise AssetExtractionGatewayError() from None
 
-        report = self.budget_policy_factory(
-            request_params.get("max_context_characters")
-        ).validate(
-            messages,
-            asset_count=len(context.assets),
-            chapter_characters=len(context.chapter.content),
-        )
-        logger.info(
-            "Extraction context prepared: novel_id=%s chapter_id=%s "
-            "assets=%s message_chars=%s total_chars=%s",
-            novel_id,
-            chapter_id,
-            len(context.assets),
-            report.message_characters,
-            report.total_characters,
-        )
-        required_assets = () if targeted else tuple((asset.asset_type, asset.canonical_name) for asset in context.required_design_assets)
-        if reusable:
-            required_assets = tuple(dict.fromkeys((*required_assets, *reusable.required_assets)))
-        extractor = self.extractor_factory(
-            AsyncOpenAI(
-                api_key=request_params["api_key"],
-                base_url=request_params["base_url"],
-            ),
-            model=request_params["model"],
-            prompt_language=prompt_language,
-            supports_json_output=request_params.get(
-                "supports_json_output",
-                False,
-            ),
-            **({'required_assets': required_assets} if required_assets else {}),
-            **({'initial_assets': reusable.accepted, 'required_variants': reusable.required_variants} if reusable else {}),
-        )
-        logger.info(
-            "Extraction model call: novel_id=%s chapter_id=%s "
-            "roles=%s call_status=started",
-            novel_id,
-            chapter_id,
-            formatted_message_roles,
-        )
-        try:
-            result = await extractor.extract(messages)
-            validate_required_design_assets(result, required_assets)
-            if getattr(extractor, 'targeted_assets', None) is not None:
-                reusable = extractor.targeted_assets
-        except asyncio.CancelledError:
-            logger.warning(
+            report = self.budget_policy_factory(
+                request_params.get("max_context_characters")
+            ).validate(
+                messages,
+                asset_count=len(context.assets),
+                chapter_characters=len(context.chapter.content),
+            )
+            logger.info(
+                "Extraction context prepared: novel_id=%s chapter_id=%s "
+                "assets=%s message_chars=%s total_chars=%s",
+                novel_id,
+                chapter_id,
+                len(context.assets),
+                report.message_characters,
+                report.total_characters,
+            )
+            required_assets = () if targeted else tuple((asset.asset_type, asset.canonical_name) for asset in context.required_design_assets)
+            if reusable:
+                required_assets = tuple(dict.fromkeys((*required_assets, *reusable.required_assets)))
+            extractor = self.extractor_factory(
+                AsyncOpenAI(
+                    api_key=request_params["api_key"],
+                    base_url=request_params["base_url"],
+                ),
+                model=request_params["model"],
+                prompt_language=prompt_language,
+                supports_json_output=request_params.get(
+                    "supports_json_output",
+                    False,
+                ),
+                **({'required_assets': required_assets} if required_assets else {}),
+                **({'initial_assets': reusable.accepted, 'required_variants': reusable.required_variants} if reusable else {}),
+            )
+            logger.info(
                 "Extraction model call: novel_id=%s chapter_id=%s "
-                "roles=%s call_status=failed "
-                "error_type=CancelledError error_code=cancelled",
+                "roles=%s call_status=started",
                 novel_id,
                 chapter_id,
                 formatted_message_roles,
             )
-            raise
-        except Exception as error:
-            from services.extraction.validation import AssetExtractionValidationError
-            error_code = (
-                error.error_code
-                if isinstance(error, (AssetExtractionGatewayError, AssetExtractionValidationError))
-                else "unexpected_error"
-            )
-            logger.warning(
+            try:
+                result = await extractor.extract(messages)
+                validate_required_design_assets(result, required_assets)
+                if getattr(extractor, 'targeted_assets', None) is not None:
+                    reusable = extractor.targeted_assets
+            except asyncio.CancelledError:
+                logger.warning(
+                    "Extraction model call: novel_id=%s chapter_id=%s "
+                    "roles=%s call_status=failed "
+                    "error_type=CancelledError error_code=cancelled",
+                    novel_id,
+                    chapter_id,
+                    formatted_message_roles,
+                )
+                raise
+            except Exception as error:
+                from services.extraction.validation import AssetExtractionValidationError
+                error_code = (
+                    error.error_code
+                    if isinstance(error, (AssetExtractionGatewayError, AssetExtractionValidationError))
+                    else "unexpected_error"
+                )
+                logger.warning(
+                    "Extraction model call: novel_id=%s chapter_id=%s "
+                    "roles=%s call_status=failed error_type=%s error_code=%s",
+                    novel_id,
+                    chapter_id,
+                    formatted_message_roles,
+                    type(error).__name__,
+                    error_code,
+                )
+                if isinstance(error, (HTTPException, AssetExtractionGatewayError, AssetExtractionValidationError)):
+                    raise error from None
+                raise AssetExtractionGatewayError.from_exception(error) from None
+            logger.info(
                 "Extraction model call: novel_id=%s chapter_id=%s "
-                "roles=%s call_status=failed error_type=%s error_code=%s",
+                "roles=%s call_status=succeeded",
                 novel_id,
                 chapter_id,
                 formatted_message_roles,
-                type(error).__name__,
-                error_code,
             )
-            if isinstance(error, (HTTPException, AssetExtractionGatewayError, AssetExtractionValidationError)):
-                raise error from None
-            raise AssetExtractionGatewayError.from_exception(error) from None
-        logger.info(
-            "Extraction model call: novel_id=%s chapter_id=%s "
-            "roles=%s call_status=succeeded",
-            novel_id,
-            chapter_id,
-            formatted_message_roles,
-        )
-
         from services.creation_agent.skill_execution import current_execution
         from services.creation_agent.operation_receipts import execute_step
         execution = current_execution.get()
@@ -202,6 +222,9 @@ class ExtractionTaskHandler(BaseTaskHandler):
             from services.creation_objects import project_write
             plan_context = await step_context(request_params)
             async with project_write(novel_id):
+                if strict:
+                    await execution.before_request()
+                    await verify_chapter_input(request_params)
                 await validate_step_inputs(request_params)
                 from models.asset import Asset
                 from models.asset_variant import AssetVariant
@@ -213,15 +236,15 @@ class ExtractionTaskHandler(BaseTaskHandler):
                         target = await (Asset if kind == 'asset' else AssetVariant).get_or_none(id=int(identifier))
                         if target is None or await object_version(target) != version:
                             raise ValueError(localized_message('待补全的设定已有新修改，已保留人工编辑，请重新生成'))
-                before = {asset.id: await object_state(asset) for asset in await Asset.filter(novel_id=novel_id)} if plan_context else {}
+                before = {asset.id: await object_state(asset) for asset in await Asset.filter(novel_id=novel_id)} if plan_context or strict else {}
                 before_variants = {variant.id: await object_state(variant) for variant in
-                    await AssetVariant.filter(asset__novel_id=novel_id)} if plan_context else {}
-                options = {'preserve_existing': plan_context.step.mode == 'fill_missing', 'include_ids': True} if plan_context else {}
+                    await AssetVariant.filter(asset__novel_id=novel_id)} if plan_context or strict else {}
+                options = {'preserve_existing': plan_context.step.mode == 'fill_missing' if plan_context else True, 'include_ids': True} if plan_context or strict else {}
                 if reusable:
                     options.update(repair_asset_ids=reusable.repair_asset_ids, repair_variant_ids=reusable.repair_variant_ids)
                 summary = await self.upsert_service.save_result(novel_id=novel_id,
                     chapter_number=context.chapter.number, result=result, **options)
-                if plan_context:
+                if plan_context or strict:
                     from models.creation_agent import PromptChange
                     from services.creation_agent.plan_sources import fingerprint
                     identifiers = [item['asset_id'] for group in summary.values() for item in group]

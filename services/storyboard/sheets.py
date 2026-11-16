@@ -46,7 +46,7 @@ async def submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id=
 async def _submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id=None):
     from controllers.config import ai_model_config_controller, general_config_controller
     from services.ai_task_executor import ai_task_executor
-    from services.creation_agent.skill_execution import prepare_workflow
+    from services.media_tasks import prepare_media_task
     scene = await Scene.get(id=scene_id).prefetch_related('chapter__novel')
     from services.video_enhancement.sources import require_generation_scope
     await require_generation_scope(scene.chapter.novel_id, team_id)
@@ -74,7 +74,7 @@ async def _submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id
                 if task.request_params.get('model_config_id') != config.id:
                     raise HTTPException(409, localized_message('本镜已有使用其他模型的线稿任务，请等待完成'))
                 return await bind_submission(task, params)
-        prepared = await prepare_workflow(params)
+        prepared = await prepare_media_task(params)
         for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
             prepared.pop(key, None)
         task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, prepared, db_connection=db)
@@ -158,7 +158,7 @@ async def submit_sheet_edit(scene_id, request, *, team_id=None, user_id=None):
     from copy import deepcopy
     from controllers.config import ai_model_config_controller, general_config_controller
     from services.ai_task_executor import ai_task_executor
-    from services.creation_agent.skill_execution import prepare_workflow
+    from services.media_tasks import prepare_media_task
     from services.creation_agent.submissions import previous_submission
     from services.storyboard.sheet_history import current_sheet, sheet_revision
     from services.video_enhancement.sources import require_generation_scope
@@ -196,7 +196,7 @@ async def submit_sheet_edit(scene_id, request, *, team_id=None, user_id=None):
             aspect_ratio=selection.aspect_ratio, output_format='png', generation_count=1,
             source_sheet=deepcopy(source), original_image_prompt=original, edit_instruction=request.instruction, sheet=sheet,
             scene_fingerprint=scene_fingerprint(scene), edit_fingerprint=sheet_edit_fingerprint(scene), source_revision=request.expected_revision)
-        prepared = await prepare_workflow(params)
+        prepared = await prepare_media_task(params)
         for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
             prepared.pop(key, None)
         task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, prepared, db_connection=db)

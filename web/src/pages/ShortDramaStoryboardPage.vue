@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { provide } from 'vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
+import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
@@ -80,7 +82,6 @@ import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
-import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { agentApi } from '@/features/creation-agent/api'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
@@ -142,6 +143,7 @@ const terminalTaskStatuses = new Set([
 
 const route = useRoute()
 const router = useRouter()
+const storyboardSkillId = ref<number>()
 const stageModelId = ref('')
 const sheetModelId = ref('')
 const generateBlockingMaps = ref(false)
@@ -1590,7 +1592,7 @@ async function generateChapterStoryboard(chapterId: number, replaceExisting = fa
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value, storyboardSkillId.value)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -1903,7 +1905,9 @@ async function optimizeChapterPrompts() {
   batchPromptProgress.value = { total: targets.length, finished: 0, failed: 0, running: true }
   try {
     const { data: configuration } = await agentApi.capabilities(projectId.value)
-    await runVideoGenerationQueue(targets, configuration.production_concurrency || 1, false, async scene => {
+    const assistant = configuration.models[0]
+    if (!assistant) throw new Error(tr('还需要配置一个对话模型'))
+    await runVideoGenerationQueue(targets, assistant.concurrency, false, async scene => {
       if (controller.signal.aborted) return false
       const applied = draftFor(scene).promptModel === model.model_type || await optimizeModelPrompt(scene, model, false)
       if (controller.signal.aborted) return false
@@ -2439,7 +2443,11 @@ async function monitorVideoBatch(taskId: string) {
       return task
     }, { signal: controller.signal, intervalMs: 4000, terminalStatuses: terminalTaskStatuses,
       requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
-    if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
+    if (result.status === TaskStatusEnum.COMPLETED && Number(result.response_data?.failed_count) > 0) {
+      notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', {
+        p0: Number(result.response_data?.completed_count || 0), p1: Number(result.response_data?.failed_count),
+      }))
+    } else if (result.status === TaskStatusEnum.COMPLETED) notice.success(tr('批量生成完成'))
     else notice.error(result.error_message || tr('连续生成已停止，后续分镜未提交'))
   } catch (error) {
     if (!isAbortError(error)) notice.error((error as Error).message)
@@ -2476,55 +2484,33 @@ async function batchGenerateVideos(request: BatchVideoGenerationRequest) {
     draft.returnLastFrame = request.returnLastFrame
     draft.autoEnhancement = request.autoEnhancement || null
   }
-  const generationSettings: SceneVideoGenerationSettings = {
-    model,
-    resolution: request.resolution,
-    aspectRatio: request.aspectRatio,
-    returnLastFrame: request.returnLastFrame,
-    autoEnhancement: request.autoEnhancement || null,
-  }
+  const chapterId = activeChapterId.value
   try {
-    if (request.returnLastFrame) {
-      for (const scene of targets) {
-        const blocked = batchVideoDisabledReason(scene, model, request)
-        if (blocked) throw new Error(blocked)
-        ensureSceneVoiceReferencePrompt(scene)
-        if (!await saveScene(scene, false, model)) return
-      }
-      const requests = targets.map(scene => {
-        const draft = draftFor(scene)
-        return { scene_id: scene.id, model_config_id: model.config_id,
-          generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
-          last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
-          resolution: request.resolution, aspect_ratio: request.aspectRatio,
-          output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
-          return_last_frame: true, auto_enhancement: request.autoEnhancement || null,
-          reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia) : [] }
-      })
-      const task = (await api.generateVideoBatch(requests)).data
-      await monitorVideoBatch(task.id)
-      return
+    for (const scene of targets) {
+      const blocked = batchVideoDisabledReason(scene, model, request)
+      if (blocked) throw new Error(blocked)
+      ensureSceneVoiceReferencePrompt(scene)
+      if (!await saveScene(scene, false, model)) return
     }
-    const completedCount = await runVideoGenerationQueue(
-      targets,
-      model.concurrency,
-      false,
-      async scene => {
-        const blocked = batchVideoDisabledReason(scene, model, request)
-        if (blocked) setSceneVideoError(scene.id, blocked)
-        return !blocked && await generateVideo(scene, false, generationSettings)
-      },
-    )
-    const failedCount = targets.length - completedCount
-    failedCount
-      ? notice.error(tr('批量生成完成：成功 {p0} 条，失败 {p1} 条', { p0: completedCount, p1: failedCount }))
-      : notice.success(request.autoEnhancement
-        ? tr('批量视频生成完成：成功 {p0} 条，高清化进度见各分镜', { p0: completedCount })
-        : tr('批量生成完成：成功 {p0} 条', { p0: completedCount }))
+    const requests = targets.map(scene => {
+      const draft = draftFor(scene)
+      return { scene_id: scene.id, model_config_id: model.config_id,
+        generation_mode: draft.videoGenerationMode, first_frame_url: draft.firstFrameUrl || undefined,
+        last_frame_url: draft.lastFrameUrl || undefined, duration: sceneDuration(scene, model),
+        resolution: request.resolution, aspect_ratio: request.aspectRatio,
+        output_format: model.capabilities.default_output_format, generate_audio: model.capabilities.default_generate_audio,
+        return_last_frame: request.returnLastFrame, auto_enhancement: request.autoEnhancement || null,
+        reference_media: draft.videoGenerationMode === 'reference' ? referencedVideoMedia(referencePrompt(draft), draft.referenceMedia) : [] }
+    })
+    const task = (await api.generateVideoBatch(requests)).data
+    if (alive && chapterId === activeChapterId.value) {
+      notice.info(tr('任务已提交，正在等待模型执行。'))
+      void monitorVideoBatch(task.id)
+    }
   } catch (error) {
     notice.error((error as Error).message)
   } finally {
-    batchGeneratingVideos.value = false
+    if (chapterId === activeChapterId.value && !batchMonitor) batchGeneratingVideos.value = false
   }
 }
 
@@ -2648,6 +2634,8 @@ onBeforeUnmount(() => {
             <AppButton class="batch-skills-optimize" variant="secondary" size="sm" :loading="batchPromptProgress?.running"
               :disabled="loading || generatingStoryboard || waitingAnalysis || !selectedVideoModelConfig || !pendingModelPrompts.length || Boolean(promptOptimizations.size)"
               @click="optimizeChapterPrompts"><WandSparkles v-if="!batchPromptProgress?.running" :size="15" aria-hidden="true" />{{ tr('一键 Skills 优化') }}</AppButton>
+            <TaskSkillPicker v-if="isAgent && scenes.length" v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker"
+              :disabled="generatingStoryboard || waitingAnalysis" />
             <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
             <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
@@ -2656,7 +2644,6 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
-
         <div v-if="batchPromptProgress" class="batch-skills-progress">
           <progress v-if="batchPromptProgress.running" :value="batchPromptProgress.finished" :max="batchPromptProgress.total" :aria-label="tr('Skills 优化进度')" />
           <span>{{ batchPromptProgress.error || (batchPromptProgress.running ? tr('Skills 优化进度：{p0}/{p1} 镜', { p0: batchPromptProgress.finished, p1: batchPromptProgress.total }) : tr('Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜', { p0: batchPromptProgress.finished - batchPromptProgress.failed, p1: batchPromptProgress.failed })) }}</span>
@@ -2664,10 +2651,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><TaskSkillPicker v-if="isAgent && !canReconnectStoryboard" v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker" :disabled="generatingStoryboard || waitingAnalysis" /><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
-        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><TaskSkillPicker v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker" :disabled="generatingStoryboard || waitingAnalysis" /><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
@@ -2940,7 +2927,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; max-inline-size: 100%; }
+.storyboard-skill-picker { width: auto; max-inline-size: 100%; text-align: start; }
 .prompt-panel > header .prompt-header-actions { display:flex; flex:0 0 auto; align-items:center; gap:6px; }
 .model-optimized-prompt { min-width: 0; color: var(--app-text); }
 .model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
@@ -2956,8 +2944,8 @@ onBeforeUnmount(() => {
 .storyboard-main.is-workflow-view { height: 100%; padding: 0; }
 .batch-skills-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 8px 16px; color: var(--app-text-secondary); font-size: 13px; }
 .batch-skills-progress progress { width: 120px; height: 8px; accent-color: var(--app-accent); }
-.chapter-toolbar { flex-wrap: wrap; position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 24px; margin: -16px calc(-1 * var(--storyboard-right-gutter)) 2px -16px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
-.chapter-summary { position: relative; display: block; min-width: 0; max-width: min(840px,calc(100% - 540px)); padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
+.chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); min-width: 0; align-items: center; gap: 24px; margin: -16px calc(-1 * var(--storyboard-right-gutter)) 2px -16px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
+.chapter-summary { position: relative; display: block; min-width: 0; width: 100%; padding: 4px 30px 4px 5px; overflow: hidden; border: 0; border-radius: 10px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; transition: background-color .16s ease,box-shadow .16s ease; }
 .chapter-summary:hover { background: color-mix(in srgb,var(--app-surface) 72%,transparent); box-shadow: inset 0 0 0 1px var(--app-border); }
 .chapter-summary:focus-visible { outline: 3px solid rgb(91 92 246 / 18%); outline-offset: 1px; }
 .chapter-summary:disabled { cursor: default; }
@@ -2967,7 +2955,7 @@ onBeforeUnmount(() => {
 .chapter-summary:hover > small,.chapter-summary:focus-visible > small { opacity: 1; transform: translateX(0); }
 .chapter-toolbar h1 { margin: 5px 0 6px; font-size: 19px; color: var(--app-text, #303442); }
 .chapter-toolbar p { max-width: 760px; margin: 0; overflow: hidden; color: var(--app-text-muted, #898f9e); font-size: 10px; line-height: 1.6; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-actions { display: flex; flex-wrap: wrap; min-width: 0; flex: 0 1 auto; align-self: center; align-items: center; justify-content: flex-end; gap: 8px; margin-left: auto; }
+.chapter-actions { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
 .video-model-select { max-width: min(420px, 48vw); }
 .video-model-select :deep(.app-select__value) { overflow: visible; text-overflow: clip; }
 .workspace-view-switch { grid-column: 3; display: flex; justify-self: end; align-items: center; gap: 3px; padding: 3px; border-radius: 11px; background: #f1f2f7; box-shadow: inset 0 0 0 1px #e5e7ef; }
@@ -3075,8 +3063,8 @@ onBeforeUnmount(() => {
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @container creation-workspace (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { align-items: stretch; flex-direction: column; margin-inline: -14px; padding-inline: 14px; }.chapter-summary { max-width: 100%; }.chapter-actions { width: 100%; justify-content: flex-end; flex-wrap: wrap; padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
-@container creation-workspace (max-width: 520px) { .chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
+@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { margin-inline: -14px; padding-inline: 14px; }.chapter-actions { padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@container creation-workspace (max-width: 520px) { .chapter-toolbar { grid-template-columns: minmax(0, 1fr); gap: 12px; }.chapter-actions { justify-content: flex-start; }.chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 .scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }
 </style>

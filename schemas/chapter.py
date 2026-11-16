@@ -40,9 +40,11 @@ class ScreenplayGenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_screenplay: str | None = None
     assistant_model_config_id: int | None = Field(None, gt=0)
+    skill_id: int | None = Field(None, ge=0, description='0 使用内置技能；未指定时使用个人默认技能')
 
 
 class ChapterExtractRequest(BaseModel):
+    skill_id: int | None = Field(None, ge=0)
     assistant_model_config_id: int | None = Field(None, gt=0)
     model_config = ConfigDict(extra='forbid')
     conversation_id: int | None = Field(None, gt=0)

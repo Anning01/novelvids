@@ -72,6 +72,7 @@ async def generate_scene(
         generate_data.chapter_id,
         replace_existing=generate_data.replace_existing,
         assistant_model_config_id=generate_data.assistant_model_config_id,
+        skill_id=generate_data.skill_id,
         sheet_model_config_id=generate_data.sheet_model_config_id,
         generate_blocking_maps=generate_data.generate_blocking_maps if 'generate_blocking_maps' in generate_data.model_fields_set else None,
         team_id=ctx.team_id,

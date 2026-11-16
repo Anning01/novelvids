@@ -1,4 +1,11 @@
 {
+  "模型未完成本次请求，请调整内容后重试": "The model could not complete this request. Adjust the content and try again.",
+  "技能不存在或不适用于当前任务": "The skill does not exist or does not support this task",
+  "技能已被修改，请重新读取后保存": "The skill has changed. Reload it before saving.",
+  "技能已停用": "This skill is disabled",
+  "请选择已启用且支持 JSON 输出的模型": "Select an active model that supports JSON output",
+  "已有任务正在运行，请等待完成后再切换技能": "A task is running. Wait for it to finish before switching skills.",
+  "模型未完整返回结果，请调整输出上限或模型后重试": "The model did not return a complete result. Adjust the output limit or model and try again.",
   "新版线稿已保留，请在历史中查看并选择是否使用": "The new sheet is saved. Open history to review and use it.",
   "线稿记录不存在": "Storyboard sheet record not found",
   "只有生成成功的线稿可以恢复": "Only successful sheet results can be restored",

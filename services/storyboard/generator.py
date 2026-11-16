@@ -62,7 +62,7 @@ def _aggregate_metadata(completions: list[Any]) -> dict[str, Any]:
 
 
 async def generate_storyboard(
-    client: AsyncOpenAI,
+    client: AsyncOpenAI | None,
     long_text: str,
     entities: list[SceneEntity],
     model: str,
@@ -79,11 +79,29 @@ async def generate_storyboard(
     shot_duration_range: list[int] | None = None,
     episode_pacing: dict | None = None,
     episode_max_seconds: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[Storyboard, dict[str, Any]]:
     """Keep the full episode in one request whenever the configured context permits."""
     from services.creation_agent.skill_execution import current_execution
     execution = current_execution.get()
     seen_assets = list(dict.fromkeys(previously_seen_assets or []))
+    if execution and execution.params.get('output_contract'):
+        from services.creation_agent.strict_text import verify_chapter_input
+        from services.creation_agent.step_context import step_context
+        from services.storyboard.strict_result import storyboard_result
+        await verify_chapter_input(execution.params)
+        context = await step_context(execution.params)
+        payload = await execution.generate_strict({'chapter': long_text,
+            'entities': [entity.model_dump() for entity in entities],
+            'constraints': creative_constraints or [], 'scene_layouts': scene_layouts or {},
+            'previously_seen_assets': seen_assets, 'introduction_descriptions': introduction_descriptions or {},
+            'episode_pacing': episode_pacing or {'preset': 'smart'}, 'episode_max_seconds': episode_max_seconds,
+            'shot_duration_range': execution.params.get('shot_duration_range', shot_duration_range),
+            'generate_blocking_maps': execution.params.get('generate_blocking_maps', False),
+            **({'step_context': context.model_dump(mode='json')} if context else {})})
+        storyboard = storyboard_result(payload, prompt_language, entities, storyboard_strategy_factory.resolve(storyboard_strategy))
+        return storyboard, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
+                            'source_scene_numbers': [shot.source_scene_number for shot in storyboard.shots]}
     if execution:
         from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
         modern = "storyboard_contract" in execution.snapshot.contents
@@ -190,6 +208,7 @@ async def generate_storyboard(
                 supports_json_output=supports_json_output,
                 timeout=600,
                 thinking=thinking,
+                reasoning_effort=reasoning_effort,
                 max_tokens=max_tokens,
             )
         except JsonCompletionTruncatedError:

@@ -297,7 +297,7 @@ async def update_config(config_id: int, config: AiModelConfigUpdate, ctx: AuthCo
 @router.patch("/{config_id}", summary="局部更新模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def patch_config(config_id: int, config: AiModelConfigPatch, ctx: AuthContext = _ADMIN):
     instance = await ai_model_config_controller.get(config_id)
-    if instance.scope == SYNC_SCOPE and config.model_fields_set == {"pricing"}:
+    if instance.scope == SYNC_SCOPE and config.model_fields_set and config.model_fields_set <= {"pricing", "thinking", "reasoning_effort"}:
         await require_studio_owner(ctx)
     else:
         _check_config_ownership(instance, ctx)

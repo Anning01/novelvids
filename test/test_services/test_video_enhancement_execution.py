@@ -64,6 +64,19 @@ async def test_capacity_wait_is_committed_and_does_not_submit():
 
 
 @pytest.mark.asyncio
+async def test_enhancement_uses_live_model_concurrency_instead_of_snapshot_caps():
+    task, export, cfg = await pending_export()
+    cfg.concurrency = 2
+    await cfg.save(update_fields=['concurrency'])
+    task.request_params['config_snapshot']['processing_options']['account_concurrency'] = 1
+    await ChapterExport.create(novel_id=1, chapter_id=1, identity_key='c'*64, source_version='d'*64, submission_slot=True)
+    with patch('services.video_enhancement.provider.MediaKitClient.submit', AsyncMock(return_value='accepted')) as submit:
+        with pytest.raises(WaitingForMedia):
+            await EnhanceExportHandler().execute(task.request_params)
+        submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_running_query_does_not_save_or_settle_then_failed_query_releases_slot():
     task,export,cfg=await pending_export()
     export.provider_task_id='accepted';export.submission_slot=True;await export.save()
