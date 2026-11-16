@@ -39,13 +39,11 @@ def text_pricing(config):
 def chat_options(config, body):
     if not set(config.task_types or [config.task_type]).intersection({1,3,5,6,7,10,11}):
         raise HTTPException(422, "该模型不支持对话请求")
-    if body.get("tools") and not config.supports_tool_calls:
-        raise HTTPException(422, "该模型配置未启用工具调用")
-    if (body.get("response_format") or {}).get("type") in {"json_object", "json_schema"} and not config.supports_json_output:
-        raise HTTPException(422, "该模型配置未启用结构化输出")
-    requested = body.get("max_tokens") or body.get("max_completion_tokens")
-    if requested and config.max_tokens and requested > config.max_tokens:
-        raise HTTPException(422, "请求的输出 token 超出模型配置上限")
+    # Capability labels are for discovery; the upstream validates requested features.
+    for name in ('max_tokens', 'max_completion_tokens'):
+        requested = body.get(name)
+        if requested and config.max_tokens and requested > config.max_tokens:
+            raise HTTPException(422, "请求的输出 token 超出模型配置上限")
     return text_pricing(config)
 
 

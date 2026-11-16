@@ -22,7 +22,8 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api } from '@/api'
-import { agentApi } from '@/features/creation-agent/api'
+import { skillsApi } from '@/features/creation-agent/skillsApi'
+import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
 import type { EpisodePacing } from '@/types'
 import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
@@ -205,7 +206,7 @@ async function generateScreenplay(id: number, existingTask = sessionStorage.getI
   })) return
   generatingScripts.value[id] = true
   try {
-    const taskId = existingTask || (await api.generateScreenplay(id, previous || undefined, Number(analysisModelId.value))).data.id
+    const taskId = existingTask || (await api.generateScreenplay(id, previous || undefined, Number(analysisModelId.value), screenplaySkillId.value)).data.id
     sessionStorage.setItem(taskKey(id), taskId)
     const task = await pollUntilTerminal(async signal => (await api.task(taskId, signal)).data, {
       signal: scriptRequests.signal, intervalMs: 1200,
@@ -403,6 +404,8 @@ async function pollAnalysis(taskId: string) {
   }
 }
 
+const storySkillId = ref<number>()
+const screenplaySkillId = ref<number>()
 const analysisModelId = ref('')
 const analysisModels = ref<{ value: string; label: string }[]>([])
 const loadingAnalysisModels = ref(true)
@@ -411,8 +414,8 @@ async function loadAnalysisModels() {
   loadingAnalysisModels.value = true
   analysisModelsError.value = ''
   try {
-    const { data } = await agentApi.capabilities(projectId.value)
-    analysisModels.value = data.models.map(model => ({ value: String(model.id), label: model.name || model.model }))
+    const { data } = await skillsApi.models()
+    analysisModels.value = data.map(model => ({ value: String(model.id), label: model.name || model.model }))
   } catch (error) {
     analysisModelsError.value = (error as Error).message
   } finally {
@@ -461,7 +464,7 @@ async function startAnalysis() {
   startingAnalysis.value = true
   analysisError.value = ''
   try {
-    const response = await api.analyzeNovel(projectId.value, undefined, Number(analysisModelId.value))
+    const response = await api.analyzeNovel(projectId.value, undefined, Number(analysisModelId.value), storySkillId.value)
     analysisTask.value = response.data
     notice.success(tr('AI 已开始提取类型、大纲和关键人物'))
     await pollAnalysis(response.data.id)
@@ -816,6 +819,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="analysis-hero-actions">
+          <div v-if="canEdit && hasAnalysisContent" class="story-generation-controls">
+            <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('故事分析模型')"
+              :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON 输出模型') }, ...analysisModels]"
+              :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
+            <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
+            <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
+            <TaskSkillPicker v-model="storySkillId" task="story" :disabled="analysisRunning || startingAnalysis || editing" />
+          </div>
           <template v-if="editing">
             <AppButton variant="ghost" size="sm" type="button" :disabled="savingEdits" @click="cancelEditing"><X :size="15" />{{ tr('取消') }}</AppButton>
             <AppButton variant="primary" size="sm" type="button" :loading="savingEdits" @click="saveEdits"><Save :size="15" />{{ tr('保存修改') }}</AppButton>
@@ -847,13 +858,6 @@ onBeforeUnmount(() => {
           <p v-else-if="analysisTask?.status === TaskStatusEnum.FAILED">{{ analysisTask.error_message || tr('模型调用失败，请检查模型配置后重试。') }}</p>
           <p v-else>{{ tr('开始分析后，结果会自动保存在当前项目中。') }}</p>
         </div>
-        <template v-if="canEdit && !selectedEpisode">
-              <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
-                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('无可用模型') }, ...analysisModels]"
-                :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
-              <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
-              <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
-        </template>
         <AppButton v-if="canEdit && !analysisRunning && !startingAnalysis" variant="primary" size="sm" type="button" :disabled="!analysisModelId" @click="startAnalysis">{{ tr('开始分析') }}</AppButton>
         <AppButton v-if="analysisError" variant="secondary" size="sm" @click="loadAnalysis">{{ tr('重新连接') }}</AppButton>
       </section>
@@ -959,9 +963,11 @@ onBeforeUnmount(() => {
               :pacing="selectedEpisode.episode_pacing" :episode="episodeDisplayLabel(selectedEpisode)"
               :disabled="editing || selectedEpisodeLoading || generatingScripts[selectedEpisode.id]"
               :save="(pacing) => saveEpisodePacing(selectedEpisode!.id, pacing)" />
+            <TaskSkillPicker v-if="canEdit" v-model="screenplaySkillId" task="screenplay" class="episode-skill-picker"
+              :disabled="editing || adapting" />
             <div v-if="canEdit" class="episode-adaptation-controls">
               <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
-                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('无可用模型') }, ...analysisModels]"
+                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON 输出模型') }, ...analysisModels]"
                 :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
               <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
               <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
@@ -1007,7 +1013,7 @@ onBeforeUnmount(() => {
 .episode-empty-state { padding: 20px; border: 1px dashed var(--app-border); border-radius: 12px; color: var(--app-text-secondary); }
 .episode-empty-state p { margin: 0 0 12px; line-height: 1.7; }
 .episode-adaptation-controls { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; flex-wrap: wrap; }
-.episode-doc-tools { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
+.episode-doc-tools { display:flex; align-items:flex-start; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
 .episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
 .episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
 .episode-doc-tabs button[aria-pressed="true"] { background:var(--app-surface); color:var(--app-accent); box-shadow:0 1px 3px #0002; }
@@ -1024,8 +1030,8 @@ onBeforeUnmount(() => {
 .analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
 .analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
 .agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 20px 22px 48px; box-sizing: border-box; }
-.analysis-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
-.analysis-hero-copy { display: grid; justify-items: start; }
+.analysis-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
+.analysis-hero-copy { display: grid; flex: 1 1 16rem; min-width: 0; justify-items: start; }
 .analysis-ready { margin-bottom: 9px; }
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
@@ -1037,7 +1043,7 @@ onBeforeUnmount(() => {
 .tag-editor > span { color: #777c8d; font-size: 9px; font-weight: 650; }
 .cover-generation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cover-generation-error { flex-basis: 100%; color: var(--creation-danger); }
-.analysis-hero-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.analysis-hero-actions { min-width: 0; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px; }
 .secondary-action { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 9px; color: #626879; background: #f3f4f8; cursor: pointer; font-size: 11px; }
 .secondary-action:hover { color: #4f51e8; background: #ededff; }
 .secondary-action:disabled { opacity: .55; cursor: wait; }
@@ -1156,6 +1162,9 @@ onBeforeUnmount(() => {
 .episode-content > header { padding: 22px var(--reading-inset) 0; }
 .episode-content h3 { margin: 0; color: var(--app-text); font-size: 20px; letter-spacing: -.02em; }
 .episode-content .episode-doc-tools { margin: 0; padding: 12px var(--reading-inset) 16px; border-bottom: 1px solid var(--app-border); }
+.episode-skill-picker { width: auto; max-inline-size: 100%; }
+.story-generation-controls { display: contents; }
+.story-generation-controls > .task-skill-picker { width: auto; max-inline-size: 100%; }
 .episode-document { padding: clamp(18px, 2vw, 30px) var(--reading-inset); }
 .chapter-title-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 5px; }
 .chapter-title-editor > span { color: #555b6b; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -1170,13 +1179,9 @@ onBeforeUnmount(() => {
 .continue-button > span { display: inline-flex; align-items: center; gap: 8px; }
 .continue-button > svg { position: absolute; right: 20px; }
 .continue-button:hover { background: #4d4ee9; transform: translateY(-1px); }
-@media (max-width: 960px) {
-  .analysis-hero { grid-template-columns: auto minmax(0, 1fr); }
-  .analysis-hero > .analysis-hero-actions { grid-column: 2; justify-self: start; }
-}
 @media (max-width: 720px) {
   .agent-content { width: 100%; padding: 22px 14px 60px; }
-  .analysis-hero { grid-template-columns: auto minmax(0, 1fr); gap: 15px; padding: 15px; }
+  .analysis-hero { gap: 15px; padding: 15px; }
   .analysis-hero h1 { font-size: 19px; }
   .genre-tags { margin-top: 11px; }
   .profile-grid, .character-grid { grid-template-columns: 1fr; }
@@ -1187,8 +1192,7 @@ onBeforeUnmount(() => {
   .episode-content > footer { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 480px) {
-  .analysis-hero { grid-template-columns: 1fr; }
-  .analysis-hero > .analysis-hero-actions { grid-column: 1; flex-wrap: wrap; justify-self: stretch; }
+  .analysis-hero-actions { margin-inline-start: 0; justify-content: flex-start; }
   .analysis-section > header { align-items: flex-start; flex-direction: column; }
 }
 </style>

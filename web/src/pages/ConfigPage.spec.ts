@@ -47,6 +47,68 @@ function teamAdminStore(): Pinia {
   return pinia
 }
 
+describe('reasoning parameter controls', () => {
+  beforeEach(() => vi.restoreAllMocks())
+  it.each(['official', 'studio_platform'])('saves arbitrary upstream values for %s models', async scope => {
+    baseMocks()
+    const pinia = createPinia()
+    useAuthStore(pinia).$patch({ enabled: true, user: { id: 1, username: 'admin', is_super_admin: true, nickname: '', avatar_url: '' } })
+    vi.spyOn(api, 'studioPlatform').mockResolvedValue({ code: 0, message: '', data: { connected: true, key_management_url: '' } })
+    vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 31, name: '推理模型', task_type: 7, task_types: [7],
+      scope, model: 'configured', api_protocol: 'openai_compatible', base_url: 'https://upstream.invalid', api_key: 'fixture',
+      is_active: true, concurrency: 1, thinking: 'enabled', reasoning_effort: null,
+      pricing: { type: 'text', input_price_per_1m: 1, output_price_per_1m: 2 } }] } } as never)
+    const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+    const wrapper = mountPage(pinia)
+    await flushPromises()
+    await (scope === 'studio_platform' ? wrapper.get('.config-actions button') : wrapper.get('[aria-label="编辑配置"]')).trigger('click')
+    const thinking = wrapper.get('input[name="model-thinking"]')
+    const effort = wrapper.get('input[name="model-reasoning-effort"]')
+    expect(thinking.element).toHaveValue('enabled')
+    expect(thinking.attributes('list')).toBeTruthy()
+    await thinking.setValue('low')
+    await effort.setValue('provider-effort')
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(31, expect.objectContaining({ thinking: 'low', reasoning_effort: 'provider-effort' }))
+    if (scope === 'studio_platform') expect(Object.keys(update.mock.calls[0]![1]).sort()).toEqual(['pricing', 'reasoning_effort', 'thinking'])
+    wrapper.unmount()
+  })
+})
+
+it.each([
+  { theme: 'light', jsonOutput: false, strict: true },
+  { theme: 'dark', jsonOutput: true, strict: false },
+])('uses one structured output switch for JSON mode in $theme', async ({ theme, strict, jsonOutput }) => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 32, name: '结构化模型', task_type: 7, task_types: [7],
+    scope: 'team', team_id: 9, model: 'structured', api_protocol: 'openai_compatible', base_url: 'https://upstream.invalid', api_key: 'fixture',
+    is_active: true, concurrency: 1, supports_json_output: jsonOutput, supports_strict_output: strict,
+    pricing: { type: 'text', input_price_per_1m: 1, output_price_per_1m: 2 } }] } } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(teamAdminStore())
+  try {
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑配置"]').trigger('click')
+    const form = wrapper.get('form.model-modal')
+    const switches = form.findAll('input[aria-label="结构化输出"]')
+    expect(switches).toHaveLength(1)
+    expect(switches[0]!.element).toHaveProperty('checked', jsonOutput)
+    expect(form.findAll('.json-capability-field')).toHaveLength(1)
+    expect(form.text()).not.toContain('支持严格结构化输出（可选能力标记）')
+    expect(form.text()).not.toContain('json_object')
+    await switches[0]!.setValue(!jsonOutput)
+    await form.trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(32, expect.objectContaining({ supports_json_output: !jsonOutput }))
+    expect(update.mock.calls[0]![1]).not.toHaveProperty('supports_strict_output')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})
+
 it('keeps platform connection unavailable without a super administrator session', async () => {
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
@@ -541,7 +603,7 @@ it('enables higher output tiers from server presets while preserving existing co
   wrapper.unmount()
 })
 
-it('模型配置表单统一使用共享选择器组件，不再渲染原生下拉框', async () => {
+it('固定选项使用共享选择器，思考参数支持自定义输入', async () => {
   baseMocks()
   vi.mocked(api.enums).mockResolvedValue({
     data: {
@@ -570,7 +632,8 @@ it('模型配置表单统一使用共享选择器组件，不再渲染原生下�
 
   await openModal('llm')
   expect(wrapper.findAll('form.model-modal select')).toHaveLength(0)
-  expect(selectorLabels()).toContain('思考模式')
+  expect(wrapper.get('input[name="model-thinking"]').attributes('list')).toBeTruthy()
+  expect(wrapper.get('input[name="model-reasoning-effort"]').attributes('list')).toBeTruthy()
 
   await closeModal()
   await openModal('image')

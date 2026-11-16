@@ -61,15 +61,17 @@ class AiModelConfig(AbstractBaseModel):
         description="是否支持 response_format=json_object",
     )
     supports_tool_calls = fields.BooleanField(default=False, description="是否支持多轮工具调用")
+    supports_strict_output = fields.BooleanField(default=False, description="是否支持严格 JSON Schema 输出")
     max_context_characters = fields.IntField(
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",
     )
     thinking = fields.CharField(
-        max_length=16,
+        max_length=64,
         null=True,
-        description="思考模式：enabled 开启 / disabled 关闭（火山方舟 thinking 参数），留空按模型默认",
+        description="thinking 参数：enabled/disabled 使用 type 对象，其他值使用顶层字符串；空值不指定",
     )
+    reasoning_effort = fields.CharField(max_length=64, null=True, description='上游 reasoning_effort 值；空值不指定')
     max_tokens = fields.IntField(
         null=True,
         description="单次 LLM 请求最大输出 token 数；留空按模型默认",

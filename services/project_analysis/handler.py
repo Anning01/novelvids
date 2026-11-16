@@ -194,12 +194,15 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         if not material.strip():
             raise ValueError(localized_message('项目没有可分析的书稿内容'))
 
-        from services.creation_agent.skill_execution import current_execution, require_agent
+        from services.creation_agent.skill_execution import current_execution, require_workflow_model
         execution = current_execution.get()
         if execution:
-            llm_config, _ = await require_agent(request_params.get('team_id'), request_params['assistant_model_config_id'])
-            analysis = await execution.generate('story', {'name': novel.name, 'manuscript': material,
-                'chapter_count': chapter_count}, BookAnalysis)
+            llm_config, _ = await require_workflow_model(request_params)
+            facts = {'name': novel.name, 'manuscript': material, 'chapter_count': chapter_count}
+            if request_params.get('output_contract'):
+                analysis = await execution.generate_strict(facts)
+            else:
+                analysis = (await execution.generate('story', facts, BookAnalysis)).model_dump()
             token_usage = {}
         else:
             llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
@@ -218,11 +221,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 response_model=BookAnalysis,
                 prompt_language=prompt_language,
                 supports_json_output=llm_config.supports_json_output,
+                thinking=llm_config.thinking,
+                reasoning_effort=llm_config.reasoning_effort,
             )
             token_usage = completion_usage(completion)
+            analysis = analysis.model_dump()
 
         result = {
-            **analysis.model_dump(), 'analysis_completed': False,
+            **analysis, 'analysis_completed': False,
             'cover_status': 'ready' if novel.cover else 'not_requested', 'chapter_count': chapter_count, 'cover': novel.cover,
             'token_usage': token_usage, 'llm_config_id': llm_config.id, 'llm_model': llm_config.model,
         }
@@ -234,8 +240,10 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             from services.creation_objects import project_write
             async with project_write(novel_id):
                 novel.total_chapters = await Chapter.filter(novel_id=novel_id).count()
-                novel.tags = analysis.book_types
-                novel.story_outline = analysis.story_outline
+                if execution:
+                    await execution.before_request()
+                novel.tags = analysis['book_types']
+                novel.story_outline = analysis['story_outline']
                 await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])
             return {"novel_id": novel_id}
 
@@ -253,7 +261,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             return result
         if not request_params.get('background_media'):
             return await self._generate_cover(novel, request_params, prompt_language, task_id,
-                outline=analysis.story_outline, book_types=analysis.book_types, result=result, stopped=stopped)
+                outline=analysis['story_outline'], book_types=analysis['book_types'], result=result, stopped=stopped)
         from uuid import uuid5, UUID
         from services.creation_agent.submissions import submission
         token = submission.set({'submission_id': str(uuid5(UUID(str(task_id)), 'project-cover')),

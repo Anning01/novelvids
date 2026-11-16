@@ -77,6 +77,8 @@ async def _initialize_database_schema() -> None:
     await Tortoise.init(config=tortoise_config)
     from services.schema_compat import ensure_billing_integration_schema
     await ensure_billing_integration_schema()
+    from services.schema_compat import ensure_model_reasoning_schema
+    await ensure_model_reasoning_schema()
     # PostgreSQL emits column comments for existing tables during safe schema
     # generation. Add fields referenced by the current models first, otherwise
     # startup fails before the compatibility migrations can run.
@@ -84,6 +86,8 @@ async def _initialize_database_schema() -> None:
     await ensure_remake_schema(include_indexes=include_compat_indexes)
     await ensure_voice_reference_schema(include_indexes=include_compat_indexes)
     await ensure_creation_agent_schema()
+    from services.schema_compat import ensure_text_task_schema
+    await ensure_text_task_schema()
     from services.schema_compat import ensure_resource_library_schema
     await ensure_resource_library_schema()
     # Ownership columns must exist before generating the scoped project-name index.

@@ -207,11 +207,10 @@ class RemakeVideoAnalysisGateway:
         }
         if bool(getattr(self.config, "supports_json_output", False)):
             request["response_format"] = {"type": "json_object"}
-        thinking = getattr(self.config, "thinking", None)
-        if thinking in {"enabled", "disabled"}:
-            request["extra_body"] = {"thinking": {"type": thinking}}
-            if thinking == "enabled":
-                request["reasoning_effort"] = "minimal"
+        from utils.model_reasoning import reasoning_parameters
+        options = reasoning_parameters(getattr(self.config, 'thinking', None), getattr(self.config, 'reasoning_effort', None))
+        if options:
+            request['extra_body'] = options
         from utils.model_limits import DEFAULT_OUTPUT_TOKENS
         output_limit = getattr(self.config, "max_tokens", None)
         request["max_tokens"] = output_limit if output_limit is not None else DEFAULT_OUTPUT_TOKENS

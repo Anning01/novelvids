@@ -18,7 +18,7 @@ from utils.enums import AiTaskTypeEnum
 WORKFLOW_VERSION = "agent-skills-v1"
 
 
-async def require_agent(team_id=None, model_id=None):
+async def require_agent(team_id=None, model_id=None, *, strict_output=False):
     from services.creation_agent.sessions import agent_configuration
     from services.model_resolution import resolve_scope_configs
     from config import settings
@@ -27,16 +27,21 @@ async def require_agent(team_id=None, model_id=None):
     models = await resolve_scope_configs(
         AiTaskTypeEnum.creation_agent.value,
         team_id if settings.AUTH_ENABLED else None,
-        capability_filter=lambda config: config.supports_tool_calls,
+        capability_filter=lambda config: config.supports_json_output if strict_output else config.supports_tool_calls,
     )
     chosen = next(
         (item for item in models if model_id is None or item.id == model_id), None
     )
     if chosen is None:
         raise HTTPException(
-            422, localized_message("请配置已启用且支持工具调用的创作助手模型")
+            422, localized_message("请选择已启用且支持 JSON 输出的模型" if strict_output else "请配置已启用且支持工具调用的创作助手模型")
         )
     return chosen, limits
+
+
+async def require_workflow_model(params):
+    return await require_agent(params.get('team_id'), params.get('assistant_model_config_id'),
+                               strict_output=bool(params.get('output_contract')))
 
 
 async def prepare_workflow(params: dict) -> dict:
@@ -121,6 +126,10 @@ class SkillExecution:
     message: AgentMessage
     before_request: Callable[[], Awaitable[object]]
     strict_streaming: bool = False
+
+    async def generate_strict(self, facts: dict) -> dict:
+        from services.creation_agent.strict_text import generate
+        return await generate(self, facts)
 
     @property
     def snapshot(self):

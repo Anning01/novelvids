@@ -125,6 +125,9 @@ async def initialize_db():
 async def clear_db():
     """Clear data between tests but keep schema."""
     from models.studio_call import StudioCall
+    from models.user_skill import UserSkill, TaskSkillPreference
+    await TaskSkillPreference.all().delete()
+    await UserSkill.all().delete()
     from models.work_sync import WorkSyncObject, WorkSyncRequest
     await WorkSyncRequest.all().delete()
     await WorkSyncObject.all().delete()
@@ -306,5 +309,5 @@ async def configured_creation_agent():
     from models.config import AiModelConfig
     await AgentSettings.update_or_create(id=1, defaults={'configuration': {'enabled': True}})
     return await AiModelConfig.create(name='production-assistant', model='mock-model',
-        task_type=7, supports_tool_calls=True, supports_json_output=True,
+        task_type=7, supports_tool_calls=True, supports_json_output=True, supports_strict_output=True,
         base_url='https://mock.api.com/v1', api_key='test-agent-key', is_active=True)

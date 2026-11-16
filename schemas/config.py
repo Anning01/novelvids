@@ -37,15 +37,17 @@ class AiModelConfigProperties(BaseModel):
         description="是否支持 response_format=json_object",
     )
     supports_tool_calls: bool = Field(False, description="是否支持多轮工具调用")
+    supports_strict_output: bool = Field(False, description="是否支持 response_format=json_schema 且 strict=true")
     max_context_characters: Optional[int] = Field(
         None,
         description="四层业务消息允许的最大总字符数",
         ge=1,
     )
-    thinking: Optional[Literal["enabled", "disabled"]] = Field(
+    thinking: Optional[str] = Field(
         None,
-        description="思考模式：enabled 开启 / disabled 关闭（火山方舟 thinking 参数）",
+        max_length=64, description="thinking：enabled/disabled 使用 type 对象，其他值原样发送为顶层字符串",
     )
+    reasoning_effort: Optional[str] = Field(None, max_length=64, description='原样传给上游，不限制模型专属档位')
     max_tokens: Optional[int] = Field(
         None,
         description="单次 LLM 请求最大输出 token 数",

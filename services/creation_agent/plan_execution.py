@@ -117,7 +117,7 @@ class CreationPlanRunner:
                     task = await AiTask.get(id=outcome['task_id'])
                     children.append(str(task.id))
                     if task.status == 3:
-                        if step.id in groups:
+                        if step.id in groups and not task.request_params.get('output_contract'):
                             from services.creation_agent.plan_sources import fingerprint
                             verified = await AgentOperation.get_or_none(task=task, key='coalesced:validated', state='completed')
                             if verified is None or verified.result.get('revision') != fingerprint(step.model_dump())[:20]:
@@ -187,7 +187,8 @@ class CreationPlanRunner:
             kept = await existing_result(step, target_id, execution)
             if kept is not None:
                 from services.creation_agent.creative_checks import check_preserved_result
-                await check_preserved_result(execution, step, target_id, kept)
+                if step.operation not in {'assets', 'storyboard'}:
+                    await check_preserved_result(execution, step, target_id, kept)
                 result = {'kept': kept}
             else:
                 # Targets are resolved exclusively from the confirmed snapshot

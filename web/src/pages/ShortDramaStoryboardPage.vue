@@ -3,6 +3,7 @@ import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { provide } from 'vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
+import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
@@ -142,6 +143,7 @@ const terminalTaskStatuses = new Set([
 
 const route = useRoute()
 const router = useRouter()
+const storyboardSkillId = ref<number>()
 const stageModelId = ref('')
 const sheetModelId = ref('')
 const generateBlockingMaps = ref(false)
@@ -1590,7 +1592,7 @@ async function generateChapterStoryboard(chapterId: number, replaceExisting = fa
   setChapterGenerating(chapterId, true)
   setGenerationError(chapterId)
   try {
-    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value)).data
+    const task = (await api.generateScenes(chapterId, replaceExisting, Number(stageModelId.value), project.value?.storyboard_enabled ? Number(sheetModelId.value) : undefined, generateBlockingMaps.value, storyboardSkillId.value)).data
     // 后端保证同章节唯一进行中任务：若已有任务在跑，这里拿到的就是同一任务。
     persistStoryboardTask(chapterId, task.id)
     await pollStoryboardTask(chapterId, task.id)
@@ -2632,6 +2634,8 @@ onBeforeUnmount(() => {
             <AppButton class="batch-skills-optimize" variant="secondary" size="sm" :loading="batchPromptProgress?.running"
               :disabled="loading || generatingStoryboard || waitingAnalysis || !selectedVideoModelConfig || !pendingModelPrompts.length || Boolean(promptOptimizations.size)"
               @click="optimizeChapterPrompts"><WandSparkles v-if="!batchPromptProgress?.running" :size="15" aria-hidden="true" />{{ tr('一键 Skills 优化') }}</AppButton>
+            <TaskSkillPicker v-if="isAgent && scenes.length" v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker"
+              :disabled="generatingStoryboard || waitingAnalysis" />
             <StageModelSelect v-if="isAgent && scenes.length" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && scenes.length" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" />
             <AppButton v-if="isAgent && scenes.length" :disabled="missingGenerationOptions && !canReconnectStoryboard" variant="secondary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="regenerateStoryboard"><Sparkles v-if="!generatingStoryboard" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : canReconnectStoryboard ? tr('重新连接') : scenes.length ? tr('重新生成分镜') : tr('生成本章分镜') }}</AppButton>
@@ -2640,7 +2644,6 @@ onBeforeUnmount(() => {
             <AppButton variant="primary" size="sm" :loading="batchGeneratingVideos" @click="openBatchVideoDialog"><Clapperboard v-if="!batchGeneratingVideos" :size="15" />{{ batchGeneratingVideos ? tr('批量生成中') : tr('批量生视频') }}</AppButton>
           </div>
         </header>
-
         <div v-if="batchPromptProgress" class="batch-skills-progress">
           <progress v-if="batchPromptProgress.running" :value="batchPromptProgress.finished" :max="batchPromptProgress.total" :aria-label="tr('Skills 优化进度')" />
           <span>{{ batchPromptProgress.error || (batchPromptProgress.running ? tr('Skills 优化进度：{p0}/{p1} 镜', { p0: batchPromptProgress.finished, p1: batchPromptProgress.total }) : tr('Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜', { p0: batchPromptProgress.finished - batchPromptProgress.failed, p1: batchPromptProgress.failed })) }}</span>
@@ -2648,10 +2651,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="loading || generatingStoryboard || waitingAnalysis" class="storyboard-state"><LoaderCircle class="storyboard-state__spinner" :size="28" /><strong>{{ generatingStoryboard ? tr('Agent 正在生成第 {p0} 集的全部分镜', { p0: activeChapter?.number || '-' }) : waitingAnalysis ? tr('项目分析尚未完成') : tr('正在读取第 {p0} 集分镜', { p0: activeChapter?.number || '-' }) }}</strong><p>{{ generatingStoryboard ? tr('仅处理当前选中的这一集，不会自动生成其他集。') : waitingAnalysis ? tr('AI 正在理解书稿并生成封面，完成后将自动生成本集分镜，请稍候…') : tr('正在准备本集章节、资产和视频信息。') }}</p></div>
-        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+        <div v-else-if="generationError && !scenes.length" class="storyboard-state is-error"><Clapperboard :size="28" /><strong>{{ canReconnectStoryboard ? tr('生成进度暂时断开') : tr('暂时无法生成分镜') }}</strong><p>{{ generationError }}</p><div class="stage-actions"><TaskSkillPicker v-if="isAgent && !canReconnectStoryboard" v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker" :disabled="generatingStoryboard || waitingAnalysis" /><StageModelSelect v-if="isAgent && !canReconnectStoryboard" v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-if="isAgent && !canReconnectStoryboard" v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton variant="primary" size="sm" :disabled="isAgent && !canReconnectStoryboard && missingGenerationOptions" @click="isAgent ? retryStoryboard() : createManualScene()">{{ canReconnectStoryboard ? tr('重新连接') : tr('重试') }}</AppButton></div><AppButton v-if="isAgent && !canReconnectStoryboard" variant="ghost" size="sm" @click="returnToScript">{{ tr('返回剧本') }}</AppButton></div>
         <div v-else-if="!isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('从第一个分镜开始，逐步搭建你的镜头列表。') }}</p><AppButton variant="primary" size="sm" :loading="creatingManualScene" @click="createManualScene()"><Plus v-if="!creatingManualScene" :size="15" />{{ creatingManualScene ? tr('创建中') : tr('创建第一个分镜') }}</AppButton></div>
-        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
+        <div v-else-if="isAgent && !scenes.length" class="storyboard-state"><Clapperboard :size="28" /><strong>{{ tr('还没有分镜') }}</strong><p>{{ tr('点击下方按钮，AI 将生成本集全部分镜。') }}</p><div class="stage-actions"><TaskSkillPicker v-model="storyboardSkillId" task="storyboard" class="storyboard-skill-picker" :disabled="generatingStoryboard || waitingAnalysis" /><StageModelSelect v-model="stageModelId" :project-id="projectId" stage="storyboard" :label="tr('选择分镜模型')" :disabled="generatingStoryboard || waitingAnalysis" />
             <StoryboardGenerationOptions v-model="sheetModelId" v-model:blocking-maps="generateBlockingMaps" :enabled="Boolean(project?.storyboard_enabled)" :disabled="updatingSheetOptions || generatingStoryboard || waitingAnalysis || submittingSheets" @toggle="toggleSheets" /><AppButton :disabled="missingGenerationOptions" variant="primary" size="sm" :loading="generatingStoryboard || waitingAnalysis" @click="waitForAnalysisThenGenerate(activeChapterId)"><Sparkles v-if="!generatingStoryboard && !waitingAnalysis" :size="15" />{{ generatingStoryboard ? tr('Agent 生成中') : waitingAnalysis ? tr('等待项目分析') : tr('生成全部分镜') }}</AppButton></div></div>
         <div v-else-if="workspaceView === 'workflow'" class="workflow-canvas-shell">
           <CreativeCanvas :key="`workflow-${activeChapterId}`" :novel-id="projectId" :chapter-id="activeChapterId" :aspect-ratio="project?.aspectRatio || '9:16'" :resolution="project?.resolution || '720p'" />
@@ -2924,7 +2927,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.stage-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; max-inline-size: 100%; }
+.storyboard-skill-picker { width: auto; max-inline-size: 100%; text-align: start; }
 .prompt-panel > header .prompt-header-actions { display:flex; flex:0 0 auto; align-items:center; gap:6px; }
 .model-optimized-prompt { min-width: 0; color: var(--app-text); }
 .model-optimized-prompt summary { padding: 8px 0; cursor: pointer; font-size: 13px; }

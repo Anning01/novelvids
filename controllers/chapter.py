@@ -97,14 +97,14 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
 
     async def extract(
         self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None,
-        *, assistant_model_config_id: int | None = None,
+        *, assistant_model_config_id: int | None = None, skill_id: int | None = None,
     ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
 
         # 1. 获取提取任务的启用配置（团队自定义优先，官方兜底）
         from services.creation_agent.skill_execution import require_agent
-        config, _ = await require_agent(team_id, assistant_model_config_id)
+        config, _ = await require_agent(team_id, assistant_model_config_id, strict_output=True)
         prompt_language = await general_config_controller.get_prompt_language()
 
         # 2. 先清理超时异常任务，再检查是否有活跃任务
@@ -130,8 +130,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
             request_params["team_id"] = team_id
         if user_id is not None:
             request_params["user_id"] = user_id
-        from services.creation_agent.skill_execution import prepare_workflow
-        request_params = await prepare_workflow(request_params)
+        from services.creation_agent.strict_text import prepare_text_workflow
+        request_params = await prepare_text_workflow(request_params, 'assets', skill_id)
         from services.creation_objects import project_write
         async with project_write(chapter.novel_id) as connection:
             from services.creation_agent.submissions import previous_submission, bind_submission
@@ -142,6 +142,9 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
                 if existing.request_params.get('chapter_id') == chapter_id:
                     if assistant_model_config_id is not None and existing.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
+                    previous_method = existing.request_params.get('creative_method')
+                    if (previous_method and previous_method != request_params['creative_method']) or (not previous_method and request_params['creative_method']['id'] != 0):
+                        raise HTTPException(409, localized_message('已有任务正在运行，请等待完成后再切换技能'))
                     return await bind_submission(existing, {**request_params, "team_id": team_id, "user_id": user_id})
             return await ai_task_executor.submit(AiTaskTypeEnum.extraction, request_params, db_connection=connection)
 

@@ -81,49 +81,40 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
     seen = []
     storyboard_prompt = ""
 
-    async def generate(self, skill, facts, output_type, **kwargs):
-        nonlocal storyboard_prompt
-        seen.append((skill, self.language, self.snapshot.revision))
+    async def generate_strict(self, facts):
+        nonlocal visual, storyboard_prompt
         assert self.language == language
-        if skill == "story":
+        operation = self.params['output_contract']['name']
+        seen.append((operation, language, self.params['creative_method']['revision']))
+        if operation == 'story':
             if screenplay_only:
-                assert first.screenplay in facts['manuscript']
-                assert second.screenplay in facts['manuscript']
-            payload = {
-                "book_types": ["Drama"],
-                "story_outline": words,
-                "key_characters": [],
-            }
-        elif skill == "assets":
-            if screenplay_only:
-                assert any(chapter.screenplay in str(facts) for chapter in (first, second))
-            payload = {
-                "persons": [
-                    {"name": name, "description": name, "base_traits": visual}
-                    for name in ("Alex Chen", "Sam Lee")
-                ],
-                "scenes": [],
-                "items": [],
-            }
-        elif skill == "storyboard":
-            shot = _shot().model_dump()
-            shot.update(
-                reference_only_types=["人物", "场景", "物品"],
-                visual_prose="@{Alex Chen} meets @{Sam Lee}.",
-                actions=["0s-4s: @{Alex Chen} meets @{Sam Lee}."],
-                dialogue=[f"0s-1s: @{{Alex Chen}}: {words}", f"2s-3s: @{{Sam Lee}}: {words}"],
-                narration=[f"3s-4s: {narrator}: {words}"],
-            )
-            storyboard_prompt = format_storyboard_prompt(SoraScenePromptConfig.model_validate(shot), language,
-                entities=[SceneEntity.model_validate(value) for value in facts['entities']],
-                strategy=storyboard_strategy_factory.resolve('narration'))
-            shot['prompt'] = None
-            payload = {"shots": [shot]}
-        else:
-            raise AssertionError(f"Unexpected extra creative call: {skill}")
-        return output_type.model_validate(payload)
+                assert first.screenplay in facts['manuscript'] and second.screenplay in facts['manuscript']
+            return {'book_types': ['Drama'], 'story_outline': words, 'key_characters': []}
+        if operation == 'assets':
+            from services.extraction.strict_result import extraction_result
+            fields = self.params['output_contract']['rendering']['asset_specifications']['person']['fields']
+            payload = {'persons': [{'name': name, 'aliases': [], 'label': '人物', 'description': name,
+                'design': 'A person in navy cotton clothes.', 'visual_fields': {key: 'Stable visual design' for key in fields},
+                'variant': None} for name in ('Alex Chen', 'Sam Lee')], 'scenes': [], 'items': []}
+            visual = extraction_result(payload, self.params['output_contract']['rendering']).persons[0].base_traits
+            return payload
+        if operation == 'storyboard':
+            from services.storyboard.strict_result import storyboard_result
+            shot = _shot().model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
+            shot.update(duration=4, visible_asset_names=['Alex Chen', 'Sam Lee'],
+                visual_prose='@{Alex Chen} meets @{Sam Lee}.',
+                actions=[{'start': 0, 'end': 4, 'text': '@{Alex Chen} meets @{Sam Lee}.'}],
+                dialogue=[{'start': 0, 'end': 1, 'speaker': 'Alex Chen', 'delivery': '', 'text': words},
+                          {'start': 2, 'end': 3, 'speaker': 'Sam Lee', 'delivery': '', 'text': words}],
+                narration=[{'start': 3, 'end': 4, 'speaker': narrator, 'delivery': '', 'text': words}])
+            payload = {'shots': [shot]}
+            storyboard_prompt = storyboard_result(payload, language,
+                [SceneEntity.model_validate(value) for value in facts['entities']], storyboard_strategy_factory.resolve('narration')).shots[0].prompt
+            return payload
+        raise AssertionError(f'Unexpected generation: {operation}')
 
-    monkeypatch.setattr(SkillExecution, "generate", generate)
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate_strict)
+    monkeypatch.setattr(SkillExecution, 'generate', AsyncMock(side_effect=AssertionError('Unexpected legacy text generation')))
     image_calls = AsyncMock(
         return_value=[GeneratedImage(url="https://image.invalid/result.png")]
     )
@@ -215,4 +206,5 @@ async def test_two_chapters_preserve_assets_prompts_and_voice_mapping(
     assert provider.submit.await_count == 2
     assert image_calls.await_count == 2
     assert all(call.kwargs["prompt"] == visual for call in image_calls.call_args_list)
-    assert len({revision for _, _, revision in seen}) == 1
+    for operation in ('story', 'assets', 'storyboard'):
+        assert len({revision for task, _, revision in seen if task == operation}) == 1

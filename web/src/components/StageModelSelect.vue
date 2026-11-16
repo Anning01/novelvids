@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import AppSelect from './AppSelect.vue'
 import AppButton from './AppButton.vue'
-import { agentApi } from '@/features/creation-agent/api'
+import { skillsApi } from '@/features/creation-agent/skillsApi'
 import { tr } from '@/i18n'
 
 const props = defineProps<{ projectId: number; stage: 'assets' | 'storyboard'; label: string; disabled: boolean }>()
@@ -13,7 +13,7 @@ const loading = ref(false)
 const retry = ref(0)
 const preferenceKey = () => `novelvids:model:${props.projectId}:${props.stage}`
 
-watch([() => props.projectId, retry], async ([id], _, onCleanup) => {
+watch([() => props.projectId, retry], async (_, _previous, onCleanup) => {
   let current = true
   onCleanup(() => { current = false })
   loading.value = true
@@ -21,9 +21,9 @@ watch([() => props.projectId, retry], async ([id], _, onCleanup) => {
   options.value = []
   selected.value = ''
   try {
-    const { data } = await agentApi.capabilities(id)
+    const { data } = await skillsApi.models()
     if (!current) return
-    options.value = data.models.map(model => ({value: String(model.id), label: model.name || model.model}))
+    options.value = data.map(model => ({value: String(model.id), label: model.name || model.model}))
     const saved = sessionStorage.getItem(preferenceKey())
     selected.value = options.value.find(option => option.value === saved)?.value ?? ''
   } catch (caught) {
@@ -41,7 +41,7 @@ function choose(value: string) {
 
 <template>
   <AppSelect :model-value="selected" :ariaLabel="label" density="compact"
-    :options="[{value: '', label: loading ? tr('正在读取模型…') : options.length ? label : tr('无可用模型')}, ...options]"
+    :options="[{value: '', label: loading ? tr('正在读取模型…') : options.length ? label : tr('暂无 JSON 输出模型')}, ...options]"
     :disabled="disabled || !options.length" @update:model-value="choose" />
   <template v-if="error">
     <small role="alert">{{ error }}</small>

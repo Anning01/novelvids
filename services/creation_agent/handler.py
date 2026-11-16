@@ -60,8 +60,8 @@ def configured_model(config, limits: AgentConfiguration, *, structured_output=Tr
     extra_body = {}
     if structured_output and getattr(config, 'supports_json_output', False):
         extra_body['response_format'] = {'type': 'json_object'}
-    if getattr(config, 'thinking', None) in ('enabled', 'disabled'):
-        extra_body['thinking'] = {'type': config.thinking}
+    from utils.model_reasoning import reasoning_parameters
+    extra_body.update(reasoning_parameters(getattr(config, 'thinking', None), getattr(config, 'reasoning_effort', None)))
     from pydantic_ai.profiles.openai import OpenAIModelProfile
     provider = OpenAIProvider(openai_client=client)
     # Reasoning endpoints can reject tool_choice=required; output validation stays in the Agent.

@@ -1,6 +1,6 @@
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
@@ -123,6 +123,22 @@ describe('分镜页面视频模型偏好', () => {
       expect(fourth.get('p').text()).toBe('H3 喂水')
       expect(fifth.get('p').text()).toBe('Seedance 接窝头')
       expect(fourth.find('button').exists()).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
+  it.each([false, true])('分镜技能紧邻生成模型，顶部不再单独占行（已有分镜：%s）', async hasScenes => {
+    vi.mocked(api.videoGenerationModels).mockResolvedValue({ code: 0, message: '', data: [] })
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({ code: 0, message: '', data: {
+      chapter, assets: [], videos: {}, scenes: hasScenes ? [{ id: 4, sequence: 1, duration: 5, prompt: '雨夜渡口' }] : [],
+    } } as never)
+    const wrapper = await mountPage()
+    try {
+      await flushPromises()
+      const actions = wrapper.get(hasScenes ? '.chapter-actions' : '.storyboard-state .stage-actions')
+      const picker = actions.get('.storyboard-skill-picker')
+      expect(wrapper.find('.chapter-toolbar > .task-skill-picker').exists()).toBe(false)
+      expect(new DOMWrapper(picker.element.nextElementSibling!).find('button[aria-label="选择分镜模型"]').exists()).toBe(true)
+      expect(wrapper.findAll('.storyboard-skill-picker')).toHaveLength(1)
     } finally { wrapper.unmount() }
   })
 

@@ -4,6 +4,7 @@ import { nextTick } from 'vue'
 import { parse } from '@vue/compiler-sfc'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { agentApi } from '@/features/creation-agent/api'
+import { skillsApi } from '@/features/creation-agent/skillsApi'
 import { api } from '@/api'
 import AppButton from '@/components/AppButton.vue'
 import AssetBatchGenerateDialog from '@/components/AssetBatchGenerateDialog.vue'
@@ -54,6 +55,7 @@ const chapter = {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  vi.spyOn(skillsApi, 'models').mockResolvedValue({ code: 0, message: '', data: [{ id: 22, name: 'Asset text', model: 'b' }] })
   vi.spyOn(agentApi, 'capabilities').mockResolvedValue({data:{models:[{id:22,name:'Asset text',model:'b'}]}} as never)
   delete routeQuery.asset
   delete routeQuery.variant
@@ -525,6 +527,6 @@ it('submits extraction with its own selected model', async () => {
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '提取本章资产')!.trigger('click')
   await flushPromises()
-  expect(api.extract).toHaveBeenCalledWith(chapter.id, undefined, 22)
+  expect(api.extract).toHaveBeenCalledWith(chapter.id, undefined, 22, undefined)
   wrapper.unmount()
 })

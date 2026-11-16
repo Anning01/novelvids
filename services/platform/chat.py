@@ -108,9 +108,12 @@ async def complete(ctx, body, key):
             params["max_tokens"] = config.max_tokens
         if body.stream:
             params["stream_options"] = {**(body.stream_options or {}), "include_usage":True}
+        from utils.model_reasoning import reasoning_parameters
+        for name, value in reasoning_parameters(config.thinking, config.reasoning_effort).items():
+            params.setdefault(name, value)
         extra = {name: params.pop(name) for name in (body.model_extra or {}) if name in params}
-        if body.thinking is not None:
-            extra["thinking"] = params.pop("thinking")
+        if 'thinking' in params:
+            extra['thinking'] = params.pop('thinking')
         if extra:
             params["extra_body"] = extra
         async with asyncio.timeout_at(deadline):

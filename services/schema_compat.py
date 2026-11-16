@@ -54,6 +54,20 @@ async def ensure_resource_library_schema() -> None:
     await connection.execute_script(generator._get_table_sql(ResourcePlacement, safe=True)['table_creation_string'])
 
 
+async def ensure_text_task_schema() -> None:
+    from models.user_skill import UserSkill, TaskSkillPreference
+    connection = Tortoise.get_connection('default')
+    if connection.capabilities.dialect == 'sqlite':
+        columns = await connection.execute_query_dict('PRAGMA table_info(ai_model_configs)')
+        if columns and 'supports_strict_output' not in {row['name'] for row in columns}:
+            await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN supports_strict_output INT NOT NULL DEFAULT 0;')
+    else:
+        await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_strict_output BOOL NOT NULL DEFAULT FALSE;')
+    generator = connection.schema_generator(connection)
+    for model in (UserSkill, TaskSkillPreference):
+        await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])
+
+
 async def ensure_video_editor_schema() -> None:
     from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
     from models.finished_episode import FinishedEpisodePublication
@@ -633,3 +647,26 @@ async def ensure_chapter_screenplay_schema() -> None:
             for chapter_id, (original, draft) in history.items():
                 await Chapter.filter(id=chapter_id, screenplay=None, content=draft).using_db(db).update(
                     content=original, screenplay=draft)
+
+
+async def ensure_model_reasoning_schema() -> None:
+    connection = Tortoise.get_connection('default')
+    if connection.capabilities.dialect == 'sqlite':
+        columns = await connection.execute_query_dict('PRAGMA table_info(ai_model_configs)')
+        if not columns:
+            return
+        names = {column['name'] for column in columns}
+        for name in ('thinking', 'reasoning_effort'):
+            if name not in names:
+                await connection.execute_script(f'ALTER TABLE ai_model_configs ADD COLUMN {name} VARCHAR(64);')
+    else:
+        await connection.execute_script(
+            'ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS thinking VARCHAR(64);'
+            'ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS reasoning_effort VARCHAR(64);')
+        columns = await connection.execute_query_dict(
+            "SELECT character_maximum_length FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'ai_model_configs' "
+            "AND column_name = 'thinking' AND data_type = 'character varying'")
+        width = columns[0]['character_maximum_length'] if columns else None
+        if width is not None and width < 64:
+            await connection.execute_script('ALTER TABLE ai_model_configs ALTER COLUMN thinking TYPE VARCHAR(64);')

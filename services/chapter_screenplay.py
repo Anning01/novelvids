@@ -7,7 +7,8 @@ from models.chapter import Chapter
 from services.ai_task_executor import BaseTaskHandler, ai_task_executor
 from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.plan_sources import fingerprint
-from services.creation_agent.skill_execution import current_execution, prepare_workflow
+from services.creation_agent.skill_execution import current_execution
+from services.creation_agent.strict_text import prepare_text_workflow
 from services.creation_objects import ACTIVE_TASK_STATUSES, project_write
 from utils.enums import AiTaskTypeEnum
 from utils.messages import localized_message
@@ -17,14 +18,14 @@ class EpisodeScript(BaseModel):
     screenplay: str = Field(min_length=1, description="可直接交给演员和制作团队的完整分场导演剧本")
 
 
-async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None, *, assistant_model_config_id: int | None = None):
+async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None, *, assistant_model_config_id: int | None = None, skill_id: int | None = None):
     chapter = await Chapter.get_or_none(id=chapter_id)
     if chapter is None:
         raise HTTPException(404, localized_message("章节不存在"))
     params = {"novel_id": chapter.novel_id, "chapter_id": chapter_id, "operation": "screenplay",
               "assistant_model_config_id": assistant_model_config_id,
               "team_id": ctx.team_id, "user_id": ctx.user.id if ctx.user else None}
-    params = await prepare_workflow(params)
+    params = await prepare_text_workflow(params, 'screenplay', skill_id)
     async with project_write(chapter.novel_id) as db:
         await chapter.refresh_from_db(using_db=db)
         if not (chapter.content or "").strip():
@@ -37,6 +38,8 @@ async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = N
             if task.request_params.get("chapter_id") == chapter_id:
                 if assistant_model_config_id is not None and task.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                     raise HTTPException(409, localized_message("已有改编任务正在运行，请等待完成后再切换模型"))
+                if task.request_params.get('creative_method') != params['creative_method']:
+                    raise HTTPException(409, localized_message('已有任务正在运行，请等待完成后再切换技能'))
                 return task
         params["episode_pacing"] = chapter.episode_pacing or {"preset": "smart"}
         params["source_version"] = fingerprint([chapter.name, chapter.content])
@@ -60,18 +63,21 @@ class ScreenplayHandler(BaseTaskHandler):
         if receipt:
             return receipt.result
         verify_source()
-        draft = await execution.generate("screenplay", {"episode_number": chapter.number,
+        facts = {"episode_number": chapter.number,
             "episode_name": chapter.name, "source_text": chapter.content,
-            "episode_pacing": params.get("episode_pacing") or {"preset": "smart"}}, EpisodeScript)
-        if not draft.screenplay.strip():
-            raise ValueError(localized_message("模型未返回导演剧本"))
+            "episode_pacing": params.get("episode_pacing") or {"preset": "smart"}}
+        if params.get('output_contract'):
+            screenplay = (await execution.generate_strict(facts))['screenplay']
+        else:
+            # Already queued historical tasks retain their original contract.
+            screenplay = (await execution.generate('screenplay', facts, EpisodeScript)).screenplay
 
         async def save():
             async with project_write(chapter.novel_id) as db:
                 await execution.before_request()
                 await chapter.refresh_from_db(using_db=db)
                 verify_source()
-                chapter.screenplay = draft.screenplay
+                chapter.screenplay = screenplay
                 await chapter.save(using_db=db, update_fields=["screenplay", "updated_at"])
                 return {"chapter_id": chapter.id, "screenplay_saved": True}
 

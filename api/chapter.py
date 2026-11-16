@@ -99,7 +99,8 @@ async def generate_episode_screenplay(chapter_id: int, bg: BackgroundTasks,
                                       ctx: AuthContext = Depends(require_chapter_access), _: AuthContext = _EDITOR):
     from services.chapter_screenplay import submit_screenplay
     task = await submit_screenplay(chapter_id, ctx, body.expected_screenplay if body else None,
-                                   assistant_model_config_id=body.assistant_model_config_id if body else None)
+                                   assistant_model_config_id=body.assistant_model_config_id if body else None,
+                                   skill_id=body.skill_id if body else None)
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
 
@@ -135,6 +136,7 @@ async def extract_chapter(
         team_id=ctx.team_id,
         user_id=ctx.user.id if ctx.user else None,
         assistant_model_config_id=body.assistant_model_config_id if body else None,
+        skill_id=body.skill_id if body else None,
         **({"conversation_id": conversation.id} if conversation else {}),
     )
     bg.add_task(ai_task_executor.run, task)
