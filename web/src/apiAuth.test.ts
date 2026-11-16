@@ -165,3 +165,12 @@ it('redirects to login when upload gets 401', async () => {
   expect(getAuthToken()).toBeNull()
   expect(window.location.hash).toBe('#/login')
 })
+
+it('preserves local login and stops retries when the upstream model connection is rejected', async () => {
+  setAuthToken('local-session')
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ code: 409,
+    message: '视频结果查询权限已失效，请重新连接模型平台后刷新状态。原任务已保留，请勿重新生成。' })))
+  await expect(api.queryVideo(37)).rejects.toMatchObject({ code: 409 })
+  expect(retryableStatusError(new ApiRequestError('重新连接模型平台', 409, 200))).toBe(false)
+  expect(getAuthToken()).toBe('local-session')
+})

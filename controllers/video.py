@@ -724,11 +724,31 @@ class VideoController(CRUDBase[Video, dict, dict]):
         if metadata.get("legacy_video_query"):
             from services.video.ark_migration import legacy_query_config
             config = legacy_query_config(config) or config
+        # Upstream credentials are not the local login. Preserve accepted jobs
+        # and pause denied queries until the configured connection changes.
+        query_blocked = metadata.get('query_blocked') or {}
+        config_version = str(config.updated_at)
+        query_help = {
+            401: localized_message('视频结果查询权限已失效，请重新连接模型平台后刷新状态。原任务已保留，请勿重新生成。'),
+            403: localized_message('模型平台拒绝读取此视频，请检查账号和模型权限后重新连接。原任务已保留，请勿重新生成。'),
+        }
+        if query_blocked.get('config_version') == config_version:
+            raise HTTPException(409, query_help[query_blocked['http_status']])
         generator = get_generator(config)
-        if config.api_protocol == "novelvids" and metadata.get("download_retry_pending"):
-            result = await generator.query(video.external_task_id, refresh=True)
-        else:
-            result = await generator.query(video.external_task_id)
+        try:
+            if config.api_protocol == "novelvids" and metadata.get("download_retry_pending"):
+                result = await generator.query(video.external_task_id, refresh=True)
+            else:
+                result = await generator.query(video.external_task_id)
+        except VideoProviderError as error:
+            if error.status_code not in {401, 403}:
+                raise
+            await Video.filter(id=video.id).update(metadata={**metadata, 'query_blocked': {
+                'config_version': config_version, 'http_status': error.status_code}})
+            logger.warning('Video query authorization blocked: video_id=%s http_status=%s', video_id, error.status_code)
+            raise HTTPException(409, query_help[error.status_code]) from None
+        metadata.pop('query_blocked', None)
+        video.metadata = metadata
         logger.info(
             "Video query result: video_id=%s, status=%s, has_url=%s",
             video_id, result.get("status"), bool(result.get("url")),
@@ -736,7 +756,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
 
         # 更新 Video 记录
         new_status = result["status"].value
-        update_fields = ["status"]
+        update_fields = ["status", "metadata"] if query_blocked else ["status"]
 
         video.status = new_status
 

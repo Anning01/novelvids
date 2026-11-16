@@ -104,7 +104,8 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         if response.status_code >= 400:
             raise VideoProviderError(public_provider_error(data, status_code=response.status_code,
                 transport_request_id=request_id(response), secrets=(self.config.api_key,)),
-                submission_uncertain=submitting and (response.status_code >= 500 or response.status_code == 408))
+                submission_uncertain=submitting and (response.status_code >= 500 or response.status_code == 408),
+                status_code=response.status_code)
         if not isinstance(data, dict):
             raise VideoProviderError(localized_message('视频接口返回了无效响应'), submission_uncertain=submitting)
         if data.get("error"):

@@ -533,3 +533,19 @@ it('stops scheduling Skills requests and ignores results after leaving the chapt
   expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(2)
   expect(api.updateScene).not.toHaveBeenCalled()
 })
+
+it.each(['light', 'dark'])('pauses rejected platform queries and retrieves the original video after reconnect in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  vi.mocked(api.queryVideo).mockRejectedValue(new ApiRequestError('请重新连接模型平台后刷新状态，原任务已保留，请勿重新生成。', 409, 200))
+  const { wrapper } = await render()
+  expect(wrapper.text()).toContain('请重新连接模型平台')
+  expect(wrapper.text()).toContain('视频状态暂未同步')
+  await vi.advanceTimersByTimeAsync(60000)
+  expect(api.queryVideo).toHaveBeenCalledTimes(1)
+  vi.mocked(api.queryVideo).mockResolvedValue({ data: completed } as never)
+  await wrapper.get('[aria-label="刷新视频状态"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[data-testid="preview"]').attributes('src')).toBe(completed.url)
+  expect(vi.mocked(api.queryVideo).mock.calls.every(([id]) => id === pending.id)).toBe(true)
+  expect(api.generateVideo).not.toHaveBeenCalled()
+})

@@ -34,7 +34,7 @@ def failure_category(message):
         (('output limit','输出达到上限','output_length'), 'output_length'),
         (('增量修复','incremental repair','校验','validation'), 'validation'),
         (('并发已满','rate_limit'), 'rate_limit'),
-        (('暂时无法','network','timeout','超时'), 'connection'),
+        (('暂时无法','network','timeout','超时','peer closed connection','incomplete chunked read'), 'connection'),
     ]:
         if any(term in text for term in terms):
             return reason
