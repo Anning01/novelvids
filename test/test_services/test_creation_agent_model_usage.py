@@ -96,3 +96,24 @@ async def test_structured_agent_uses_auto_tool_choice_compatible_with_reasoning_
                 'type':'object','properties':{'result':{'type':'string'}},'required':['result'],
             })],allow_text_output=False))
     finally: await model.client.close()
+
+
+@pytest.mark.asyncio
+async def test_non_storyboard_models_keep_completed_stream_recovery(monkeypatch):
+    from test.test_services.test_storyboard_stream_completion import StreamBody
+    def respond(request):
+        events = [{'id': 'done', 'created': 1, 'model': 'test', 'object': 'chat.completion.chunk',
+            'choices': [{'index': 0, 'delta': {'content': '完整回复'}, 'finish_reason': 'stop'}]}]
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=StreamBody(events, True))
+    monkeypatch.setattr(handler, 'AsyncOpenAI', lambda **kw: AsyncOpenAI(**kw,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
+    model = handler.configured_model(SimpleNamespace(api_protocol='openai_compatible',
+        base_url='https://example.invalid', api_key='test', model='test'), AgentConfiguration())
+    try:
+        async with model.request_stream([ModelRequest(parts=[UserPromptPart('测试')])], None, ModelRequestParameters()) as stream:
+            async for _ in stream:
+                pass
+            assert stream.get().parts[0].content == '完整回复'
+            assert stream.provider_details['stream_transport_interrupted'] is True
+    finally:
+        await model.client.close()

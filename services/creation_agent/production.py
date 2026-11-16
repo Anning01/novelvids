@@ -185,6 +185,7 @@ async def run_production(task, handler):
         },
         message,
         before_request,
+        strict_streaming=task.task_type == AiTaskTypeEnum.storyboard.value,
     )
     from utils.prompt_language import skill_workflow
 

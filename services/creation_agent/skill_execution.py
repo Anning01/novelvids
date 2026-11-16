@@ -120,6 +120,7 @@ class SkillExecution:
     params: dict
     message: AgentMessage
     before_request: Callable[[], Awaitable[object]]
+    strict_streaming: bool = False
 
     @property
     def snapshot(self):
@@ -238,6 +239,9 @@ class SkillExecution:
                 },
             )
         model = configured_model(chosen, limits)
+        # Storyboard generation retains the v1.9 transport contract; other skills keep their fixes.
+        if self.strict_streaming or skill == "storyboard":
+            model.strict_streaming = True
 
         async def validate_call():
             await self.before_request()
