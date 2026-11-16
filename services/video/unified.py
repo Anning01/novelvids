@@ -77,7 +77,9 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
             platform_call = await begin_platform_call(self.config, billing_type="video", video_id=billing_video_id,
                 task_id=current_task_id.get(), request_key=payload["request_id"])
             headers["Idempotency-Key"] = str(platform_call.request_key)
-        async with httpx.AsyncClient(timeout=600) as client:
+        from services.remake.capacity_transport import PlatformCapacityTransport
+        transport = {"transport": PlatformCapacityTransport()} if self.config.api_protocol == "novelvids" else {}
+        async with httpx.AsyncClient(timeout=600, **transport) as client:
             try:
                 response = await client.request(method, _endpoint(self.config.base_url, task_id),
                     headers=headers,
