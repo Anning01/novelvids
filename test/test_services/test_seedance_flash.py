@@ -71,7 +71,7 @@ async def test_flash_sync_submit_and_poll_reuse_platform_protocol(monkeypatch):
         assert request.url.path == "/v1/videos/flash-task"
         return httpx.Response(200, json={"id": "flash-task", "status": "completed", "progress": 100,
             "metadata": {"url": "https://media.example/result.mp4"}})
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client_type(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client_type(**{**kw, "transport": httpx.MockTransport(respond)}))
     for _ in range(2):
         assert await studio_platform.sync_platform_models("fixture-key") == {"connected": True, "synced": 1}
     config = await AiModelConfig.get(scope=studio_platform.SYNC_SCOPE, model="nv-231")

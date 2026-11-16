@@ -51,6 +51,9 @@ async def prepare_direct_plan(task, execution):
             if chapter.number in (asset.source_chapters or []):
                 plan.object_versions[f'asset:{asset.id}'] = await object_version(asset)
     plan.object_scopes['direct'] = list(plan.object_versions)
+    if operation == 'storyboard':
+        from services.creation_agent.input_versions import storyboard_input_versions
+        plan.storyboard_input_versions = await storyboard_input_versions(plan.object_versions)
     await AgentOperation.get_or_create(task=task, key=PLAN_KEY,
         defaults={'state': 'completed', 'result': plan.model_dump(mode='json')})
     params.update(creation_plan_id=str(task.id), creation_step_id='direct', creation_run_id=str(task.id))

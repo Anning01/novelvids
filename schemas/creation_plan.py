@@ -120,6 +120,7 @@ class CreationPlan(CreationPlanDraft):
     chapters: list[ChapterEvidence] = Field(default_factory=list)
     excerpts: list[SourceExcerpt] = Field(default_factory=list)
     object_versions: dict[str, str] = Field(default_factory=dict)
+    storyboard_input_versions: dict[str, str] = Field(default_factory=dict)
     object_scopes: dict[str, list[str]] = Field(default_factory=dict)
     chapter_scenes: dict[str, dict[str, str]] = Field(default_factory=dict)
 
