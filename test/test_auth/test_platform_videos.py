@@ -164,3 +164,42 @@ async def test_self_hosted_official_platform_config_tracks_cost_without_charging
     await video_controller._consume_balance(rec,team.id)
     assert rec.cost_source=="team_key" and rec.cost==5
     assert not await BalanceTransaction.all().exists()
+
+
+async def test_replacement_key_reads_previously_completed_video_without_regeneration_or_recharge(video_api, monkeypatch):
+    from auth.models import PlatformApiKey
+    from services.platform.access import revoke_key
+    from services.platform.videos import refresh_job
+    from services.video.base import VideoProviderError
+    app, key, model, team, local = video_api
+    backend = httpx.ASGITransport(app=app)
+    client_type = httpx.AsyncClient
+    posts = []
+    async def dispatch(request):
+        if request.url.host == 'platform.example':
+            return await backend.handle_async_request(request)
+        if request.method == 'POST':
+            posts.append(request.url.path)
+            return httpx.Response(200, json={'id': 'accepted-before-key-change'})
+        return httpx.Response(200, json={'status': 'succeeded', 'content': {'video_url': 'https://cdn.example/done.mp4'},
+            'duration': 5, 'usage': {'completion_tokens': 10000}})
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: client_type(**{**kw, 'transport': httpx.MockTransport(dispatch)}))
+    handle = await get_generator(local).submit('测试', duration=5, resolution='720p', aspect_ratio='16:9')
+    receipt = await PlatformCallReceipt.get()
+    job = await PlatformVideoJob.get(receipt_id=receipt.id)
+    await refresh_job(job, receipt)
+    old_key = await PlatformApiKey.get(name='studio')
+    user = await User.get(id=old_key.user_id)
+    member = await TeamMember.get(team=team, user=user)
+    ctx = AuthContext(user=user, team_id=team.id, membership=member)
+    await revoke_key(ctx, old_key.id)
+    with pytest.raises(VideoProviderError) as error:
+        await get_generator(local).query(handle)
+    assert error.value.status_code == 401
+    local.api_key = (await create_key(ctx, 'replacement', studio=True))['key']
+    await local.save(update_fields=['api_key', 'updated_at'])
+    result = await get_generator(local).query(handle)
+    assert result['status'] == 3 and result['url'] == 'https://cdn.example/done.mp4'
+    assert len(posts) == 1
+    assert await ModelUsageRecord.all().count() == 1
+    assert await BalanceTransaction.all().count() == 1
