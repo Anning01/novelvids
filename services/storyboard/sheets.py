@@ -64,12 +64,13 @@ async def _submit_sheet(scene_id, *, model_config_id: int, team_id=None, user_id
             scene_id=scene.id, team_id=team_id, user_id=user_id, model_config_id=config.id,
             model=config.model, prompt_language=language, clarity=selection.clarity, resolution=selection.provider_size,
             aspect_ratio=selection.aspect_ratio, output_format='png', generation_count=1,
-            sheet=sheet_for(scene, language), scene_fingerprint=scene_fingerprint(scene))
+            sheet=sheet_for(scene, language), scene_fingerprint=scene_fingerprint(scene),
+            source_sheet=(scene.metadata or {}).get('storyboard_sheet') or {})
         previous = await previous_submission(AiTaskTypeEnum.reference_image, params, db)
         if previous:
             return previous
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.reference_image, status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]).using_db(db):
-            if (task.request_params or {}).get('scene_id') == scene.id and (task.request_params or {}).get('operation') == 'storyboard_sheet':
+            if (task.request_params or {}).get('scene_id') == scene.id and (task.request_params or {}).get('operation') in {'storyboard_sheet', 'storyboard_sheet_edit'}:
                 if task.request_params.get('model_config_id') != config.id:
                     raise HTTPException(409, localized_message('本镜已有使用其他模型的线稿任务，请等待完成'))
                 return await bind_submission(task, params)
@@ -126,17 +127,7 @@ async def execute_sheet(params):
         raise ValueError(localized_message('故事版须返回一张图片'))
     # The shared media store uses an ID namespace; the suffix separates scene sheets from asset images.
     url = await _persist_generated_image(images[0], scene.id, f'_storyboard_{params["task_id"]}')
-    result = {'scene_id': scene.id, 'images': [url], 'image_count': 1, 'input_image_count': len(references), 'saved': False}
-    async with project_write(scene.chapter.novel_id):
-        current = await Scene.get_or_none(id=scene.id)
-        task = await AiTask.get(id=params['task_id'])
-        if current and task.status == TaskStatusEnum.running and scene_fingerprint(current) == params['scene_fingerprint'] and not await parent_cancelled(params):
-            current.metadata = {**(current.metadata or {}), 'storyboard_sheet': {
-                'task_id': str(task.id), 'status': 'completed', 'image_url': url, 'scene_fingerprint': params['scene_fingerprint'],
-                'video_prompt': params['sheet']['video_prompt'], 'video_guidance': params['sheet'].get('video_guidance', '')}}
-            await current.save(update_fields=['metadata', 'updated_at'])
-            result['saved'] = True
-    return result
+    return await apply_sheet_result(scene, params, url, len(references))
 
 
 async def enqueue_chapter_sheets(chapter_id, scene_ids, model_id, team_id, user_id, *, batch_id):
@@ -161,3 +152,123 @@ async def enqueue_chapter_sheets(chapter_id, scene_ids, model_id, team_id, user_
                 submission.reset(token)
             tasks.append(str(task.id))
     return tasks
+
+
+async def submit_sheet_edit(scene_id, request, *, team_id=None, user_id=None):
+    from copy import deepcopy
+    from controllers.config import ai_model_config_controller, general_config_controller
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.skill_execution import prepare_workflow
+    from services.creation_agent.submissions import previous_submission
+    from services.storyboard.sheet_history import current_sheet, sheet_revision
+    from services.video_enhancement.sources import require_generation_scope
+    from prompts.storyboard_sheet_edit import render_sheet_edit
+    scene = await Scene.get(id=scene_id).prefetch_related('chapter__novel')
+    await require_generation_scope(scene.chapter.novel_id, team_id)
+    async with project_write(scene.chapter.novel_id) as db:
+        prior = await previous_submission(AiTaskTypeEnum.reference_image, {'team_id': team_id, 'user_id': user_id}, db)
+        if prior:
+            return prior
+        await scene.refresh_from_db()
+        source = current_sheet(scene)
+        if not source.get('image_url'):
+            raise HTTPException(409, localized_message('请先生成该分镜的线稿'))
+        if sheet_revision(scene) != request.expected_revision:
+            raise HTTPException(409, localized_message('当前线稿已变化，请刷新后重试'))
+        active = await AiTask.get_or_none(id=source.get('task_id')) if source.get('task_id') else None
+        if active and active.status in {1, 2, 6}:
+            raise HTTPException(409, localized_message('本镜已有线稿任务，请等待完成'))
+        model_id = request.model_config_id or (active.request_params.get('model_config_id') if active else None)
+        if not model_id:
+            raise HTTPException(422, localized_message('请选择生图模型'))
+        config = await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image, model_id, team_id=team_id)
+        selection = validate_selection(config.image_model_type, clarity=None,
+            aspect_ratio=scene.chapter.novel.aspect_ratio or '16:9', output_format='png', generation_count=1)
+        language = await general_config_controller.get_prompt_language()
+        source_prompt = (active.request_params.get('original_image_prompt') or (active.request_params.get('sheet') or {}).get('image_prompt')) if active else None
+        original = source_prompt or scene.prompt or scene.description or ''
+        # Preserve the source's video guidance. Editing the image does not rewrite the shot.
+        sheet = {'image_prompt': render_sheet_edit(original, request.instruction, language),
+                 'video_prompt': source.get('video_prompt', scene.prompt), 'video_guidance': source.get('video_guidance', '')}
+        params = dict(operation='storyboard_sheet_edit', scene_id=scene.id, chapter_id=scene.chapter_id,
+            novel_id=scene.chapter.novel_id, team_id=team_id, user_id=user_id, model_config_id=config.id,
+            model=config.model, prompt_language=language, clarity=selection.clarity, resolution=selection.provider_size,
+            aspect_ratio=selection.aspect_ratio, output_format='png', generation_count=1,
+            source_sheet=deepcopy(source), original_image_prompt=original, edit_instruction=request.instruction, sheet=sheet,
+            scene_fingerprint=scene_fingerprint(scene), edit_fingerprint=sheet_edit_fingerprint(scene), source_revision=request.expected_revision)
+        prepared = await prepare_workflow(params)
+        for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id'):
+            prepared.pop(key, None)
+        task = await ai_task_executor.submit(AiTaskTypeEnum.reference_image, prepared, db_connection=db)
+        scene.metadata = {**(scene.metadata or {}), 'storyboard_sheet': {
+            **source, 'task_id': str(task.id), 'status': 'pending', 'previous_image_url': source['image_url']}}
+        await scene.save(update_fields=['metadata', 'updated_at'])
+        return task
+
+
+async def execute_sheet_edit(params):
+    from controllers.config import ai_model_config_controller
+    from services.creation_agent.operation_receipts import execute_step
+    from services.reference.generator import generate_for_sora_consistency
+    from services.reference.handler import _persist_generated_image
+    from services.image_inputs import resolve_reference_images
+    scene = await Scene.get(id=params['scene_id'], chapter__novel_id=params['novel_id']).prefetch_related('chapter')
+    if sheet_edit_fingerprint(scene) != params['edit_fingerprint'] or await parent_cancelled(params):
+        raise ValueError(localized_message('分镜已变化或任务已停止，请重新提交'))
+
+    async def generate():
+        await scene.refresh_from_db()
+        if not sheet_task_is_current(scene, params):
+            raise ValueError(localized_message('当前线稿已变化，请刷新后重试'))
+        config = await ai_model_config_controller.get_active(AiTaskTypeEnum.reference_image, params['model_config_id'], team_id=params.get('team_id'))
+        references = resolve_reference_images([params['source_sheet']['image_url']])
+        images = await generate_for_sora_consistency({'base_traits': params['sheet']['image_prompt']},
+            base_url=config.base_url, api_key=config.api_key, model=config.model, api_protocol=config.api_protocol,
+            resolution=params['resolution'], aspect_ratio=params['aspect_ratio'], reference_images=references, count=1,
+            prompt_language=params['prompt_language'])
+        if len(images) != 1:
+            raise ValueError(localized_message('故事版须返回一张图片'))
+        url = await _persist_generated_image(images[0], scene.id, f'_storyboard_{params["task_id"]}')
+        return {'url': url}
+
+    generated = await execute_step(params['task_id'], 'sheet:generate', generate, external=True)
+    return await execute_step(params['task_id'], 'sheet:apply',
+        lambda: apply_sheet_result(scene, params, generated['url'], 1), atomic=True)
+
+
+async def apply_sheet_result(scene, params, url, input_image_count):
+    from uuid import uuid4
+    sheet = {'task_id': str(params['task_id']), 'status': 'completed', 'image_url': url,
+             'revision': str(uuid4()), 'scene_fingerprint': params['scene_fingerprint'],
+             'video_prompt': params['sheet']['video_prompt'], 'video_guidance': params['sheet'].get('video_guidance', '')}
+    result = {'scene_id': scene.id, 'scene_ids': [scene.id], 'images': [url], 'image_count': 1,
+              'input_image_count': input_image_count, 'saved': False, 'sheet': sheet}
+    async with project_write(scene.chapter.novel_id):
+        current = await Scene.get_or_none(id=scene.id)
+        task = await AiTask.get(id=params['task_id'])
+        if (current and task.status == TaskStatusEnum.running and scene_fingerprint(current) == params['scene_fingerprint']
+                and sheet_task_is_current(current, params)
+                and not await parent_cancelled(params)):
+            current.metadata = {**(current.metadata or {}), 'storyboard_sheet': sheet}
+            await current.save(update_fields=['metadata', 'updated_at'])
+            result['saved'] = True
+    if not result['saved']:
+        result['not_applied_reason'] = localized_message('新版线稿已保留，请在历史中查看并选择是否使用')
+    return result
+
+
+def sheet_task_is_current(scene, params):
+    from services.storyboard.sheet_history import current_sheet
+    current = current_sheet(scene)
+    if current.get('task_id') != str(params['task_id']):
+        return False
+    if params.get('operation') == 'storyboard_sheet_edit':
+        source = params['source_sheet']
+        return (current.get('image_url') == source.get('image_url') and current.get('revision') == source.get('revision')
+                and sheet_edit_fingerprint(scene) == params['edit_fingerprint'])
+    return True
+
+
+def sheet_edit_fingerprint(scene):
+    from services.video_enhancement.media import digest
+    return digest([scene_fingerprint(scene), (scene.metadata or {}).get('asset_variant_ids')])

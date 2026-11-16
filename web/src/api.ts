@@ -1,3 +1,4 @@
+import type { SheetHistory } from '@/shared/storyboardSheetHistory'
 import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 
 import { tr } from '@/i18n'
@@ -400,6 +401,8 @@ export const api = {
   insertSceneAfter: (sceneId: number) => request<SingleResponse<Scene>>(`/scene/${sceneId}/insert-after`, { method: 'POST' }),
   updateScene: (id: number, data: Partial<Scene>, expectedPrompt?: string | null) => request<SingleResponse<Scene>>(`/scene/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteScene: (id: number) => request<SingleResponse<null>>(`/scene/${id}`, { method: 'DELETE' }),
+  storyboardSheetHistory: (sceneId: number) => request<SingleResponse<SheetHistory>>(`/scene/${sceneId}/storyboard-sheet/history`),
+  restoreStoryboardSheet: (sceneId: number, payload: {task_id: string; source: boolean; expected_revision: string}) => request<SingleResponse<Scene>>(`/scene/${sceneId}/storyboard-sheet/restore`, {method:'POST', body:JSON.stringify(payload)}),
   generateStoryboardSheet: async (sceneId: number, modelConfigId: number, restart = false) => {
     const url = `/scene/${sceneId}/storyboard-sheet${qs({ model_config_id: modelConfigId })}`
     if (restart) await resetGenerationRequest(url)
