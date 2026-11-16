@@ -25,3 +25,8 @@ async def test_recent_limits_before_export_and_isolates_users_and_teams():
     assert 'private-manuscript' not in json.dumps(result) and 'secret-key' not in json.dumps(result)
     assert len(await recent_tasks(AuthContext(user=SimpleNamespace(id=4)))) == 1
     assert len(await recent_tasks(AuthContext())) == 1
+
+
+def test_interrupted_response_is_classified_as_connection_failure():
+    from services.diagnostics import failure_category
+    assert failure_category('分镜生成失败: peer closed connection without sending complete message body (incomplete chunked read)') == 'connection'
