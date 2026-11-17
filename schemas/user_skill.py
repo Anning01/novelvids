@@ -1,5 +1,6 @@
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, AfterValidator
+from schemas.chapter import EpisodePacing
 
 TextTask = Literal['story', 'screenplay', 'assets', 'storyboard']
 
@@ -43,6 +44,7 @@ class SkillTrialInput(BaseModel):
     skill: UserSkillInput
     model_config_id: int = Field(gt=0)
     input: str = Field(min_length=1, max_length=64000)
+    episode_pacing: EpisodePacing = Field(default_factory=EpisodePacing)
     # None inherits the saved model preference; an empty value omits it.
     thinking: str | None = Field(None, max_length=64)
     reasoning_effort: str | None = Field(None, max_length=64)

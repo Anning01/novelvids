@@ -39,7 +39,7 @@ async def test_trial_uses_draft_production_schema_and_request_only_overrides():
     assert snapshot.thinking == 'disabled' and snapshot.reasoning_effort is None
     await chosen.refresh_from_db()
     assert chosen.thinking == 'enabled' and chosen.reasoning_effort == 'high'
-    assert json.loads(content)['creative_method']['instructions'] == request.skill.instructions
+    assert json.loads(content)['creative_method']['instructions'] == request.skill.instructions.replace('{{input}}', '测试素材')
     assert 'output_schema=' not in instructions and 'story_outline' in contract['schema']['properties']
     assert json.loads(content)['task_context']['input'] == '测试素材'
     for changes in ({'team_id': 2}, {'supports_strict_output': False}, {'is_active': False}):
@@ -155,3 +155,16 @@ async def test_trial_counts_native_schema_against_configured_context_limit():
     with pytest.raises(HTTPException) as caught:
         await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
     assert caught.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_trial_pacing_resolves_the_same_placeholders_as_episode_generation():
+    chosen = await config()
+    request = body(chosen.id, episode_pacing={'preset': 'fast', 'max_seconds': 75})
+    request.skill.task = 'screenplay'
+    request.skill.instructions = '配置 {{episode_pacing}}；时长 {{max_seconds}}'
+    _, _, content, _ = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    payload = json.loads(content)
+    assert payload['creative_method']['instructions'] == '配置 {"preset": "fast", "max_seconds": 75}；时长 75'
+    assert payload['task_context']['episode_pacing'] == {'preset': 'fast', 'max_seconds': 75}
+    assert request.skill.instructions == '配置 {{episode_pacing}}；时长 {{max_seconds}}'

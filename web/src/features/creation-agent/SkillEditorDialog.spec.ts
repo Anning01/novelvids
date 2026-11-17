@@ -67,3 +67,39 @@ it('focuses the safe confirmation action when closing a dirty editor and never d
   expect(document.activeElement).toBe(modal().get('input[name="skill-name"]').element)
   expect(modal().get('.discard-area').attributes('aria-hidden')).toBe('true')
 })
+
+it('sends trial-only placeholder values while saving the Markdown template unchanged', async () => {
+  const instructions = '节奏 {{episode_pacing}}；参考 {{max_seconds}} 秒'
+  wrapper = mount(SkillEditorDialog, { props: { task: 'screenplay', source: { ...source, task: 'screenplay', instructions } } })
+  await flushPromises()
+  await modal().get('button[aria-label="本集节奏"]').trigger('click')
+  const menu = new DOMWrapper(document.body).get('[role="listbox"][aria-label="本集节奏"]')
+  await menu.findAll('[role="option"]').find(option => option.text() === '快节奏')!.trigger('click')
+  const seconds = modal().get('input[name="trial-max-seconds"]')
+  expect(seconds.attributes('form')).toBe('')
+  expect(seconds.attributes('min')).toBe('1')
+  await seconds.setValue('75')
+  await modal().get('.trial-input').setValue('渡口来了一条陌生的船。')
+  vi.mocked(runSkillTrial).mockResolvedValueOnce()
+  await modal().findAll('button').find(button => button.text() === '发送')!.trigger('click')
+  await flushPromises()
+  expect(runSkillTrial).toHaveBeenCalledWith(expect.objectContaining({
+    skill: expect.objectContaining({ instructions }), episode_pacing: { preset: 'fast', max_seconds: 75 },
+  }), expect.any(AbortSignal), expect.any(Function))
+  expect(skillsApi.update).not.toHaveBeenCalled()
+  vi.mocked(skillsApi.update).mockImplementation(async (id, body) => ({ code: 0, message: '', data: { ...body, id, version: 5, builtin: false } }))
+  await modal().get('form').trigger('submit')
+  await flushPromises()
+  expect(skillsApi.update).toHaveBeenCalledWith(3, expect.objectContaining({ instructions }), 4)
+  expect(vi.mocked(skillsApi.update).mock.calls[0]![1]).not.toHaveProperty('episode_pacing')
+})
+
+it.each(['0', '1.5'])('reveals invalid trial duration %s before sending', async seconds => {
+  wrapper = mount(SkillEditorDialog, { props: { task: 'screenplay', source } })
+  await flushPromises()
+  await modal().get('input[name="trial-max-seconds"]').setValue(seconds)
+  await modal().get('.trial-input').setValue('测试素材')
+  await modal().findAll('button').find(button => button.text() === '发送')!.trigger('click')
+  expect(runSkillTrial).not.toHaveBeenCalled()
+  expect(modal().get<HTMLDetailsElement>('.trial-parameters').element.open).toBe(true)
+})

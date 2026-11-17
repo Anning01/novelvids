@@ -30,7 +30,7 @@ onMounted(async () => {
     instance = new Editor(host.value, {
       lang: language, cdn: '/vditor', mode: 'ir', theme: theme(), value: props.modelValue,
       i18n: { ...window.VditorI18n, splitView: tr('Markdown 源码') },
-      cache: { enable: false }, height: '100%', minHeight: 240,
+      cache: { enable: false }, height: '100%', minHeight: 0,
       toolbar: ['headings', 'bold', 'list', 'link', 'code', '|', 'undo', 'redo', '|', 'edit-mode'],
       toolbarConfig: { pin: false }, resize: { enable: false },
       preview: { mode: 'editor', hljs: { enable: false }, actions: [], markdown: { codeBlockPreview: false, mathBlockPreview: false, sanitize: true } },

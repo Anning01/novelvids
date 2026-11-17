@@ -1,6 +1,7 @@
 import { API_BASE, authHeaders, request } from '@/api'
 import { tr } from '@/i18n'
 import type { SingleResponse } from '@/types'
+import type { EpisodePacing } from '@/types'
 
 export type TextTask = 'story' | 'screenplay' | 'assets' | 'storyboard'
 export interface SkillReference { name: string; content: string }
@@ -21,6 +22,7 @@ export interface SkillTrialInput {
   skill: CreativeSkillInput
   model_config_id: number
   input: string
+  episode_pacing?: EpisodePacing
   thinking: string | null
   reasoning_effort: string | null
 }

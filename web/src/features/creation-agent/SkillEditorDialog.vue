@@ -4,6 +4,7 @@ import { FlaskConical, Plus, Send, Square, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { tr } from '@/i18n'
+import type { EpisodePacing } from '@/types'
 import SkillMarkdownEditor from './SkillMarkdownEditor.vue'
 import { skillsApi, runSkillTrial, type CreativeSkill, type CreativeSkillInput, type TextTask } from './skillsApi'
 
@@ -29,6 +30,19 @@ const modelId = ref('')
 const thinking = ref('default')
 const effort = ref('default')
 const input = ref('')
+const pacing = ref<EpisodePacing['preset']>('smart')
+const maxSeconds = ref<number | ''>('')
+const secondsInput = ref<HTMLInputElement>()
+const parameters = ref<HTMLDetailsElement>()
+const parametersExpanded = ref(false)
+const hasPacingParameters = computed(() => props.task === 'screenplay' ||
+  [editor.value.instructions, ...editor.value.references.map(reference => reference.content)]
+    .some(content => /\{\{\s*(?:episode_pacing(?:\.\w+)*|max_seconds)\s*\}\}/.test(content)))
+const pacingOptions = computed(() => [
+  { value: 'compact', label: tr('紧凑节奏') }, { value: 'fast', label: tr('快节奏') },
+  { value: 'smart', label: tr('智能时长') }, { value: 'slow', label: tr('慢节奏') },
+  { value: 'detailed', label: tr('极致细节') },
+])
 const output = ref('')
 const thoughts = ref('')
 const running = ref(false)
@@ -87,6 +101,12 @@ async function save() {
 }
 async function send() {
   if (running.value || !input.value.trim() || !modelId.value || !editor.value.instructions.trim()) return
+  if (hasPacingParameters.value && secondsInput.value && !secondsInput.value.checkValidity()) {
+    if (parameters.value) parameters.value.open = true
+    await nextTick()
+    secondsInput.value.reportValidity()
+    return
+  }
   controller = new AbortController()
   running.value = true; trialError.value = ''; output.value = ''; thoughts.value = ''; tokenCount.value = null; elapsed.value = 0
   trialStatus.value = tr('等待模型')
@@ -95,6 +115,7 @@ async function send() {
   try {
     await runSkillTrial({ skill: { ...editor.value, references: editor.value.references.map(item => ({ ...item })) },
       model_config_id: Number(modelId.value), input: input.value,
+      ...(hasPacingParameters.value ? { episode_pacing: { preset: pacing.value, max_seconds: maxSeconds.value === '' ? null : maxSeconds.value } } : {}),
       thinking: thinking.value === 'default' ? null : thinking.value,
       reasoning_effort: effort.value === 'default' ? null : effort.value }, controller.signal, event => {
       if (event.type === 'output') output.value += event.delta ?? ''
@@ -146,9 +167,21 @@ async function send() {
             <div class="result-scroll" :aria-busy="running">
               <details v-if="thoughts" class="model-thoughts"><summary>{{ tr('思考过程') }}</summary><pre>{{ thoughts }}</pre></details>
               <pre v-if="output" class="model-output" tabindex="0">{{ output }}</pre>
-              <div v-else class="result-empty"><FlaskConical :size="28" aria-hidden="true" /><strong>{{ tr('试试这项技能') }}</strong><p>{{ tr('在下方输入一段素材，查看当前技能的实际输出。') }}</p></div>
+              <div v-else class="result-empty"><FlaskConical v-if="!parametersExpanded" :size="28" aria-hidden="true" /><strong>{{ tr('试试这项技能') }}</strong><p v-if="!parametersExpanded">{{ tr('在下方输入一段素材，查看当前技能的实际输出。') }}</p></div>
               <p v-if="trialError" class="skill-error" role="alert">{{ trialError }}</p>
             </div>
+          <details v-if="hasPacingParameters" ref="parameters" class="trial-parameters" @toggle="parametersExpanded = ($event.target as HTMLDetailsElement).open">
+            <summary>{{ tr('占位符参数（仅试运行）') }}</summary>
+            <p :id="`${id}-parameters-hint`">{{ tr('正式生成时从本集设置填入，保存技能时保留占位符。') }}</p>
+            <div class="trial-parameter-fields">
+              <label>{{ tr('本集节奏') }}<AppSelect v-model="pacing" :options="pacingOptions" :ariaLabel="tr('本集节奏')" :disabled="running" /><code v-pre>{{episode_pacing}}</code></label>
+              <label :for="`${id}-seconds`">{{ tr('本集参考时长（秒）') }}
+                <!-- Trial parameters must not block the separate skill-save action. -->
+                <input :id="`${id}-seconds`" ref="secondsInput" v-model.number="maxSeconds" form="" name="trial-max-seconds" type="number" inputmode="numeric" min="1" :max="Number.MAX_SAFE_INTEGER" step="1" :placeholder="tr('留空按剧情自然展开')" :disabled="running" :aria-describedby="`${id}-parameters-hint`" />
+                <code v-pre>{{max_seconds}}</code>
+              </label>
+            </div>
+          </details>
             <p class="trial-note">{{ tr('试运行使用当前内容，不保存到项目；模型调用按正常用量计费。') }}</p>
           </section>
         </div>
@@ -189,7 +222,7 @@ async function send() {
 h2 { font-size: 19px; margin: 0; } h3 { font-size: 14px; margin: 0; }
 p { color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
 .skill-lab-columns { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); flex: 1; min-block-size: 0; }
-.skill-source { display: flex; flex-direction: column; min-block-size: 0; border-inline-end: 1px solid var(--app-border); }
+.skill-source { display: flex; flex-direction: column; min-block-size: 0; overflow: hidden; border-inline-end: 1px solid var(--app-border); }
 fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
 .skill-metadata { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 20px; border-block-end: 1px solid var(--app-border); }
 label { display: grid; gap: 6px; min-inline-size: 0; color: var(--app-text-secondary); font-size: 12px; }
@@ -207,11 +240,15 @@ summary { font-size: 12px; cursor: pointer; color: var(--app-text-secondary); } 
 .result-scroll { flex: 1; min-block-size: 0; overflow: auto; padding: 0 20px 20px; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
 .model-output, .model-thoughts pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.8 ui-monospace, monospace; margin: 16px 0 0; }
 .model-thoughts pre { color: var(--app-text-secondary); font-family: inherit; }
-.result-empty { min-block-size: 200px; block-size: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--app-text-secondary); }
+.result-empty { min-block-size: 0; block-size: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--app-text-secondary); }
 .result-empty strong { color: var(--app-text); font-size: 15px; } .result-empty p { max-inline-size: 30ch; }
 .trial-note { padding: 10px 20px; border-block-start: 1px solid var(--app-border); }
 .skill-lab-footer { flex: none; padding: 14px 20px 0; border-block-start: 1px solid var(--app-border); }
 .input-label { margin-block-end: 8px; } .trial-input { resize: vertical; min-block-size: 72px; max-block-size: 180px; font-size: 13px; line-height: 1.6; }
+.trial-parameters { flex: none; padding: 10px 20px; border-block-start: 1px solid var(--app-border); max-block-size: 50%; overflow: auto; }
+.trial-parameter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-inline-size: 520px; margin-block-start: 10px; }
+.trial-parameter-fields code { font-size: 11px; color: var(--app-text-secondary); }
+.trial-parameter-fields input:user-invalid { border-color: var(--app-danger, #b33645); }
 .skill-lab-actions { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-block-start: 12px; }
 .trial-options, .save-options { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
 .trial-options > label:first-child { min-inline-size: 180px; max-inline-size: 300px; }

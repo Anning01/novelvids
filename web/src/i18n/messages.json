@@ -4428,6 +4428,11 @@
     "官方标准价": "Official standard price"
   },
   "skills_management": {
+    "占位符参数（仅试运行）": "Placeholder parameters (trial only)",
+    "正式生成时从本集设置填入，保存技能时保留占位符。": "Production uses episode settings. Saved skills keep their placeholders.",
+    "本集节奏": "Episode pacing",
+    "本集参考时长（秒）": "Target episode duration (seconds)",
+    "留空按剧情自然展开": "Leave blank to follow the story naturally",
     "Markdown 源码": "Markdown source",
     "故事分析": "Story analysis",
     "剧本改编": "Screenplay adaptation",

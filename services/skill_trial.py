@@ -48,7 +48,7 @@ async def prepare_trial(body: SkillTrialInput, ctx):
     specifications = json.loads(read_skill('asset_contract'))[language] if body.skill.task == 'assets' else None
     contract = output_contract(body.skill.task, asset_specifications=specifications)
     instructions, content = render_text_task(language=language, skill=body.skill.model_dump(),
-        context={'input': body.input})
+        context={'input': body.input, 'episode_pacing': body.episode_pacing.model_dump()})
     context_size = len(instructions) + len(content) + len(json.dumps(contract, ensure_ascii=False))
     if chosen.max_context_characters and context_size > chosen.max_context_characters:
         raise HTTPException(400, localized_message('内容超过模型上下文上限，请缩短技能或测试输入'))
