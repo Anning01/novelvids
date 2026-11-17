@@ -151,7 +151,9 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
 
     assert task.status == 4
     assert len(requests) == 1 and not requests[0].get("tools")
-    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert requests[0]["response_format"]["type"] == "json_schema"
+    assert requests[0]["response_format"]["json_schema"]["strict"] is True
+    assert requests[0]["response_format"]["json_schema"]["schema"] == task.request_params["output_contract"]["schema"]
     messages = str(requests[0]["messages"])
     assert "episode_pacing" in messages and "本集按剧情自然展开" in messages
     assert "Target episode duration:" in messages

@@ -34,7 +34,8 @@ from services.platform.access import create_key
 
 
 @pytest.mark.asyncio
-async def test_platform_quota_rejection_is_not_mistaken_for_a_local_balance_failure(monkeypatch):
+@pytest.mark.parametrize("endpoint", ["chat/completions", "responses"])
+async def test_platform_quota_rejection_is_not_mistaken_for_a_local_balance_failure(monkeypatch, endpoint):
     from types import SimpleNamespace
     from services.billing.platform import active_model_call, platform_text_client
     from services.creation_agent.handler import public_run_error
@@ -49,7 +50,7 @@ async def test_platform_quota_rejection_is_not_mistaken_for_a_local_balance_fail
     token = active_model_call.set((SimpleNamespace(task_id=task.id, id=1), call))
     try:
         async with platform_text_client(config) as client:
-            response = await client.post(config.base_url + "/chat/completions", json={"model": config.model})
+            response = await client.post(config.base_url + "/" + endpoint, json={"model": config.model})
         assert response.status_code == 402
     finally:
         active_model_call.reset(token)

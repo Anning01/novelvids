@@ -397,7 +397,7 @@ def test_incomplete_blocking_map_rejected_for_duration_split_continuations(probl
 
 
 @pytest.mark.parametrize('legacy', [True, False])
-def test_voice_from_outside_is_heard_without_a_character_image(legacy):
+def test_spoken_references_use_the_same_character_association(legacy):
     shot = _shot()
     hero, speaker = characters()
     shot.description = '苏玄听见门外赵无垢的声音。'
@@ -408,15 +408,15 @@ def test_voice_from_outside_is_heard_without_a_character_image(legacy):
     shot.visible_asset_names = None if legacy else [hero.name]
     shot.reference_only_types = ['人物']
     prompt = format_storyboard_prompt(shot, entities=[hero, speaker])
-    assert referenced_entities(shot, [hero, speaker]) == [hero]
-    assert '角色参考：@{苏玄}\n' in prompt and shot.dialogue[0] in prompt
+    assert referenced_entities(shot, [hero, speaker]) == [hero, speaker]
+    assert '角色参考：@{苏玄}、@{赵无垢}' in prompt and shot.dialogue[0] in prompt
     # The speaker appears later within the same generation segment.
     shot.actions.append('2s-4s: 赵无垢推门入画。')
     if not legacy:
         shot.visible_asset_names.append(speaker.name)
     assert referenced_entities(shot, [hero, speaker]) == [hero, speaker]
     shot.visible_asset_names = []
-    assert not referenced_entities(shot, [hero, speaker])
+    assert referenced_entities(shot, [hero, speaker]) == [speaker]
 
 
 def test_visual_roster_uses_registered_asset_or_form_names():

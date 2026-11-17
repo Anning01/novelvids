@@ -20,7 +20,7 @@ async def project(monkeypatch):
     await GeneralConfig.create(id=1, prompt_language='zh')
     model = await AiModelConfig.create(name='strict-production', model='strict-model', task_type=7,
         base_url='https://model.invalid/v1', api_key='test', is_active=True,
-        supports_json_output=True)
+        supports_json_output=True, supports_strict_output=True)
     novel = await Novel.create(name='渡口', episodes_managed=True, shot_duration_max=15)
     chapter = await Chapter.create(novel=novel, number=1, name='夜渡', content='原文',
         screenplay='1-1 渡口 外 夜\n出场：阿岚\n△ 阿岚提灯停下。\n阿岚：等一等。')
@@ -49,9 +49,28 @@ def shot_payload():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('task_kind', ['assets', 'storyboard'])
-async def test_production_uses_one_strict_request_without_candidate_checks(project, monkeypatch, task_kind):
+@pytest.mark.parametrize('missing', ['variant', 'design', 'visual_fields'])
+async def test_asset_conversion_failure_explains_missing_field_without_retry(project, monkeypatch, missing):
     novel, chapter, _ = project
+    payload = asset_payload()
+    del payload['persons'][0][missing]
+    requests = mock_model(monkeypatch, payload)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 4
+    assert task.error_message == f'资产结果转换失败：persons[0] 缺少字段 {missing}，尚未保存本次提取结果。'
+    assert len(requests) == 1
+    assert not await Asset.filter(novel=novel).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('task_kind', ['assets', 'storyboard'])
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+async def test_production_uses_one_strict_request_without_candidate_checks(project, monkeypatch, task_kind, text_api):
+    novel, chapter, model = project
+    model.text_api = text_api
+    await model.save()
     await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, base_traits='人工确认的设定', source_chapters=[1])
     requests = mock_model(monkeypatch, asset_payload() if task_kind == 'assets' else shot_payload())
     forbidden = AsyncMock(side_effect=AssertionError('legacy generation or review must not run'))
@@ -74,7 +93,13 @@ async def test_production_uses_one_strict_request_without_candidate_checks(proje
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
-    assert len(requests) == 1 and requests[0]['response_format'] == {'type': 'json_object'}
+    assert len(requests) == 1
+    expected = {'type': 'json_schema', 'json_schema': {'name': task_kind,
+        'schema': task.request_params['output_contract']['schema'], 'strict': True}}
+    if text_api == 'responses':
+        assert requests[0]['text']['format'] == {'type': 'json_schema', **expected['json_schema']}
+    else:
+        assert requests[0]['response_format'] == expected
     assert not requests[0].get('tools')
     forbidden.assert_not_awaited()
     if task_kind == 'assets':
@@ -253,3 +278,120 @@ async def test_optional_storyboard_sheets_remain_separate_media_tasks(project, m
     media = await AiTask.get(id=task.response_data['storyboard_sheet_task_ids'][0])
     assert media.request_params['execution_mode'] == 'media'
     assert 'skill_snapshot' not in media.request_params
+
+
+@pytest.mark.asyncio
+async def test_speaking_character_uses_normal_asset_binding_without_another_model_call(project, monkeypatch):
+    novel, chapter, _ = project
+    hero = await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, source_chapters=[1])
+    speaker = await Asset.create(novel=novel, canonical_name='王叔', asset_type=1, source_chapters=[1],
+        metadata={'voice_reference_id': 12})
+    payload = shot_payload()
+    payload['shots'][0]['dialogue'][0].update(speaker='王叔', delivery='画外呼喊', text='阿岚！')
+    requests = mock_model(monkeypatch, payload)
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    scene = await Scene.get(chapter=chapter)
+    assert set(await scene.assets.all().values_list('id', flat=True)) == {hero.id, speaker.id}
+    assert '角色参考：@{阿岚}、@{王叔}' in scene.prompt
+    assert '@{王叔}（画外呼喊）: 阿岚！' in scene.prompt
+    assert (await scene.assets.all().get(id=speaker.id)).metadata['voice_reference_id'] == 12
+    assert len(requests) == 1
+    assert '发声角色也属于角色引用' in str(requests[0]['messages'])
+
+
+@pytest.mark.parametrize('language', ['zh', 'en'])
+def test_asset_wire_schema_has_no_empty_objects(language):
+    import json
+    from prompts.skill_pack import read_skill
+    from schemas.text_task_contracts import output_contract
+    specifications = json.loads(read_skill('asset_contract'))[language]
+    schema = output_contract('assets', asset_specifications=specifications)['schema']
+    def check(value):
+        if isinstance(value, dict):
+            if value.get('type') == 'object':
+                assert value.get('properties'), 'Provider rejects object schemas without properties'
+            for child in value.values():
+                check(child)
+        elif isinstance(value, list):
+            for child in value:
+                check(child)
+    check(schema)
+    scene = schema['properties']['scenes']['items']['properties']
+    assert scene['visual_fields'] == {'type': 'null'}
+    assert scene['variant']['anyOf'][0]['properties']['visual_fields'] == {'type': 'null'}
+
+
+@pytest.mark.asyncio
+async def test_scene_and_variant_with_no_visual_columns_save_via_responses(project, monkeypatch):
+    from models.asset_variant import AssetVariant
+    novel, chapter, model = project
+    model.text_api = 'responses'
+    await model.save()
+    payload = {'persons': [], 'items': [], 'scenes': [{
+        'name': '渡口', 'aliases': [], 'description': '故事发生地', 'design': '河岸木制渡口。', 'visual_fields': None,
+        'variant': {'existing_variant_id': None, 'name': '暴雨后', 'description': '雨后场景',
+                    'change_reason': '暴雨淹没河岸', 'design': '雨后被淹的渡口。', 'visual_fields': None},
+    }]}
+    requests = mock_model(monkeypatch, payload)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    schema = requests[0]['text']['format']['schema']
+    assert requests[0]['text']['format']['strict'] is True
+    assert schema['properties']['scenes']['items']['properties']['visual_fields'] == {'type': 'null'}
+    scene = await Asset.get(novel=novel, canonical_name='渡口')
+    assert '河岸木制渡口。' in scene.base_traits
+    assert '雨后被淹的渡口。' in (await AssetVariant.get(asset=scene)).base_traits
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+async def test_storyboard_input_and_enum_share_only_current_chapter_candidates(project, monkeypatch, text_api):
+    import json
+    from models.asset_variant import AssetVariant
+    novel, chapter, model = project
+    model.text_api = text_api
+    await model.save()
+    hero = await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, source_chapters=[1, 2])
+    await Asset.create(novel=novel, canonical_name='其他章节', asset_type=1, source_chapters=[2], is_global=True)
+    await Asset.create(novel=novel, canonical_name='未关联资产', asset_type=3, source_chapters=[], is_global=True)
+    await AssetVariant.create(asset=hero, name='本章形态', chapter_numbers=[1])
+    await AssetVariant.create(asset=hero, name='第二章形态', chapter_numbers=[2])
+    await AssetVariant.create(asset=hero, name='未关联形态', chapter_numbers=[])
+    requests = mock_model(monkeypatch, shot_payload())
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    request = requests[0]
+    messages = request.get('messages') or request['input']
+    user = next(message for message in messages if message['role'] == 'user')['content']
+    if isinstance(user, list):
+        user = user[0]['text']
+    context = json.loads(user)['task_context']['input']
+    names = [entity['name'] for entity in context['entities']]
+    assert names == ['阿岚', '阿岚#本章形态']
+    schema = (request['text']['format']['schema'] if text_api == 'responses'
+              else request['response_format']['json_schema']['schema'])
+    fields = schema['properties']['shots']['items']['properties']
+    assert fields['visible_asset_names']['items']['enum'] == names
+    assert fields['dialogue']['items']['properties']['speaker']['enum'] == [*names, '旁白', 'Narrator']
+    assert fields['narration']['items']['properties']['speaker']['enum'] == [*names, '旁白', 'Narrator']
+    assert task.request_params['output_contract']['schema'] == schema
+
+
+def test_empty_storyboard_candidates_do_not_allow_arbitrary_references():
+    from schemas.text_task_contracts import output_contract, bind_storyboard_candidates
+    original = output_contract('storyboard', blocking_maps=True)
+    bound = bind_storyboard_candidates(original, [])
+    fields = bound['schema']['properties']['shots']['items']['properties']
+    assert fields['visible_asset_names']['maxItems'] == 0
+    assert fields['blocking_map']['properties']['assets']['items']['properties']['asset_name'] == {'type': 'null'}
+    assert fields['dialogue']['items']['properties']['speaker']['enum'] == ['旁白', 'Narrator']
+    assert 'maxItems' not in original['schema']['properties']['shots']['items']['properties']['visible_asset_names']

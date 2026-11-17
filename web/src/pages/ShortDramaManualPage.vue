@@ -936,6 +936,7 @@ onBeforeUnmount(() => {
       :novel-id="projectId"
       :asset="editingAsset"
       :initial-variant-id="editingVariantId"
+      :chapter-id="selectedChapter?.id"
       :chapter-number="selectedChapter?.number"
       :episode-numbers="chapters.map(item => item.number)"
       :initial-mode="assetDrawerMode"

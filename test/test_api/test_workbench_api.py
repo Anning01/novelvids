@@ -203,3 +203,21 @@ async def test_non_remake_workbench_bootstrap_has_no_remake_source(client: Async
     data = response.json()["data"]
     assert data["project_config"]["workflow_kind"] == "script"
     assert data["remake_source"] is None
+
+
+@pytest.mark.asyncio
+async def test_manually_created_prop_is_available_in_its_episode_picker(client):
+    novel = await Novel.create(name='本集手工道具')
+    first = await Chapter.create(novel=novel, number=1, name='第一集', content='正文')
+    second = await Chapter.create(novel=novel, number=2, name='第二集', content='正文')
+    response = await client.post('/api/asset', json={
+        'novel_id': novel.id, 'chapter_id': second.id, 'asset_type': AssetTypeEnum.item.value,
+        'canonical_name': '新道具', 'is_global': False,
+    })
+    assert response.status_code == 200, response.text
+    created = response.json()['data']
+    assert created['source_chapters'] == [2]
+    for chapter, expected in [(first, set()), (second, {created['id']})]:
+        result = await client.get(f'/api/workbench/bootstrap?novel_id={novel.id}&chapter_id={chapter.id}')
+        assert result.status_code == 200
+        assert {asset['id'] for asset in result.json()['data']['assets']} == expected

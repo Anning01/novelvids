@@ -351,8 +351,14 @@ def referenced_entities(
     shot: StoryboardShot,
     entities: Sequence[StoryboardEntity],
 ) -> list[StoryboardEntity]:
-    """Resolve image references independently of dialogue and sound bindings."""
+    """All explicit asset references share the same scene association."""
     names = set(visible_storyboard_assets(shot, entities))
+    text = "\n".join([
+        *(str(getattr(shot, field, "") or "") for field in _REFERENCE_TEXT_FIELDS),
+        *(str(value) for field in _REFERENCE_LIST_FIELDS for value in (getattr(shot, field, ()) or ())),
+        str(getattr(shot, "prompt", "") or ""),
+    ])
+    names.update(entity.name for entity in entity_reference_names(text, entities))
     if getattr(shot, 'visible_asset_names', None) is None:
         names.update(reference.asset_name for reference in getattr(shot, 'asset_refs', ()))
     return [entity for entity in entities if entity.name in names]

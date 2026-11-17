@@ -22,7 +22,8 @@ def _nullable(item):
 
 def asset_contract(specifications):
     def design(kind):
-        return {'design': _STRING, 'visual_fields': _object({key: _STRING for key in specifications[kind]['fields']})}
+        fields = {key: _STRING for key in specifications[kind]['fields']}
+        return {'design': _STRING, 'visual_fields': _object(fields) if fields else {'type': 'null'}}
 
     def asset(kind, labels=None):
         return _object({'name': {'type': 'string', 'pattern': r'^[\s\S]{1,100}$'},
@@ -60,7 +61,8 @@ def storyboard_contract(duration_range, blocking_maps):
         'spatial_relationships', 'visual_prose', 'format_and_look', 'lenses_and_filtration',
         'lighting_and_atmosphere', 'grade_and_palette', 'camera_movement', 'sound_design', 'transition')
     shot = _object({**{key: _STRING for key in text_fields}, 'duration': duration,
-        'effect_restrictions': _STRINGS, 'allowed_effects': _STRINGS, 'visible_asset_names': _STRINGS,
+        'effect_restrictions': _STRINGS, 'allowed_effects': _STRINGS,
+        'visible_asset_names': {**_STRINGS, 'description': '本镜引用的全部角色、场景和道具，包含发声角色；名单不强制角色出现在画面中。'},
         'actions': _array(action), 'dialogue': _array(speech), 'narration': _array(speech),
         'source_scene_number': {'type': ['string', 'null']},
         'duration_split_part': {'type': ['integer', 'null'], 'minimum': 2},
@@ -88,3 +90,19 @@ def output_contract(task: str, *, asset_specifications=None, duration_range=(1, 
     schema = (asset_contract(asset_specifications) if task == 'assets' else
               storyboard_contract(duration_range, blocking_maps) if task == 'storyboard' else CONTRACTS[task])
     return {'name': task, 'version': 1, 'schema': deepcopy(schema)}
+
+
+def bind_storyboard_candidates(contract: dict, entities: list[dict]) -> dict:
+    """Use the actual request context as the sole source of allowed references."""
+    result = deepcopy(contract)
+    names = list(dict.fromkeys(entity['name'] for entity in entities))
+    speakers = list(dict.fromkeys([entity['name'] for entity in entities if entity['asset_type'] == '人物'] + ['旁白', 'Narrator']))
+    fields = result['schema']['properties']['shots']['items']['properties']
+    fields['visible_asset_names'] = ({'type': 'array', 'items': {'type': 'string', 'enum': names}}
+                                     if names else {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 0})
+    for key in ('dialogue', 'narration'):
+        fields[key]['items']['properties']['speaker'] = {'type': 'string', 'enum': speakers}
+    if fields['blocking_map'].get('type') == 'object':
+        fields['blocking_map']['properties']['assets']['items']['properties']['asset_name'] = (
+            {'type': ['string', 'null'], 'enum': [*names, None]} if names else {'type': 'null'})
+    return result

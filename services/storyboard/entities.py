@@ -51,7 +51,7 @@ def entities_for_assets(assets, chapter_number: int, selected: dict[int, int], p
 
 
 def generation_entities_for_assets(assets, chapter_number: int, selected: dict[int, int]):
-    """Offer each visual identity separately so shots can select a flashback or current form."""
+    """Offer base identities and only forms associated with the requested chapter."""
     from schemas.scene import SceneEntity
     from utils.enums import AssetTypeEnum
 
@@ -59,14 +59,15 @@ def generation_entities_for_assets(assets, chapter_number: int, selected: dict[i
     for asset in assets:
         if asset.asset_type not in (AssetTypeEnum.person.value, AssetTypeEnum.scene.value, AssetTypeEnum.item.value):
             continue
-        if asset.id in selected:
-            entities.extend(entities_for_assets([asset], chapter_number, selected))
-            continue
         entities.append(SceneEntity(asset_id=asset.id, name=asset.canonical_name,
             aliases=asset.aliases or [],
             description=visual_entity_description(asset.description, asset.base_traits),
             asset_type=AssetTypeEnum(asset.asset_type).nickname))
         for variant in asset.variants:
+            if chapter_number not in (variant.chapter_numbers or []):
+                continue
+            if asset.id in selected and selected[asset.id] != variant.id:
+                continue
             entities.append(SceneEntity(asset_id=asset.id, variant_id=variant.id,
                 name=f'{asset.canonical_name}#{variant.name}', aliases=[],
                 description=visual_entity_description(variant.description, variant.base_traits),

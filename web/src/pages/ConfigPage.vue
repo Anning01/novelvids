@@ -168,7 +168,14 @@ const editingSyncedPricing = ref(false)
 const editedBillingUnit = ref<ModelPricing['billing_unit']>()
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_tool_calls: false, supports_json_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' })
+const outputMode = computed({
+  get: () => form.value.supports_strict_output ? 'json_schema' : 'text',
+  set: (value: string) => {
+    form.value.supports_json_output = value !== 'text'
+    form.value.supports_strict_output = value === 'json_schema'
+  },
+})
 
 function configTaskTypes(item: AiModelConfig) {
   return item.task_types?.length ? item.task_types : [item.task_type]
@@ -342,7 +349,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   editingSyncedPricing.value = false
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, supports_json_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
+  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
   const asrPreset = generationCapabilities.value.audio_recognition
   asrPrice.value = asrPreset?.pricing?.price_per_minute ?? 0
   if (category.id === 'asr' && asrPreset) Object.assign(form.value, { base_url: asrPreset.base_url, model: asrPreset.model, api_protocol: asrPreset.api_protocol })
@@ -388,7 +395,9 @@ function openEdit(item: AiModelConfig) {
     video_model_type: item.video_model_type || '',
     concurrency: item.concurrency,
     supports_tool_calls: item.supports_tool_calls ?? false,
+    text_api: item.text_api ?? 'chat_completions',
     supports_json_output: item.supports_json_output ?? false,
+    supports_strict_output: item.supports_strict_output ?? false,
     max_context_characters: item.max_context_characters ?? '',
     thinking: item.thinking ?? '',
     reasoning_effort: item.reasoning_effort ?? '',
@@ -864,12 +873,16 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             />
             <small>{{ tr('限制单次请求输出，避免 JSON 因达到 token 上限被截断。') }}</small>
           </label>
-          <label v-if="selectedCategory.id === 'llm'" class="is-full json-capability-field">
-            <span class="json-capability-copy">
-              <strong>{{ tr('结构化输出') }}</strong>
-              <small>{{ tr('按固定字段生成 JSON 结果，文本创作任务必需。') }}</small>
-            </span>
-            <input v-model="form.supports_json_output" type="checkbox" role="switch" :aria-label="tr('结构化输出')" />
+          <label v-if="selectedCategory.id === 'llm'">
+            <span>{{ tr('文本接口') }}</span>
+            <AppSelect v-model="form.text_api" :ariaLabel="tr('文本接口')" :menu-z-index="2000"
+              :options="[{ value: 'chat_completions', label: 'Chat Completions' }, { value: 'responses', label: 'Responses' }]" />
+          </label>
+          <label v-if="selectedCategory.id === 'llm'">
+            <span>{{ tr('结构化输出') }}</span>
+            <AppSelect v-model="outputMode" :ariaLabel="tr('结构化输出')" :menu-z-index="2000"
+              :options="[{ value: 'text', label: tr('不支持') }, { value: 'json_schema', label: 'JSON Schema' }]" />
+            <small>{{ tr('文本创作任务仅使用 JSON Schema 严格字段约束。') }}</small>
           </label>
         </div>
 
@@ -883,7 +896,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
               <option value="disabled">{{ tr('关闭思考') }}</option>
               <option v-for="level in ['low', 'medium', 'high', 'max']" :key="level" :value="level" />
             </datalist>
-            <small :id="`${reasoningControlId}-thinking-help`">{{ tr('enabled/disabled 发送 thinking.type；其他值作为顶层 thinking 原样发送。') }}</small>
+            <small :id="`${reasoningControlId}-thinking-help`">{{ form.text_api === 'responses' ? tr('Responses 使用 reasoning.effort；disabled 对应 none，enabled 沿用所设强度或模型默认值。') : tr('enabled/disabled 发送 thinking.type；其他值作为顶层 thinking 原样发送。') }}</small>
           </label>
           <label :for="`${reasoningControlId}-effort`">
             <span :id="`${reasoningControlId}-effort-label`">{{ tr('推理强度（reasoning_effort）') }}</span>
@@ -895,6 +908,22 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             <small :id="`${reasoningControlId}-effort-help`">{{ tr('可选常用档位，也可输入上游支持的其他值。不同模型的支持范围不同。') }}</small>
           </label>
         </div>
+
+        <details v-if="selectedCategory.id === 'llm'" class="reasoning-reference">
+          <summary>{{ tr('常用模型参数参考') }}</summary>
+          <p>{{ tr('按模型版本和调用接口填写；以下仅为参考，不会自动修改参数。') }}</p>
+          <dl>
+            <dt>DeepSeek · Flash / V4</dt>
+            <dd>{{ tr('强度 low / high / max，默认 high；Responses 中 none 关闭思考。Chat 接口也可用 thinking 的 enabled / disabled 开关。') }} <a href="https://api-docs.deepseek.com/guides/thinking_mode/" target="_blank" rel="noopener noreferrer">{{ tr('DeepSeek 官方文档') }}</a></dd>
+            <dt>{{ tr('豆包 · Seed 2.1 Pro / Lite（260915）') }}</dt>
+            <dd>{{ tr('强度 minimal / low / medium / high，默认 high；thinking 支持 enabled / disabled。其他版本的档位可能不同。') }} <a href="https://docs.volcengine.com/docs/ark/model-parameter-support" target="_blank" rel="noopener noreferrer">{{ tr('豆包官方文档') }}</a></dd>
+            <dt>GLM · 5.3</dt>
+            <dd>{{ tr('强度 low / high / max；不支持关闭思考，需要较快响应时可用 low。不要将这组取值直接套用到旧版 GLM。') }} <a href="https://docs.bigmodel.cn/cn/guide/capabilities/thinking" target="_blank" rel="noopener noreferrer">{{ tr('GLM 官方文档') }}</a></dd>
+            <dt>{{ tr('小米 MiMo') }}</dt>
+            <dd>{{ tr('Chat 接口使用 thinking 的 enabled / disabled；Responses 用 none 关闭，其余强度值目前都表示开启，并不区分推理强弱。') }} <a href="https://mimo.mi.com/docs/en-US/api/chat/responses" target="_blank" rel="noopener noreferrer">{{ tr('MiMo 官方文档') }}</a></dd>
+          </dl>
+          <small>{{ tr('中转通道可能有不同支持范围；不确定时留空，使用模型默认值。核对日期：2026-11-17。') }}</small>
+        </details>
 
         <label v-if="selectedCategoryId === 'llm' && !editingSyncedPricing" class="model-toggle">
           <input v-model="form.supports_tool_calls" type="checkbox" role="switch" :aria-label="tr('多轮工具调用')" />
@@ -984,6 +1013,14 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
 
 <style scoped>
 .reasoning-controls { margin-block: 14px; }
+.reasoning-reference { margin-block: 14px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; }
+.reasoning-reference summary { cursor: pointer; color: var(--app-text); padding-block: 6px; }
+.reasoning-reference summary:hover, .reasoning-reference a:hover { color: var(--app-accent); }
+.reasoning-reference summary:focus-visible, .reasoning-reference a:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+.reasoning-reference dt { color: var(--app-text); font-weight: 600; margin-block-start: 12px; }
+.reasoning-reference dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.reasoning-reference a { color: var(--app-text); text-decoration: underline; text-underline-offset: 3px; }
+.reasoning-reference p { margin-block: 8px; }
 .reasoning-controls input:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
 .model-settings-page { min-height: 100%; padding: 36px 22px 80px; color: #303442; background: #fff; }
 .model-settings-header { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 24px; margin: 0 0 28px; padding-bottom: 28px; border-bottom: 1px solid #eceef3; }

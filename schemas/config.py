@@ -37,6 +37,7 @@ class AiModelConfigProperties(BaseModel):
         description="是否支持 response_format=json_object",
     )
     supports_tool_calls: bool = Field(False, description="是否支持多轮工具调用")
+    text_api: Literal["chat_completions", "responses"] = "chat_completions"
     supports_strict_output: bool = Field(False, description="是否支持 response_format=json_schema 且 strict=true")
     max_context_characters: Optional[int] = Field(
         None,
