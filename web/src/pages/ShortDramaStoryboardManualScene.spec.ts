@@ -56,7 +56,7 @@ async function mountPage() {
   })
 }
 
-describe('人工模式无章节时创建第一个分镜', () => {
+describe('手动创建分镜', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -91,6 +91,88 @@ describe('人工模式无章节时创建第一个分镜', () => {
     expect(api.createChapter).toHaveBeenCalledWith(expect.objectContaining({ novel_id: 9, number: 1, name: '第一章' }))
     expect(api.createScene).toHaveBeenCalledWith(expect.objectContaining({ chapter_id: 1, sequence: 1 }))
     expect(wrapper.findAll('.shot-editor').length).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  async function mountAgentPage() {
+    vi.mocked(api.novelMeta).mockResolvedValue({ data: { id: 9, name: '测试故事', author: 'Agent 创建' } } as never)
+    vi.mocked(api.chapters).mockResolvedValue({ data: { items: [chapter], pagination: { page: 1, pages: 1 } } } as never)
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, assets: [], scenes: [], videos: {} } } as never)
+    const wrapper = await mountPage()
+    await flushPromises()
+    return wrapper
+  }
+
+  it('Agent 项目没有选择 AI 模型时，也能从空态手动创建首镜', async () => {
+    const wrapper = await mountAgentPage()
+    expect(api.createScene).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').find(button => button.text() === '生成全部分镜')!.attributes('disabled')).toBeDefined()
+    await wrapper.get('.storyboard-state').findAll('button').find(button => button.text() === '手动创建分镜')!.trigger('click')
+    await flushPromises()
+    expect(api.createScene).toHaveBeenCalledWith(expect.objectContaining({ chapter_id: 1, sequence: 1, prompt: '' }))
+    expect(api.createChapter).not.toHaveBeenCalled()
+    expect(api.generateScenes).not.toHaveBeenCalled()
+    expect(wrapper.findAll('.shot-editor')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('Agent 项目可以连续手动追加分镜，保留已有分镜', async () => {
+    const wrapper = await mountAgentPage()
+    await wrapper.get('.chapter-actions').findAll('button').find(button => button.text() === '创建分镜')!.trigger('click')
+    await flushPromises()
+    vi.mocked(api.createScene).mockResolvedValueOnce({ data: { id: 101, chapter_id: 1, sequence: 2, description: '', prompt: '', duration: 6 } } as never)
+    await wrapper.get('.chapter-actions').findAll('button').find(button => button.text() === '创建分镜')!.trigger('click')
+    await flushPromises()
+    expect(api.createScene).toHaveBeenLastCalledWith(expect.objectContaining({ chapter_id: 1, sequence: 2 }))
+    expect(wrapper.find('#scene-100').exists()).toBe(true)
+    expect(wrapper.find('#scene-101').classes()).toContain('is-active')
+    expect(api.generateScenes).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('创建期间两个手动入口都显示忙碌状态，避免重复提交', async () => {
+    const wrapper = await mountAgentPage()
+    let finish!: (value: Awaited<ReturnType<typeof api.createScene>>) => void
+    vi.mocked(api.createScene).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    await wrapper.get('.storyboard-state').findAll('button').find(button => button.text() === '手动创建分镜')!.trigger('click')
+    const busyButtons = wrapper.findAll('button').filter(button => button.text() === '创建中')
+    expect(busyButtons).toHaveLength(2)
+    for (const button of busyButtons) {
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(button.attributes('aria-busy')).toBe('true')
+      await button.trigger('click')
+    }
+    expect(api.createScene).toHaveBeenCalledTimes(1)
+    finish({ data: { id: 100, chapter_id: 1, sequence: 1, description: '', prompt: '', duration: 6 } } as never)
+    await flushPromises()
+    expect(wrapper.findAll('.shot-editor')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('手动创建失败后保留空态，允许再次手动创建', async () => {
+    const wrapper = await mountAgentPage()
+    vi.mocked(api.createScene).mockRejectedValueOnce(new Error('保存失败'))
+    const createButton = () => wrapper.get('.storyboard-state').findAll('button').find(button => button.text() === '手动创建分镜')!
+    await createButton().trigger('click')
+    await flushPromises()
+    expect(createButton().attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('.shot-editor')).toHaveLength(0)
+    await createButton().trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.shot-editor')).toHaveLength(1)
+    expect(api.generateScenes).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('章节尚未读取完成时禁用手动创建，避免另建章节', async () => {
+    vi.mocked(api.chapters).mockReturnValueOnce(new Promise(() => {}))
+    const wrapper = await mountPage()
+    await flushPromises()
+    const button = wrapper.get('.chapter-actions').findAll('button').find(button => button.text() === '创建分镜')!
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(api.createChapter).not.toHaveBeenCalled()
+    expect(api.createScene).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
