@@ -4428,6 +4428,11 @@
     "官方标准价": "Official standard price"
   },
   "skills_management": {
+    "输入素材": "Input material",
+    "输出语言": "Output language",
+    "插入变量": "Insert a variable",
+    "可直接编辑 Markdown，也可点击下方变量插入正文末尾。变量只能整体移除，不能修改名称。": "Edit Markdown or append a variable using the buttons below. Variables can only be removed as a whole; their names cannot be edited.",
+    "占位符不可拆改，请整体删除后重新插入。": "Variables cannot be edited in part. Remove the whole variable and insert it again.",
     "占位符参数（仅试运行）": "Placeholder parameters (trial only)",
     "正式生成时从本集设置填入，保存技能时保留占位符。": "Production uses episode settings. Saved skills keep their placeholders.",
     "本集节奏": "Episode pacing",

@@ -149,7 +149,7 @@ async function send() {
               <label :for="`${id}-name`">{{ tr('技能名称') }}<input :id="`${id}-name`" v-model="editor.name" name="skill-name" autofocus required maxlength="100" /></label>
               <label :for="`${id}-description`">{{ tr('说明（可选）') }}<input :id="`${id}-description`" v-model="editor.description" name="skill-description" maxlength="1000" /></label>
             </fieldset>
-            <div class="skill-instructions"><SkillMarkdownEditor v-model="editor.instructions" :disabled="saving || running || disabled" /></div>
+            <div class="skill-instructions"><SkillMarkdownEditor v-model="editor.instructions" :task="task" :disabled="saving || running || disabled" /></div>
             <details class="skill-references">
               <summary>{{ tr('参考资料') }} <span>{{ editor.references.length }}/10</span></summary>
               <fieldset :disabled="saving || running || disabled">
