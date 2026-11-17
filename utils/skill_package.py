@@ -231,4 +231,3 @@ class SkillPackage:
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, file_bytes(file))
         return output.getvalue()
-

@@ -235,6 +235,7 @@ textarea { flex: 1; resize: none; min-block-size: 240px; padding: 16px; color: v
 .skill-markdown :deep(.vditor-ir .vditor-reset), .skill-markdown :deep(.vditor-sv) { padding: 20px !important; }
 .skill-markdown :deep(.vditor-content) { min-block-size: 0; }
 .skill-markdown :deep([contenteditable]) { scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; caret-color: var(--app-accent); }
+.skill-markdown :deep(.vditor-sv) { scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; caret-color: var(--app-accent); }
 .skill-markdown :deep(.vditor-toolbar) { padding-inline: 10px; border-block-end: 1px solid var(--app-border); }
 .skill-markdown :deep(button:focus-visible), textarea:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
 .skill-markdown :deep(.vditor-reset pre > code) { color: var(--app-text); background: var(--app-surface-muted); }
