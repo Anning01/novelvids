@@ -59,6 +59,13 @@ const counts = computed(() => {
 const stateLabel = computed(() => selected.value?.state === 'current' ? tr('已确认') : selected.value?.state === 'stale' ? tr('需要复核') : tr('尚未建立'))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
 const natures: Record<FactNature, string> = { fact: '明确事实', testimony: '人物证言', inference: '尚待证实的推测', plan: '大纲计划', creative_decision: '创作决定' }
+const scopeOptions = computed(() => rows.value.map(row => ({
+  value: row.chapter_id === null ? 'baseline' : String(row.chapter_id),
+  label: row.chapter_id === null ? tr('全局故事底稿') : `${tr('第 {p0} 集', { p0: row.number })} · ${tr(row.state === 'current' ? '已确认' : row.state === 'stale' ? '需要复核' : '尚未建立')}`,
+})))
+const natureOptions = computed(() => Object.entries(natures).map(([value, label]) => ({ value, label: tr(label) })))
+const worldOptions = computed(() => [{ value: '', label: tr('未指定世界') },
+  ...(draft.value?.subjects.filter(subject => subject.kind === 'world').map(world => ({ value: world.ref, label: world.name })) ?? [])])
 const commitLabels: Record<MemoryCommit['status'], string> = { pending: '分析中', draft: '尚未审核', ready: '待确认', needs_review: '审核有阻断问题', accepted: '已确认', rejected: '已退回', stale: '已失效' }
 function scopeText(value: MemoryScope | Record<string, string | number | null>) {
   const parts: string[] = []
@@ -307,7 +314,7 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
     <div v-if="loading && !status" class="memory-skeleton" :aria-label="tr('正在读取故事记忆')" aria-busy="true"><span></span><span></span></div>
     <template v-if="status">
       <div class="memory-controls">
-        <div class="memory-field"><label :for="`${id}-scope`">{{ tr('查看范围') }}</label><select :id="`${id}-scope`" v-model="scope" name="memory_scope" :disabled="Boolean(draft) || busy"><option value="baseline">{{ tr('全局故事底稿') }}</option><option v-for="row in status.chapters" :key="row.chapter_id!" :value="String(row.chapter_id)">{{ tr('第 {p0} 集', { p0: row.number }) }} · {{ tr(row.state === 'current' ? '已确认' : row.state === 'stale' ? '需要复核' : '尚未建立') }}</option></select></div>
+        <div class="memory-field"><label :id="`${id}-scope-label`">{{ tr('查看范围') }}</label><AppSelect v-model="scope" :aria-labelledby="`${id}-scope-label`" :ariaLabel="tr('查看范围')" density="compact" :options="scopeOptions" :disabled="Boolean(draft) || busy" /></div>
         <template v-if="canEdit">
           <div class="memory-field"><label :id="`${id}-model-label`">{{ tr('故事记忆模型') }}</label><AppSelect v-model="modelId" :aria-labelledby="`${id}-model-label`" :ariaLabel="tr('故事记忆模型')" density="compact" :options="[{ value: '', label: tr(modelsLoading ? '正在读取模型…' : models.length ? '选择分析模型' : '暂无可用模型') }, ...models]" :disabled="locked || !models.length || modelsLoading" /></div>
           <TaskSkillPicker v-model="skillId" task="story" :disabled="locked" />
@@ -343,10 +350,10 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
           <fieldset v-for="(fact, index) in draft.facts" :key="index" :disabled="locked">
             <legend>{{ draft.subjects.find(subject => subject.ref === fact.subject_ref)?.name }} · {{ tr(labels[fact.category] || fact.category) }}</legend>
             <div class="memory-field"><label :for="`${id}-fact-${index}`">{{ tr('事实描述') }}</label><textarea :id="`${id}-fact-${index}`" v-model="fact.content" :name="`fact_${index}`" required maxlength="8000" rows="3"></textarea></div>
-            <div class="memory-field"><label :for="`${id}-nature-${index}`">{{ tr('记忆性质') }}</label><select :id="`${id}-nature-${index}`" v-model="fact.nature" :name="`nature_${index}`"><option v-for="(label, value) in natures" :key="value" :value="value">{{ tr(label) }}</option></select></div>
+            <div class="memory-field"><label :id="`${id}-nature-${index}-label`">{{ tr('记忆性质') }}</label><AppSelect :model-value="fact.nature" :aria-labelledby="`${id}-nature-${index}-label`" :ariaLabel="tr('记忆性质')" density="compact" :options="natureOptions" :disabled="locked" @update:model-value="fact.nature = $event as FactNature" /></div>
             <details><summary>{{ tr('调整适用范围') }}</summary>
               <div class="memory-scope-fields">
-                <div class="memory-field"><label :for="`${id}-world-${index}`">{{ tr('所属世界') }}</label><select :id="`${id}-world-${index}`" v-model="fact.scope.world_ref" :name="`world_${index}`"><option :value="null">{{ tr('未指定世界') }}</option><option v-for="world in draft.subjects.filter(subject => subject.kind === 'world')" :key="world.ref" :value="world.ref">{{ world.name }}</option></select></div>
+                <div class="memory-field"><label :id="`${id}-world-${index}-label`">{{ tr('所属世界') }}</label><AppSelect :model-value="fact.scope.world_ref ?? ''" :aria-labelledby="`${id}-world-${index}-label`" :ariaLabel="tr('所属世界')" density="compact" :options="worldOptions" :disabled="locked" @update:model-value="fact.scope.world_ref = $event || null" /></div>
                 <div class="memory-field"><label :for="`${id}-scene-${index}`">{{ tr('适用场景（可选）') }}</label><input :id="`${id}-scene-${index}`" v-model="fact.scope.scene" :name="`scene_${index}`" maxlength="8000" /></div>
                 <div class="memory-field"><label :for="`${id}-time-${index}`">{{ tr('故事时点（可选）') }}</label><input :id="`${id}-time-${index}`" v-model="fact.scope.story_time" :name="`time_${index}`" maxlength="8000" /></div>
                 <div class="memory-field"><label :for="`${id}-from-${index}`">{{ tr('起始集号（可选）') }}</label><input :id="`${id}-from-${index}`" v-model.number="fact.scope.from_chapter" :name="`from_${index}`" type="number" min="1" step="1" /></div>
@@ -386,11 +393,11 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
 .memory-field { display: grid; gap: 6px; min-width: 0; margin-block: 10px; }
 .memory-field label, legend { color: var(--app-text-secondary); font-size: 12px; font-weight: 600; }
 .memory-field :deep(.app-select) { width: 100%; }
-textarea, select, input { width: 100%; box-sizing: border-box; min-height: 38px; padding: 9px 11px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; font-size: 14px; line-height: 1.6; caret-color: var(--app-accent); }
+textarea, input { width: 100%; box-sizing: border-box; min-height: 38px; padding: 9px 11px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; font-size: 14px; line-height: 1.6; caret-color: var(--app-accent); }
 textarea { resize: vertical; }
-textarea:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+textarea:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
 textarea::placeholder { color: var(--app-text-muted); }
-textarea:disabled, select:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
+textarea:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .memory-scope-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
 .memory-hint { margin-block: 10px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .memory-current, .memory-candidate, .memory-history { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
@@ -419,5 +426,5 @@ fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-bloc
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }
 @media (max-width: 680px) { .story-memory { padding: 18px 14px; } .memory-controls > .memory-field { flex-basis: 100%; } .memory-controls > .memory-actions { margin-inline-start: 0; } .memory-controls > .memory-actions :deep(button) { white-space: normal; } }
-@media (pointer: coarse) { textarea, select, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } .story-memory :deep(.app-button) { min-height: 48px; } }
+@media (pointer: coarse) { textarea, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } .story-memory :deep(.app-button) { min-height: 48px; } }
 </style>

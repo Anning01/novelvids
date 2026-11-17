@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import StoryMemoryPanel from './StoryMemoryPanel.vue'
+import AppSelect from '@/components/AppSelect.vue'
 import { storyMemoryApi } from './api'
 import { api } from '@/api'
 import { agentApi } from '@/features/creation-agent/api'
@@ -27,6 +28,16 @@ const task = (status: number, stage?: string): AiTask => ({ id: 'job', task_type
 function render(canEdit = true) {
   return mount(StoryMemoryPanel, { props: { projectId: 9, chapterId: 1, canEdit, models: [{ value: '5', label: '分析模型' }], modelId: '5' },
     global: { stubs: { TaskSkillPicker: true, AgentRunActivity: true } } })
+}
+
+async function choose(wrapper: ReturnType<typeof render>, label: string, optionLabel: string) {
+  const picker = wrapper.findAllComponents(AppSelect).find(component => component.props('ariaLabel') === label)!
+  await picker.get('button').trigger('click')
+  const menu = document.querySelector(`[role="listbox"][aria-label="${label}"]`)!
+  const option = [...menu.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(button => button.textContent?.trim() === optionLabel)!
+  expect(option).toBeDefined()
+  option.click()
+  await flushPromises()
 }
 
 beforeEach(() => {
@@ -59,6 +70,36 @@ it('separates confirmed memory from reviewable candidates and preserves source e
   expect(storyMemoryApi.detail).toHaveBeenCalledWith(9, 10, expect.any(AbortSignal))
 })
 
+it('switches to global memory through the shared scope picker', async () => {
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.find('select').exists()).toBe(false)
+  await choose(wrapper, '查看范围', '全局故事底稿')
+  expect(storyMemoryApi.context).toHaveBeenLastCalledWith(9, null, expect.any(AbortSignal))
+  expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('全局故事底稿')
+})
+
+it.each([['world', '未指定世界', null], [null, '故城世界', 'world']] as const)('saves the world picker value from %s without changing nullable semantics', async (initial, label, expected) => {
+  const detail = structuredClone(ready)
+  ;(detail.candidate as MemoryCandidate).facts[0]!.scope.world_ref = initial
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(detail))
+  const wrapper = render()
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
+  expect(wrapper.find('select').exists()).toBe(false)
+  expect(wrapper.get('button[aria-label="查看范围"]').attributes('disabled')).toBeDefined()
+  await choose(wrapper, '所属世界', label)
+  await wrapper.setProps({ disabled: true })
+  expect(wrapper.get('button[aria-label="所属世界"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('button[aria-label="记忆性质"]').attributes('disabled')).toBeDefined()
+  await wrapper.setProps({ disabled: false })
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(storyMemoryApi.update).toHaveBeenCalledWith(9, 10, expect.objectContaining({
+    facts: [expect.objectContaining({ scope: expect.objectContaining({ world_ref: expected }) })],
+  }), 1)
+})
+
 it('uses the reviewed package hash and records the human decision note', async () => {
   const wrapper = render()
   await flushPromises()
@@ -74,7 +115,7 @@ it('edits a candidate without altering the evidence and invalidates its prior re
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
   await wrapper.get('textarea[name="fact_0"]').setValue('古代城镇，以油灯照明。')
-  await wrapper.get('select[name="nature_0"]').setValue('testimony')
+  await choose(wrapper, '记忆性质', '人物证言')
   await wrapper.get('input[name="scene_0"]').setValue('灾变前的回忆')
   await wrapper.get('input[name="from_0"]').setValue('2')
   await wrapper.get('input[name="until_0"]').setValue('3')
@@ -173,7 +214,7 @@ it('ignores a late chapter response after switching scopes', async () => {
   vi.mocked(storyMemoryApi.detail).mockImplementation(async (_project, identifier) => identifier === 10 ? delayed : response(next))
   const wrapper = render()
   await flushPromises()
-  await wrapper.get('select[name="memory_scope"]').setValue('2')
+  await choose(wrapper, '查看范围', '第 2 集 · 已确认')
   await flushPromises()
   resolve(response(ready))
   await flushPromises()
