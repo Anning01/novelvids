@@ -68,6 +68,9 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         return await self._edit(chapter_id, obj_in)
 
     async def _ensure_unreferenced(self, chapter: Chapter) -> None:
+        from models.story_memory import StoryCommit
+        if await StoryCommit.filter(chapter_id=chapter.id).exists():
+            raise HTTPException(409, localized_message('本集已有故事记忆提交，请保留集号和来源章节'))
         for task in await AiTask.filter(status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]):
             params = task.request_params or {}
             if params.get('novel_id') == chapter.novel_id and (params.get('chapter_id') == chapter.id or task.task_type in {AiTaskTypeEnum.project_analysis, AiTaskTypeEnum.creation_agent}):

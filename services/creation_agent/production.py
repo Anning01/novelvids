@@ -36,6 +36,8 @@ async def conversation_for_task(task):
         "assets": ("提取资产", "Extract assets"),
         "storyboard": ("生成分镜", "Generate storyboard"),
         "story": ("分析故事", "Analyze story"),
+        "story_memory_analyze": ("分析故事记忆候选", "Analyze story memory candidates"),
+        "story_memory_review": ("审核故事记忆候选", "Review story memory candidates"),
         "project_cover": ("生成项目封面", "Generate project cover"),
         "optimize_video_prompt": ("优化分镜提示词", "Optimize shot prompt"),
         "screenplay": ("生成本集剧本", "Adapt episode screenplay"),

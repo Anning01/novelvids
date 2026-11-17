@@ -1,0 +1,66 @@
+"""Project-scoped candidate, review, decision and immutable history endpoints."""
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from auth.deps import AuthContext, require_team_access, require_roles
+from controllers.story_memory import submit_analysis, submit_review
+from models.story_memory import StoryCommit, StoryFact, StorySubject
+from schemas.ai_task import AiTaskOut
+from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryReviewRequest
+from services.ai_task_executor import ai_task_executor
+from services.story_memory.store import commit_data, decide, get_commit, save_candidate
+from utils.response_format import ResponseSchema
+
+router = APIRouter(prefix='/novel/{novel_id}/story-memory', dependencies=[Depends(require_team_access)])
+_EDITOR = Depends(require_roles('admin', 'creator'))
+
+
+@router.post('/analyze', response_model=ResponseSchema[AiTaskOut])
+async def analyze(novel_id: int, body: StoryAnalysisRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
+    task = await submit_analysis(novel_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.get('/commits', response_model=ResponseSchema)
+async def history(novel_id: int, before_id: int | None = Query(None, gt=0), limit: int = Query(30, ge=1, le=100)):
+    query = StoryCommit.filter(novel_id=novel_id)
+    if before_id:
+        query = query.filter(id__lt=before_id)
+    commits = await query.order_by('-id').limit(limit)
+    return ResponseSchema(data=[await commit_data(commit, detail=False) for commit in commits])
+
+
+@router.get('/commits/{commit_id}', response_model=ResponseSchema)
+async def detail(novel_id: int, commit_id: int):
+    return ResponseSchema(data=await commit_data(await get_commit(novel_id, commit_id)))
+
+
+@router.put('/commits/{commit_id}/candidate', response_model=ResponseSchema)
+async def edit(novel_id: int, commit_id: int, body: StoryCandidateUpdate, _: AuthContext = _EDITOR):
+    commit = await save_candidate(novel_id, commit_id, body.candidate, body.expected_revision)
+    return ResponseSchema(data=await commit_data(commit))
+
+
+@router.post('/commits/{commit_id}/review', response_model=ResponseSchema[AiTaskOut])
+async def review(novel_id: int, commit_id: int, body: StoryReviewRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
+    task = await submit_review(novel_id, commit_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post('/commits/{commit_id}/decision', response_model=ResponseSchema)
+async def decision(novel_id: int, commit_id: int, body: StoryDecision, ctx: AuthContext = _EDITOR):
+    commit = await decide(novel_id, commit_id, body, ctx.user.id if ctx.user else None)
+    return ResponseSchema(data=await commit_data(commit))
+
+
+@router.get('/subjects', response_model=ResponseSchema)
+async def subjects(novel_id: int, after_id: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    return ResponseSchema(data=await StorySubject.filter(novel_id=novel_id, id__gt=after_id).order_by('id').limit(limit).values('id', 'kind', 'name', 'aliases'))
+
+
+@router.get('/commits/{commit_id}/facts', response_model=ResponseSchema)
+async def facts(novel_id: int, commit_id: int, after_id: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    await get_commit(novel_id, commit_id)
+    return ResponseSchema(data=await StoryFact.filter(novel_id=novel_id, commit_id=commit_id, id__gt=after_id)
+        .order_by('id').limit(limit).values('id', 'subject_id', 'category', 'nature', 'content', 'scope', 'evidence', 'operation', 'replaces_id'))

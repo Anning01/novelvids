@@ -54,6 +54,16 @@ async def ensure_resource_library_schema() -> None:
     await connection.execute_script(generator._get_table_sql(ResourcePlacement, safe=True)['table_creation_string'])
 
 
+async def ensure_story_memory_schema() -> None:
+    """Only create missing story tables; never rewrite existing project data."""
+    from models.story_memory import StorySubject, StoryCommit, StoryFact, StorySnapshot
+    connection = Tortoise.get_connection('default')
+    generator = connection.schema_generator(connection)
+    for model in (StorySubject, StoryCommit, StoryFact, StorySnapshot):
+        definition = generator._get_table_sql(model, safe=True)
+        await connection.execute_script(definition['table_creation_string'])
+
+
 async def ensure_text_task_schema() -> None:
     from models.user_skill import UserSkill, TaskSkillPreference
     connection = Tortoise.get_connection('default')
