@@ -376,7 +376,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if previous:
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
-                if (existing.request_params.get('novel_id') == novel_id
+                if (existing.request_params.get('operation') in {None, 'story', 'project_cover'}
+                    and existing.request_params.get('novel_id') == novel_id
                     and (existing.request_params.get('operation') == 'project_cover') == cover_only):
                     if assistant_model_config_id is not None and existing.request_params.get('assistant_model_config_id') != assistant_model_config_id:
                         raise HTTPException(409, localized_message('已有分析任务正在运行，请等待完成后再切换分析模型'))
@@ -396,7 +397,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         from services.project_analysis.results import expose_saved_analysis
         return await expose_saved_analysis(next(
             (task for task in tasks if task.request_params.get("novel_id") == novel_id
-             and task.request_params.get("operation") != "project_cover"),
+             and task.request_params.get("operation") in {None, 'story'}),
             None,
         ))
 

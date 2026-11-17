@@ -151,6 +151,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             context['project'] = {'id': novel.id, 'name': novel.name, 'style': novel.custom_style_prompt or novel.style_key}
             context['chapter'] = {'id': chapter.id, 'name': chapter.name, 'number': chapter.number} if chapter else None
         context['constraints'] = await creation_memory.applicable(novel.id, request)
+        if limits.runtime != 'deepagents':
+            from services.story_memory.context import conversation_memory
+            context['story_memory'] = await conversation_memory(novel.id, request.chapter_id)
         async def refresh_context(chapter_offset: int | None = None):
             await before_request()
             await novel.refresh_from_db()
@@ -162,6 +165,8 @@ class CreationAgentTaskHandler(BaseTaskHandler):
                 context['project'].update(outline=novel.story_outline, setting=novel.project_setting,
                                           style=novel.custom_style_prompt or novel.style_key)
             context['constraints'] = await creation_memory.applicable(novel.id, request)
+            if limits.runtime != 'deepagents':
+                context['story_memory'] = await conversation_memory(novel.id, request.chapter_id)
             return context
 
         async def check_context():

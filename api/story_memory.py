@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from auth.deps import AuthContext, require_team_access, require_roles
 from controllers.story_memory import submit_analysis, submit_review
 from models.story_memory import StoryCommit, StoryFact, StorySubject
+from models.ai_task import AiTask
 from schemas.ai_task import AiTaskOut
 from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryReviewRequest, StoryRecheckRequest
 from services.ai_task_executor import ai_task_executor
@@ -18,6 +19,27 @@ _EDITOR = Depends(require_roles('admin', 'creator'))
 async def status(novel_id: int):
     from services.story_memory.status import memory_status
     return ResponseSchema(data=await memory_status(novel_id))
+
+
+@router.get('/context', response_model=ResponseSchema)
+async def context(novel_id: int, chapter_id: int | None = Query(None, gt=0)):
+    from services.story_memory.context import story_context
+    return ResponseSchema(data=await story_context(novel_id, chapter_id))
+
+
+@router.get('/activity', response_model=ResponseSchema)
+async def activity(novel_id: int):
+    active = await AiTask.filter(task_type=5, status__in=[1, 2, 6]).order_by('-created_at')
+    task = next((task for task in active if task.request_params.get('novel_id') == novel_id
+        and task.request_params.get('operation') in {'story_memory_recheck', 'story_memory_analyze', 'story_memory_review'}), None)
+    if task is None:
+        commit = await StoryCommit.filter(novel_id=novel_id).order_by('-id').first()
+        identifier = (commit.review.get('task_id') or commit.task_id) if commit else None
+        task = await AiTask.get_or_none(id=identifier) if identifier else None
+        if task and task.request_params.get('story_recheck_id'):
+            task = await AiTask.get(id=task.request_params['story_recheck_id'])
+    return ResponseSchema(data=AiTaskOut.model_validate(task).model_dump(include={
+        'id', 'status', 'stage', 'progress', 'response_data', 'error_message', 'started_at', 'finished_at'}) if task else None)
 
 
 @router.post('/recheck', response_model=ResponseSchema[AiTaskOut])

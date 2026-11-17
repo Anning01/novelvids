@@ -54,3 +54,12 @@ def contract(stage):
 
     strict(schema)
     return {'name': 'story_memory_' + stage, 'version': 1, 'schema': schema}
+
+
+def context_rules(language):
+    return ('\n已确认故事记忆按章节和世界范围生效。结合全局背景、前情和本章状态创作；'
+        '逐条遵守 scope、nature 和 applies_to，计划、证言、推测不当作已发生事实。'
+        '回忆、梦境、穿越按场景的世界与故事时点选择设定，不把章末状态提前到章首。'
+        '未明确的年代、科技和身份保留未知；视觉设计的补全不反向成为原著事实。'
+        '人物档案标识与资产标识不同，引用已登记资产和形态时沿用业务目录中的真实标识。'
+        '\nStory memory language=' + language)

@@ -171,7 +171,13 @@ async def commit_data(commit, *, detail=True):
     data = {key: getattr(commit, key) for key in fields}
     data.update(current=current, stale_reason=reason, request_id=str(commit.request_id), task_id=str(commit.task_id) if commit.task_id else None)
     if detail:
+        from models.ai_task import AiTask
+        task = await AiTask.get_or_none(id=commit.task_id) if commit.task_id else None
         snapshot = await StorySnapshot.get_or_none(commit_id=commit.id)
         data.update(candidate=commit.candidate, review=commit.review, source_snapshot=commit.source_snapshot,
-            snapshot=snapshot.data if snapshot else None)
+            snapshot=snapshot.data if snapshot else None,
+            recheck_task_id=task.request_params.get('story_recheck_id') if task else None)
+        replaced = [fact['replaces_id'] for fact in commit.candidate.get('facts', []) if fact.get('replaces_id')]
+        data['replaced_facts'] = {row['id']: row['content'] for row in await StoryFact.filter(
+            novel_id=commit.novel_id, id__in=replaced).values('id', 'content')}
     return data

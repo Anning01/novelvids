@@ -50,6 +50,8 @@ async def load_project_facts(*, novel_id, chapter_id, page_size, character_budge
         'saved_assets': len(rows), 'saved_variants': len(variants), 'catalog_path': CATALOG_PATH,
         'asset_groups': preview, 'preview_has_more': len(relevant or rows) > len(preview),
         'source': 'current_saved_project_catalog'}
+    from services.story_memory.context import conversation_memory
+    summary['story_memory'] = await conversation_memory(novel_id, chapter_id)
     entries = [{'world_and_style': world}]
     for row in rows:
         entries.append({key: value for key, value in row.items() if key != 'variants'})

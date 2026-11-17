@@ -67,6 +67,13 @@ class ExtractionTaskHandler(BaseTaskHandler):
                 variant_ids = [item['variant_id'] for group in summary.values() for item in group if 'variant_id' in item]
                 summary['asset_ids'] = sorted(set(identifiers))
                 summary['variant_ids'] = sorted(set(variant_ids))
+                from services.story_memory.context import saved_binding
+                provenance = await saved_binding(request_params)
+                if provenance:
+                    for model, ids in ((Asset, summary['asset_ids']), (AssetVariant, summary['variant_ids'])):
+                        for obj in await model.filter(id__in=ids):
+                            obj.metadata = {**(obj.metadata or {}), 'story_memory': provenance}
+                            await obj.save(update_fields=['metadata'])
                 changes = []
                 for asset in await Asset.filter(id__in=identifiers):
                     previous, after = before.get(asset.id, {}), await object_state(asset)

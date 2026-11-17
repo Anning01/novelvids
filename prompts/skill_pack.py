@@ -33,6 +33,7 @@ FILES = {
     "screenplay": "novelvids-screenplay/references/screenplay.md",
     "source_reading": "runtime/source_reading.md",
     "story": "runtime/story.md",
+    "story_memory_guide": "novelvids-story/references/story_memory.md",
     "storyboard": "novelvids-storyboard/references/storyboard.md",
     "storyboard_sheets": "novelvids-storyboard/references/storyboard_sheets.md",
     "storyboard_sheet_templates": "novelvids-storyboard/references/storyboard_sheet_templates.json",

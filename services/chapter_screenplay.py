@@ -65,6 +65,8 @@ class ScreenplayHandler(BaseTaskHandler):
         async def save():
             async with project_write(chapter.novel_id) as db:
                 await execution.before_request()
+                from services.story_memory.context import verify_bindings
+                await verify_bindings(params)
                 await chapter.refresh_from_db(using_db=db)
                 verify_source()
                 chapter.screenplay = screenplay

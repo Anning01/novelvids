@@ -57,6 +57,9 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
         duration_range=params.get('shot_duration_range', (1, 30)), blocking_maps=params.get('generate_blocking_maps', False))
     if rendering:
         contract['rendering'] = rendering
+    if task in {'assets', 'storyboard', 'screenplay'}:
+        from services.story_memory.context import capture_binding
+        params = {**params, 'story_memory_bindings': await capture_binding(params['novel_id'], params.get('chapter_id'), task)}
     return {**params, **(submission.get() or {}), **inherited,
             'workflow_version': WORKFLOW_VERSION, 'assistant_model_config_id': chosen.id,
             'agent_configuration': limits.model_dump(),
@@ -66,6 +69,8 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
 
 
 async def verify_chapter_input(params):
+    from services.story_memory.context import verify_bindings
+    await verify_bindings(params)
     if 'chapter_input_version' not in params:
         return
     from models.chapter import Chapter
@@ -82,6 +87,8 @@ async def generate(execution, facts: dict) -> dict:
     from schemas.creation_agent import AgentConfiguration
 
     params = execution.params
+    from services.story_memory.context import add_generation_context
+    facts = await add_generation_context(execution, facts)
     chosen, _ = await require_workflow_model(params)
     limits = AgentConfiguration.model_validate(params['agent_configuration'])
     contract = params['output_contract']

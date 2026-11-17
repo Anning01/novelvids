@@ -45,6 +45,9 @@ def render_text_task(*, language: str, skill: dict, context: dict, output_schema
     )
     if output_schema is not None:
         instructions += '\n只返回 JSON 对象，完整遵循以下字段定义，不输出 Markdown。\noutput_schema=' + json.dumps(output_schema, ensure_ascii=False)
+    if isinstance(facts, dict) and facts.get('story_memory', {}).get('enabled'):
+        from prompts.story_memory import context_rules
+        instructions += context_rules(language)
     method = {
         'instructions': render_skill_markdown(skill['instructions'], variables),
         'references': [{**reference, 'content': render_skill_markdown(reference['content'], variables)

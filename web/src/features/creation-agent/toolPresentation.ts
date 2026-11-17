@@ -6,6 +6,7 @@ const TOOL_LABELS: Record<string, { operation: string; progress: string }> = {
   remember_creation_constraints: { operation: '保存创作要求', progress: '正在保存创作要求' },
   link_scene_references: { operation: '引用已有设定与形态', progress: '正在引用已有设定与形态' },
   read_episode_script: {operation:'读取本集剧本',progress:'正在读取本集剧本'},
+  read_story_memory: {operation:'读取故事记忆',progress:'正在读取故事记忆'},
   revise_episode_script: {operation:'保存本集剧本',progress:'正在保存本集剧本'},
   read_file: { operation: '读取创作资料', progress: '正在读取创作资料' },
   read_skill: { operation: '读取创作规范', progress: '正在读取创作规范' },

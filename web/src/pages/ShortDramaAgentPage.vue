@@ -24,6 +24,7 @@ import {
 import { api } from '@/api'
 import { skillsApi } from '@/features/creation-agent/skillsApi'
 import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
+import StoryMemoryPanel from '@/features/story-memory/StoryMemoryPanel.vue'
 import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
 import type { EpisodePacing } from '@/types'
 import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
@@ -134,6 +135,7 @@ const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
+const memoryRefreshKey = ref(0)
 const pendingStoryboard = ref<boolean | null>(null)
 const savingStoryboard = computed(() => pendingStoryboard.value !== null)
 const savingDuration = ref(false)
@@ -218,6 +220,7 @@ async function generateScreenplay(id: number, existingTask = sessionStorage.getI
     if (!chapter.screenplay) throw new Error(tr('未读取到本集导演剧本'))
     chapterDetails.value[id] = chapter
     episodeViews.value[id] = 'screenplay'
+    ++memoryRefreshKey.value
   } catch (error) {
     if (!scriptRequests.signal.aborted) notice.error((error as Error).message)
   } finally {
@@ -660,6 +663,7 @@ async function saveEdits() {
         : chapter)
     }
     cancelEditing(false)
+    ++memoryRefreshKey.value
     notice.success(tr('修改已保存{p0}', { p0: changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : '' }))
   } catch (error) {
     notice.error((error as Error).message)
@@ -669,6 +673,7 @@ async function saveEdits() {
 }
 
 async function refreshAgentEpisodes() {
+  ++memoryRefreshKey.value
   if (editing.value) {
     notice.info(tr('助手修改已保存，当前编辑草稿已保留'))
     return
@@ -683,6 +688,7 @@ async function addEpisode() {
   episodeBusy.value = true
   try {
     const {data} = await api.createChapter({novel_id: projectId.value, content: ''})
+    ++memoryRefreshKey.value
     await loadChapters(data.id)
     await selectEpisode(data.number)
     beginEditing()
@@ -700,6 +706,7 @@ async function removeEpisode() {
   try {
     if (!await appConfirm({title: tr('删除本集'), message: episodeDisplayLabel(target), confirmLabel: tr('删除')})) return
     await api.deleteChapter(target.id)
+    ++memoryRefreshKey.value
     delete chapterDetails.value[target.id]
     delete chapterAssets.value[target.id]
     const neighbor = chapters.value.find(item => item.id !== target.id)
@@ -927,6 +934,10 @@ onBeforeUnmount(() => {
           </button>
         </label>
       </div>
+      <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
+        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey"
+        v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" />
+
       <section class="analysis-section episode-section">
         <header>
           <h2>{{ tr('分集剧情') }}</h2>
