@@ -283,6 +283,8 @@ def test_prompt_language_and_strict_contracts():
                 assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content
             else:
                 assert '场景世界范围或混淆回忆与当前世界时，标为 blocking' in content
+                assert '与前置正式记忆在同一对象的事实时序或规则上不可同时成立' in content
+                assert '把互斥事实写进 unresolved、标成 inference、并列两说或声明留待用户裁决，都不能解除阻断' in content
             schema = contract(stage)
             assert schema['name'] == f'story_memory_{stage}'
             def check(value):
