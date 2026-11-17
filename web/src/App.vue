@@ -52,6 +52,7 @@ const personalItems = computed(() => {
     { path: '/resource-library', get label() { return tr('资源库') }, icon: Film, active: () => route.path.startsWith('/resource-library') },
     { path: '/assets', get label() { return tr('项目资产') }, icon: Images, active: () => route.path.startsWith('/assets') },
   ]
+  if (auth.enabled === false || ['admin', 'creator', 'super'].includes(auth.role ?? '')) items.push({ path: '/skills', get label() { return tr('技能管理') }, icon: Sparkles, active: () => route.path === '/skills' })
   if (auth.canAccessBilling) items.push({ path: '/billing', get label() { return tr('成本') }, icon: BarChart3, active: () => route.path.startsWith('/billing') })
   if (auth.canAccessSettings) items.push({ path: '/settings', get label() { return tr('设置') }, icon: Settings, active: () => route.path.startsWith('/settings') })
   return items

@@ -39,6 +39,7 @@ const router = createRouter({
     { path: '/assets', component: () => import('./pages/VideosPage.vue'), beforeEnter: to => to.query.scope === 'public' ? { path: '/resource-library', query: { kind: to.query.category === 'audio' ? 'voice' : 'character' } } : true },
     { path: '/settings', component: () => import('./pages/ConfigPage.vue'), meta: { roles: ['admin'], superOnly: true } },
     { path: '/billing', component: () => import('./pages/BillingPage.vue'), meta: { roles: ['admin', 'creator'] } },
+    { path: '/skills', component: () => import('./pages/SkillsPage.vue'), meta: { roles: ['admin', 'creator'] } },
     { path: '/members', name: 'members', component: () => import('./pages/MembersPage.vue'), meta: { roles: ['admin'] } },
     { path: '/teams', name: 'teams', component: () => import('./pages/TeamsPage.vue'), meta: { roles: ['admin'], superOnly: true } },
     { path: '/users', name: 'users', component: () => import('./pages/UsersPage.vue'), meta: { roles: ['admin'], superOnly: true } },

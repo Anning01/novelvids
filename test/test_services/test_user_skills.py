@@ -18,6 +18,16 @@ def method(**updates):
 
 
 @pytest.mark.asyncio
+async def test_markdown_roundtrip_preserves_frontmatter_placeholders_and_whitespace():
+    source = '---\nname: test\n---\n# Method\n{{input}}  \n```json\n{}\n```\n'
+    body = UserSkillInput(task='story', name=' Test ', instructions=source, references=[{'name': ' Reference ', 'content': source}])
+    saved = await user_skills.save_skill(10, body)
+    assert saved['instructions'] == source
+    assert saved['references'][0]['content'] == source
+    assert saved['name'] == 'Test'
+
+
+@pytest.mark.asyncio
 async def test_private_skills_defaults_versions_and_archived_selection():
     first = await user_skills.save_skill(11, method())
     assert (await user_skills.list_skills(12, 'story'))['items'][0]['builtin']

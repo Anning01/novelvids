@@ -3,13 +3,15 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import TaskSkillPicker from './TaskSkillPicker.vue'
 import { skillsApi, type CreativeSkill } from './skillsApi'
 
-vi.mock('./skillsApi', () => ({ skillsApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), setDefault: vi.fn() } }))
+vi.mock('./skillsApi', () => ({ skillsApi: { list: vi.fn(), models: vi.fn(async () => ({ data: [] })), create: vi.fn(), update: vi.fn(), setDefault: vi.fn() } }))
+vi.mock('./SkillMarkdownEditor.vue', () => ({ default: { props: ['modelValue', 'disabled'], emits: ['update:modelValue'], template: '<textarea name="skill-instructions" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' } }))
 const modal = () => new DOMWrapper(document.body).get<HTMLDialogElement>('dialog[open]')
 
 const builtin: CreativeSkill = { id: 0, task: 'story', name: '故事分析', description: '', instructions: '内置分析方法', references: [], builtin: true, is_active: true }
 const custom: CreativeSkill = { ...builtin, id: 5, name: '我的悬疑', builtin: false, version: 2 }
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(skillsApi.models).mockResolvedValue({ code: 0, message: '', data: [] })
   vi.mocked(skillsApi.list).mockResolvedValue({ code: 0, message: '', data: { items: [builtin, custom], default_skill_id: 0 } })
   vi.mocked(skillsApi.create).mockImplementation(async body => ({ code: 0, message: '', data: { ...body, id: 6, version: 1, builtin: false } }))
   vi.mocked(skillsApi.update).mockImplementation(async (id, body) => ({ code: 0, message: '', data: { ...body, id, version: 3, builtin: false } }))
@@ -74,7 +76,8 @@ it('saves the current version and retains edits when saving fails', async () => 
   expect(skillsApi.update).toHaveBeenCalledWith(5, expect.objectContaining({ instructions: '尚未保存的方法' }), 2)
   expect(modal().get('[role="alert"]').text()).toContain('保存失败')
   expect(modal().get('textarea').element).toHaveValue('尚未保存的方法')
-  await modal().findAll('button').find(button => button.text() === '取消')!.trigger('click')
+  await modal().get('button[aria-label="关闭"]').trigger('click')
+  await modal().findAll('button').find(button => button.text() === '放弃并关闭')!.trigger('click')
   expect(document.querySelector('dialog[open]')).toBeNull()
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 })
