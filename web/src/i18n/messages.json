@@ -360,6 +360,8 @@
     "登录后继续创作": "Sign in to continue creating",
     "账号登录": "Sign in",
     "登录与注册": "Sign in or create an account",
+    "启用模型 {p0}": "Enable model {p0}",
+    "停用模型 {p0}": "Disable model {p0}",
     "此处只管理团队自建模型。启用后自动使用自建来源；当前任务没有可用自建模型时，使用平台模型，费用从团队余额扣除。": "Manage your team's own models here. Enabling a model switches to team configurations. Tasks without an eligible team model use a platform model, charged to the team balance.",
     "剧本、设定和分镜文本使用「创作助手」用途，并需要 JSON Schema 严格输出能力。": "Scripts, assets and storyboards use the Creation assistant capability and require strict JSON Schema output.",
     "注册": "Sign up",

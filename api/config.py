@@ -314,13 +314,23 @@ async def delete_config(config_id: int, ctx: AuthContext = _ADMIN):
 
 @router.post("/{config_id}/activate", summary="启用模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def activate_config(config_id: int, ctx: AuthContext = _ADMIN):
-    _check_config_ownership(await ai_model_config_controller.get(config_id), ctx)
+    instance = await ai_model_config_controller.get(config_id)
+    if instance.scope == SYNC_SCOPE:
+        await require_studio_owner(ctx)
+        from services.studio_platform import validate_model_activation
+        await validate_model_activation(instance)
+    else:
+        _check_config_ownership(instance, ctx)
     instance = await ai_model_config_controller.activate(config_id)
-    return ResponseSchema(data=instance)
+    return ResponseSchema(data=_mask_official_key(AiModelConfigOut.model_validate(instance), ctx))
 
 
 @router.post("/{config_id}/deactivate", summary="停用模型配置", response_model=ResponseSchema[AiModelConfigOut])
 async def deactivate_config(config_id: int, ctx: AuthContext = _ADMIN):
-    _check_config_ownership(await ai_model_config_controller.get(config_id), ctx)
+    instance = await ai_model_config_controller.get(config_id)
+    if instance.scope == SYNC_SCOPE:
+        await require_studio_owner(ctx)
+    else:
+        _check_config_ownership(instance, ctx)
     instance = await ai_model_config_controller.deactivate(config_id)
-    return ResponseSchema(data=instance)
+    return ResponseSchema(data=_mask_official_key(AiModelConfigOut.model_validate(instance), ctx))

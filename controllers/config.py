@@ -14,6 +14,7 @@ from services.image_generation.capabilities import (
     validate_protocol as validate_image_protocol,
 )
 from services.model_resolution import resolve_scope_configs
+from services.studio_platform import SYNC_SCOPE
 from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
     protocol_options as video_protocol_options,
@@ -278,10 +279,18 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         """独立启用当前渠道配置，同类型的其他渠道可同时运行。"""
         instance = await self.get(config_id)
         self._validate_generation_payload({'is_active': True} if instance.task_type == 8 else {}, instance)
+        return await self._save_activation(instance, True)
+
+    async def _save_activation(self, instance: AiModelConfig, active: bool) -> AiModelConfig:
+        instance.is_active = active
+        fields = ["is_active", "updated_at"]
+        if instance.scope == SYNC_SCOPE:
+            instance.local_enabled = active
+            fields.append('local_enabled')
         async with in_transaction():
-            instance.is_active = True
-            await instance.save(update_fields=["is_active", "updated_at"])
-            await self._use_team_source(instance)
+            await instance.save(update_fields=fields)
+            if active:
+                await self._use_team_source(instance)
         return instance
 
     async def list_active_image_models(self, team_id: int | None = None) -> list[dict]:
@@ -365,9 +374,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     async def deactivate(self, config_id: int) -> AiModelConfig:
         """停用指定配置，不影响同用途下的其他运行配置。"""
         instance = await self.get(config_id)
-        instance.is_active = False
-        await instance.save(update_fields=["is_active", "updated_at"])
-        return instance
+        return await self._save_activation(instance, False)
 
     async def get_active(
         self,

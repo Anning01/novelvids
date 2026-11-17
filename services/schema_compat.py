@@ -145,6 +145,17 @@ async def ensure_agent_operation_schema() -> None:
             'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS source_video_id INT;')
 
 
+async def ensure_model_local_activation_schema() -> None:
+    """Preserve local model choices independently of upstream availability."""
+    connection = Tortoise.get_connection('default')
+    if connection.capabilities.dialect == 'sqlite':
+        columns = await connection.execute_query_dict('PRAGMA table_info(ai_model_configs)')
+        if columns and 'local_enabled' not in {column['name'] for column in columns}:
+            await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN local_enabled INT NOT NULL DEFAULT 1;')
+    else:
+        await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS local_enabled BOOL NOT NULL DEFAULT TRUE;')
+
+
 async def ensure_ai_model_config_schema() -> None:
     """为已有 SQLite 数据库补齐模型能力与协议字段。"""
     if not settings.DATABASE_URL.startswith("sqlite"):

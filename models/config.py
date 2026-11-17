@@ -52,6 +52,7 @@ class AiModelConfig(AbstractBaseModel):
         db_index=True,
         description="是否启用",
     )
+    local_enabled = fields.BooleanField(default=True, description="平台同步模型的本地启用选择，不受目录同步覆盖")
     concurrency = fields.IntField(
         default=1,
         description="并发数",

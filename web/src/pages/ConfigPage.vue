@@ -97,6 +97,7 @@ const taskTypes = ref<EnumItem[]>([])
 const imageModelTypes = ref<ConfigEnumItem[]>([])
 const videoModelTypes = ref<ConfigEnumItem[]>([])
 const loading = ref(true)
+const togglingId = ref<number | null>(null)
 const auth = useAuthStore()
 const platform = computed(() => auth.deploymentRole === 'platform')
 const canConnectPlatform = computed(() => !platform.value && auth.isSuperAdmin)
@@ -160,6 +161,9 @@ function canManage(item: AiModelConfig) {
   if (item.scope === 'studio_platform') return false
   if (!isTeamAdmin.value) return true
   return item.scope === 'team'
+}
+function canToggle(item: AiModelConfig) {
+  return canManage(item) || (canConnectPlatform.value && item.scope === 'studio_platform')
 }
 const showCreate = ref(false)
 const creating = ref(false)
@@ -582,23 +586,27 @@ async function saveConfig() {
 }
 
 async function activate(item: AiModelConfig) {
+  if (togglingId.value !== null) return
+  togglingId.value = item.id
   try {
     await api.activateConfig(item.id)
     await load()
     notice.success(tr('已启用 {p0}', { p0: item.name }))
   } catch (error) {
     notice.error((error as Error).message)
-  }
+  } finally { togglingId.value = null }
 }
 
 async function deactivate(item: AiModelConfig) {
+  if (togglingId.value !== null) return
+  togglingId.value = item.id
   try {
     await api.deactivateConfig(item.id)
     await load()
     notice.success(tr('已停用 {p0}', { p0: item.name }))
   } catch (error) {
     notice.error((error as Error).message)
-  }
+  } finally { togglingId.value = null }
 }
 
 async function remove(item: AiModelConfig) {
@@ -747,17 +755,17 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             </div>
           </div>
           <div class="config-actions">
-            <template v-if="canManage(item)">
-              <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" :title="tr('启用配置')" @click="activate(item)"><Power :size="15" /><span>{{ tr('启用') }}</span></AppButton>
+            <template v-if="canToggle(item)">
+              <AppButton v-if="!item.is_active" variant="soft" size="sm" type="button" :title="tr('启用配置')" :aria-label="tr('启用模型 {p0}', { p0: item.name })" :loading="togglingId === item.id" :disabled="togglingId !== null" @click="activate(item)"><Power :size="15" /><span>{{ tr('启用') }}</span></AppButton>
               <template v-else>
                 <span class="active-check"><CheckCircle2 :size="16" />{{ tr('运行中') }}</span>
-                <AppButton variant="soft" size="sm" type="button" :title="tr('停用配置')" @click="deactivate(item)"><Power :size="15" /><span>{{ tr('停用') }}</span></AppButton>
+                <AppButton variant="soft" size="sm" type="button" :title="tr('停用配置')" :aria-label="tr('停用模型 {p0}', { p0: item.name })" :loading="togglingId === item.id" :disabled="togglingId !== null" @click="deactivate(item)"><Power :size="15" /><span>{{ tr('停用') }}</span></AppButton>
               </template>
-              <span class="config-icon-actions">
+            </template>
+              <span v-if="canManage(item)" class="config-icon-actions">
                 <AppButton variant="secondary" size="sm" icon-only type="button" :aria-label="tr('编辑配置')" :title="tr('编辑配置')" @click="openEdit(item)"><Pencil :size="15" /></AppButton>
                 <AppButton variant="danger" size="sm" icon-only type="button" :aria-label="tr('删除配置')" :title="tr('删除配置')" @click="remove(item)"><Trash2 :size="15" /></AppButton>
               </span>
-            </template>
             <AppButton v-else-if="canConnectPlatform && item.scope === 'studio_platform'" variant="secondary" size="sm" @click="openEdit(item)">{{ selectedCategory.id === 'llm' ? tr('本地设置') : tr('编辑本地价格') }}</AppButton>
             <span v-else class="official-badge" :title="tr('官方配置由平台维护，团队管理员只读')">{{ tr('只读') }}</span>
           </div>

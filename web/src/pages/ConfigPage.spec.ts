@@ -61,7 +61,7 @@ describe('reasoning parameter controls', () => {
     const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
     const wrapper = mountPage(pinia)
     await flushPromises()
-    await (scope === 'studio_platform' ? wrapper.get('.config-actions button') : wrapper.get('[aria-label="编辑配置"]')).trigger('click')
+    await (scope === 'studio_platform' ? wrapper.findAll('.config-actions button').find(button => button.text() === '本地设置')! : wrapper.get('[aria-label="编辑配置"]')).trigger('click')
     const thinking = wrapper.get('input[name="model-thinking"]')
     const effort = wrapper.get('input[name="model-reasoning-effort"]')
     expect(thinking.element).toHaveValue('enabled')
@@ -118,6 +118,80 @@ it('keeps platform connection unavailable without a super administrator session'
   expect(wrapper.get('.model-header-actions').text()).toBe('添加模型')
   expect(status).not.toHaveBeenCalled()
   wrapper.unmount()
+})
+
+it.each(['light', 'dark'])('lets the studio owner toggle a synced model without exposing upstream edit actions in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).user!.is_super_admin = true
+  const remote = { id: 77, name: '远程文本模型', scope: 'studio_platform', task_type: 7, task_types: [7],
+    model: 'nv-77', is_active: true, concurrency: 1, pricing: { type: 'text', input_price_per_1m: 1, output_price_per_1m: 2 } }
+  vi.spyOn(api, 'configs').mockImplementation(async () => ({ data: { items: [{ ...remote }] } }) as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: false } } as never)
+  const off = vi.spyOn(api, 'deactivateConfig').mockImplementation(async () => {
+    remote.is_active = false
+    return { data: { ...remote } } as never
+  })
+  const on = vi.spyOn(api, 'activateConfig').mockImplementation(async () => {
+    remote.is_active = true
+    return { data: { ...remote } } as never
+  })
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    const card = wrapper.get('.model-config-card')
+    expect(card.text()).toContain('本地设置')
+    expect(card.find('[aria-label="编辑配置"]').exists()).toBe(false)
+    expect(card.find('[aria-label="删除配置"]').exists()).toBe(false)
+    await card.get('[aria-label="停用模型 远程文本模型"]').trigger('click')
+    await flushPromises()
+    expect(off).toHaveBeenCalledWith(77)
+    await wrapper.get('[aria-label="启用模型 远程文本模型"]').trigger('click')
+    await flushPromises()
+    expect(on).toHaveBeenCalledWith(77)
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})
+
+it.each([{ superAdmin: false, deployment: 'studio' as const }, { superAdmin: true, deployment: 'platform' as const }])('keeps synced model toggles unavailable for $deployment super=$superAdmin', async ({ superAdmin, deployment }) => {
+  baseMocks()
+  const pinia = teamAdminStore()
+  const auth = useAuthStore(pinia)
+  auth.user!.is_super_admin = superAdmin
+  auth.deploymentRole = deployment
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 77, name: 'Remote', scope: 'studio_platform', task_type: 7, task_types: [7], model: 'nv-77', is_active: true, concurrency: 1 }] } } as never)
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    expect(wrapper.get('.config-actions').text()).toBe('只读')
+  } finally { wrapper.unmount() }
+})
+
+it('blocks repeated toggle requests while saving and recovers after a failed toggle', async () => {
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).user!.is_super_admin = true
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: false } } as never)
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 77, name: 'Remote', scope: 'studio_platform', task_type: 7, task_types: [7], model: 'nv-77', is_active: true, concurrency: 1 }] } } as never)
+  let rejectRequest: ((error: Error) => void) | undefined
+  const off = vi.spyOn(api, 'deactivateConfig').mockImplementation(() => new Promise((_resolve, reject) => { rejectRequest = reject }))
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    const button = wrapper.get('[aria-label="停用模型 Remote"]')
+    await button.trigger('click')
+    await button.trigger('click')
+    expect(off).toHaveBeenCalledOnce()
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(button.attributes('disabled')).toBeDefined()
+    rejectRequest?.(new Error('操作失败'))
+    await flushPromises()
+    expect(notice.error).toHaveBeenCalledWith('操作失败')
+    expect(button.attributes('disabled')).toBeUndefined()
+  } finally { wrapper.unmount() }
 })
 
 it.each(['light', 'dark'])('defaults a new text model to the creation purpose without claiming strict support in %s', async theme => {
