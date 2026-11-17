@@ -1,249 +1,9 @@
-from test.agent_stream_fixtures import streaming_model
+"""Read-only reuse of completed historical receipts; no legacy model execution."""
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-
 import pytest
-from pydantic_ai.messages import ModelResponse, ToolCallPart
-from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.usage import RequestUsage
-
-from controllers.chapter import chapter_controller
-from models.ai_task import AiTask
-from models.asset import Asset
-from models.config import GeneralConfig
-from models.usage_record import ModelUsageRecord
-from services.ai_task_executor import ai_task_executor
 from services.extraction.reuse import extraction_reuse
 from test.test_services.test_asset_design_instructions import synthetic_snapshot, fixed_asset_prompt
-from test.test_services.test_skill_workflow import enabled_project
-
-
-async def extraction_fixture(with_variant=False, repair_hook=None, multiple_variants=False):
-    novel, chapter, config = await enabled_project()
-    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': 'zh'})
-    config.pricing = {'type': 'text', 'currency': 'CNY', 'input_price_per_1m': 1, 'output_price_per_1m': 2}
-    await config.save()
-    snapshot = synthetic_snapshot()
-    counts = {'inventory': 0, 'design': 0}
-    requested = []
-
-    async def respond(messages, info):
-        tool = info.output_tools[0]
-        if 'characters' in tool.parameters_json_schema['properties']:
-            counts['inventory'] += 1
-            entry = lambda name: {'name': name, 'presence': 'present', 'quote': chapter.content}
-            payload = {'characters': [entry('角色甲')], 'scenes': [entry('地点甲')], 'items': [entry('道具甲')]}
-        else:
-            counts['design'] += 1
-            if counts['design'] > 1 and repair_hook:
-                await repair_hook()
-            requested.append(str(messages) + info.instructions)
-            fields = [('persons', 'person', '角色甲'), ('scenes', 'scene', '地点甲'), ('items', 'item', '道具甲')]
-            payload = {field: [{'name': name, 'base_traits': fixed_asset_prompt(kind=kind, snapshot=snapshot)}]
-                       for field, kind, name in fields}
-            if with_variant:
-                payload['persons'][0]['variant'] = {'name': '新外形', 'description': '本章形态',
-                    'base_traits': fixed_asset_prompt(snapshot=snapshot), 'change_reason': '本章明确出现稳定外形变化'}
-            if multiple_variants:
-                base = payload['persons'][0]
-                payload['persons'] = [base, *[{'name': base['name'], 'variant': {
-                    'name': name, 'base_traits': fixed_asset_prompt(snapshot=snapshot),
-                    'change_reason': '剧本明确的闪回形象'}} for name in ('前世', '襁褓')]]
-            if 'issues_to_fix' in info.instructions:
-                missing = 'persons' if '人物/角色甲' in info.instructions else 'items'
-                payload = {field: items if field == missing else [] for field, items in payload.items()}
-        return ModelResponse(parts=[ToolCallPart(tool.name, payload)], usage=RequestUsage(input_tokens=100, output_tokens=20))
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-
-    async def run(expect_success=True):
-        with patch('services.creation_agent.handler.configured_model', return_value=model):
-            task = await chapter_controller.extract(chapter.id)
-            task.request_params['skill_snapshot'] = snapshot.model_dump()
-            await task.save()
-            await ai_task_executor.run(task)
-        await task.refresh_from_db()
-        if expect_success:
-            assert task.status == 3, task.error_message
-        return task
-
-    return novel, chapter, snapshot, counts, requested, run
-
-
-@pytest.mark.asyncio
-async def test_second_button_extraction_skips_model_and_does_not_add_usage():
-    _, _, _, counts, _, run = await extraction_fixture()
-    await run()
-    before = await ModelUsageRecord.all().count()
-    amounts = await ModelUsageRecord.all().values_list('cost', flat=True)
-    second = await run()
-    assert counts == {'inventory': 0, 'design': 1}
-    assert second.response_data['preserved_existing']
-    assert len(second.response_data['asset_ids']) == 3
-    assert await ModelUsageRecord.all().count() == before
-    assert sum(amounts) > 0 and await ModelUsageRecord.all().values_list('cost', flat=True) == amounts
-
-
-@pytest.mark.asyncio
-async def test_missing_prop_reuses_saved_designs_and_only_completes_the_missing_type():
-    novel, _, _, counts, requested, run = await extraction_fixture()
-    await run()
-    person = await Asset.get(novel=novel, asset_type=1)
-    original = person.base_traits
-    await Asset.filter(novel=novel, asset_type=3).update(base_traits='')
-    await run()
-    assert counts == {'inventory': 0, 'design': 2}
-    await person.refresh_from_db()
-    assert person.base_traits == original
-    assert '道具甲' in requested[-1] and ('只返回' in requested[-1] or 'Return only' in requested[-1])
-    assert (await Asset.get(novel=novel, asset_type=3)).base_traits
-    await run()
-    assert counts == {'inventory': 0, 'design': 2}
-
-
-@pytest.mark.asyncio
-async def test_missing_variant_is_repaired_without_regenerating_other_assets():
-    from models.asset_variant import AssetVariant
-    novel, _, _, counts, _, run = await extraction_fixture(with_variant=True)
-    await run()
-    await run()
-    assert counts == {'inventory': 0, 'design': 1}
-    variant = await AssetVariant.get(asset__novel_id=novel.id)
-    await AssetVariant.filter(id=variant.id).update(base_traits='')
-    await run()
-    assert counts == {'inventory': 0, 'design': 2}
-    assert (await AssetVariant.get(asset__novel_id=novel.id)).base_traits
-    await run()
-    assert counts == {'inventory': 0, 'design': 2}
-
-
-@pytest.mark.asyncio
-async def test_deleted_prop_is_not_silently_restored_or_charged_again():
-    from datetime import datetime, timezone
-    novel, _, _, counts, _, run = await extraction_fixture()
-    await run()
-    await Asset.filter(novel=novel, asset_type=3).update(deleted_at=datetime.now(timezone.utc))
-    from services.creation_agent.skill_execution import SkillExecution
-    from models.creation_agent import AgentMessage
-    task = await AiTask.filter(task_type=1, status=3).first()
-    execution = SkillExecution({**task.request_params, 'task_id': str(task.id)}, await AgentMessage.get(task=task, role='assistant'), AsyncMock())
-    with pytest.raises(ValueError, match='恢复'):
-        await extraction_reuse.find(execution, task.request_params['chapter_id'])
-    assert counts == {'inventory': 0, 'design': 1}
-    assert await Asset.filter(novel=novel, asset_type=3).count() == 0
-
-
-@pytest.mark.asyncio
-async def test_cover_only_changes_do_not_invalidate_completed_extraction():
-    novel, _, _, counts, _, run = await extraction_fixture()
-    await run()
-    novel.cover = '/media/new-cover.png'
-    await novel.save()
-    await run()
-    assert counts == {'inventory': 0, 'design': 1}
-
-
-@pytest.mark.asyncio
-async def test_saved_freeform_prompt_is_reused_without_model_call():
-    novel, _, _, counts, _, run = await extraction_fixture()
-    await run()
-    design = '自由描述的深色木盒，保留旧铜扣。'
-    await Asset.filter(novel=novel, asset_type=3).update(base_traits=design)
-    await run()
-    assert counts == {'inventory': 0, 'design': 1}
-    assert (await Asset.get(novel=novel, asset_type=3)).base_traits == design
-
-
-@pytest.mark.asyncio
-async def test_variant_repair_preserves_a_concurrent_user_edit():
-    from models.asset_variant import AssetVariant
-    changed = {}
-    async def edit():
-        await AssetVariant.filter(id=changed['id']).update(base_traits=changed['prompt'])
-    novel, _, snapshot, counts, _, run = await extraction_fixture(with_variant=True, repair_hook=edit)
-    await run()
-    variant = await AssetVariant.get(asset__novel_id=novel.id)
-    changed.update(id=variant.id, prompt=fixed_asset_prompt(snapshot=snapshot) + '\n人工确认的补充要求')
-    await AssetVariant.filter(id=variant.id).update(base_traits='')
-    failed = await run(expect_success=False)
-    assert failed.status == 4 and '人工编辑' in failed.error_message
-    await variant.refresh_from_db()
-    assert variant.base_traits == changed['prompt']
-    assert counts == {'inventory': 0, 'design': 2}
-
-
-@pytest.mark.asyncio
-async def test_legacy_verified_receipts_are_reused_without_a_schema_migration():
-    from models.agent_operation import AgentOperation
-    from dataclasses import asdict
-    from services.extraction.cast import cast_segment
-    from services.extraction.context import ExtractionContextLoader
-
-    novel, chapter, snapshot, counts, _, run = await extraction_fixture()
-    first = await run()
-    await AgentOperation.filter(task=first, key=f'extraction:inputs:{chapter.id}:{snapshot.revision}').delete()
-    context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
-    segment = cast_segment(asdict(context.chapter), 'zh', snapshot.revision)
-    await AgentOperation.create(task=first, key=f'model:structured:ChapterCast:{segment}', state='completed',
-        result={'characters': [{'name': '临时名单中的额外人物', 'presence': 'present', 'quote': chapter.content}]})
-    await run()
-    assert counts == {'inventory': 0, 'design': 1}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('change', ['source', 'project', 'protocol', 'failed', 'missing_persist', 'placeholder'])
-async def test_reuse_requires_verified_complete_current_source_and_rules(change):
-    from models.agent_operation import AgentOperation
-    from models.creation_agent import AgentMessage
-    from services.creation_agent.skill_execution import SkillExecution
-    novel, chapter, snapshot, _, _, run = await extraction_fixture()
-    first = await run()
-    if change == 'source':
-        chapter.content += '原文有新内容。'
-        await chapter.save()
-    elif change == 'project':
-        novel.custom_style_prompt = '新风格'
-        await novel.save()
-    elif change == 'protocol':
-        snapshot = snapshot.model_copy(update={'revision': 'new-protocol'})
-    elif change == 'failed':
-        await AiTask.filter(id=first.id).update(status=4)
-    elif change == 'missing_persist':
-        await AgentOperation.filter(task=first, key='persist:assets').delete()
-    else:
-        await Asset.filter(novel=novel, asset_type=3).update(metadata={'analysis_source': 'project_analysis'})
-    execution = SkillExecution({**first.request_params, 'task_id': str(first.id), 'skill_snapshot': snapshot.model_dump()},
-        await AgentMessage.get(task=first, role='assistant'), AsyncMock())
-    reusable = await extraction_reuse.find(execution, chapter.id)
-    assert reusable is None or not reusable.complete
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['regenerate', 'revise'])
-async def test_explicit_regeneration_and_revision_never_skip(mode):
-    from models.creation_agent import AgentMessage
-    from schemas.creation_plan import CreationPlanStep
-    from services.creation_agent.plan_execution import existing_result
-    from services.creation_agent.skill_execution import SkillExecution
-    _, chapter, _, _, _, run = await extraction_fixture()
-    first = await run()
-    execution = SkillExecution(first.request_params, await AgentMessage.get(task=first, role='assistant'), AsyncMock())
-    step = CreationPlanStep(id='assets', operation='assets', mode=mode, target_id=chapter.id, instructions='显式修改', label='修改')
-    assert await existing_result(step, chapter.id, execution) is None
-
-
-@pytest.mark.asyncio
-async def test_existing_roles_alone_are_not_proof_that_all_asset_types_were_extracted():
-    from models.creation_agent import AgentMessage
-    from services.creation_agent.skill_execution import SkillExecution
-    novel, chapter, snapshot, _, _, run = await extraction_fixture()
-    await Asset.create(novel=novel, asset_type=1, canonical_name='已有人物', base_traits=fixed_asset_prompt(snapshot=snapshot))
-    task = await chapter_controller.extract(chapter.id)
-    task.request_params['skill_snapshot'] = snapshot.model_dump()
-    from services.creation_agent.production import conversation_for_task
-    message = await conversation_for_task(task)
-    execution = SkillExecution({**task.request_params, 'task_id': str(task.id)}, message, AsyncMock())
-    assert await extraction_reuse.find(execution, chapter.id) is None
 
 
 @pytest.mark.asyncio
@@ -289,52 +49,57 @@ def test_reuse_plan_prompt_preserves_source_and_mode_contracts():
         assert 'reference_id' in prompt
 
 
-def test_misplaced_duplicate_scene_cannot_poison_an_otherwise_complete_candidate():
-    from services.extraction.validation import AssetCandidateValidator
-    from services.extraction.extractor import AssetExtractionResult, validate_required_design_assets
-    snapshot = synthetic_snapshot()
-    scope = ((1, '角色甲'), (2, '维修室'), (3, '面板'))
-    validator = AssetCandidateValidator(AssetExtractionResult, scope)
-    draft = validator.draft_type.model_validate({'persons': [
-        {'name': '角色甲', 'base_traits': fixed_asset_prompt(snapshot=snapshot)},
-        {'name': '维修室', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}],
-        'scenes': [{'name': '维修室', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}],
-        'items': [{'name': '面板', 'base_traits': fixed_asset_prompt(kind='item', snapshot=snapshot)}]})
-    merged = validator.merge(draft)
-    validate_required_design_assets(merged, scope)
-    assert not validator.issues and [person.name for person in merged.persons] == ['角色甲']
 
 
-def test_scope_filter_never_drops_a_required_person_sharing_a_scene_name():
-    from services.extraction.validation import AssetCandidateValidator
-    from services.extraction.extractor import AssetExtractionResult
+
+
+
+async def historical_receipt():
+    from models.novel import Novel
+    from models.chapter import Chapter
+    from models.ai_task import AiTask
+    from models.agent_operation import AgentOperation
+    from services.extraction.context import ExtractionContextLoader
+    from services.extraction.extractor import AssetExtractionResult, Person
+    from services.extraction.persistence import AssetUpsertService
+    novel = await Novel.create(name='已完成的旧任务')
+    chapter = await Chapter.create(novel=novel, number=1, name='第一章', content='人物甲回家。')
     snapshot = synthetic_snapshot()
-    validator = AssetCandidateValidator(AssetExtractionResult, ((1, '同名'), (2, '同名')))
-    draft = validator.draft_type.model_validate({'persons': [{'name': '同名', 'base_traits': fixed_asset_prompt(snapshot=snapshot)}],
-        'scenes': [{'name': '同名', 'base_traits': fixed_asset_prompt(kind='scene', snapshot=snapshot)}], 'items': []})
-    merged = validator.merge(draft)
-    assert len(merged.persons) == len(merged.scenes) == 1 and not validator.issues
+    task = await AiTask.create(task_type=1, status=3, request_params={'novel_id': novel.id, 'chapter_id': chapter.id})
+    execution = SimpleNamespace(params={**task.request_params, 'task_id': str(task.id)}, snapshot=snapshot, language='zh')
+    accepted = AssetExtractionResult(persons=[Person(name='人物甲', base_traits=fixed_asset_prompt(snapshot=snapshot))], scenes=[], items=[])
+    summary = await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=1, result=accepted, include_ids=True)
+    context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
+    revision = await extraction_reuse.input_revision(execution, context, novel)
+    await AgentOperation.create(task=task, key=f'extraction:inputs:{chapter.id}:{snapshot.revision}', state='completed', result={'revision': revision})
+    await AgentOperation.create(task=task, key='persist:assets', state='completed', result=summary)
+    await AgentOperation.create(task=task, key='candidate:assets:', state='completed', result={'accepted': accepted.model_dump(), 'issues': []})
+    return novel, chapter, task, execution
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('legacy_receipt', [False, True])
-async def test_multiple_forms_survive_extraction_and_reuse_without_new_model_calls(legacy_receipt):
-    from models.asset_variant import AssetVariant
-    novel, _, _, counts, _, run = await extraction_fixture(multiple_variants=True)
-    first = await run()
-    asset = await Asset.get(novel=novel, canonical_name='角色甲')
-    variants = await AssetVariant.filter(asset=asset).order_by('id')
-    assert len(variants) == 2 and all(v.chapter_numbers == [1] for v in variants)
-    if legacy_receipt:
-        from models.agent_operation import AgentOperation
-        receipt = await AgentOperation.get(task_id=first.id, key='persist:assets')
-        for row in receipt.result['persons']:
-            row.pop('variant_name', None)
-        await receipt.save(update_fields=['result'])
-    before = await ModelUsageRecord.all().count()
-    second = await run()
-    assert counts['design'] == 1
-    assert await ModelUsageRecord.all().count() == before
-    assert second.response_data['preserved_existing']
-    assert second.response_data['variant_ids'] == first.response_data['variant_ids']
-    assert {row.get('variant_name') for row in second.response_data['persons']} == {None, '前世', '襁褓'}
+async def test_completed_historical_assets_remain_readable_without_generation():
+    _, chapter, _, execution = await historical_receipt()
+    result = await extraction_reuse.find(execution, chapter.id)
+    assert result and result.complete and result.summary['asset_ids']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['source', 'project', 'protocol', 'failed', 'missing_persist'])
+async def test_stale_historical_receipt_cannot_be_reused(change):
+    from models.agent_operation import AgentOperation
+    novel, chapter, task, execution = await historical_receipt()
+    if change == 'source':
+        chapter.content += '原文修改'
+        await chapter.save()
+    elif change == 'project':
+        novel.custom_style_prompt = '新风格'
+        await novel.save()
+    elif change == 'protocol':
+        execution.snapshot = execution.snapshot.model_copy(update={'revision': 'changed'})
+    elif change == 'failed':
+        task.status = 4
+        await task.save()
+    else:
+        await AgentOperation.filter(task=task, key='persist:assets').delete()
+    assert await extraction_reuse.find(execution, chapter.id) is None

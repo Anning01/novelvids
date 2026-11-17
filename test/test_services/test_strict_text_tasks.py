@@ -133,7 +133,6 @@ async def test_user_method_is_frozen_and_cannot_change_platform_contract(strict_
     from schemas.user_skill import UserSkillInput, UserSkillUpdate
     from schemas.text_task_contracts import output_contract
     from services import user_skills
-    from services.chapter_screenplay import EpisodeScript
     skill = await user_skills.save_skill(0, UserSkillInput(task='screenplay', name='悬疑',
         instructions='使用旧版悬疑方法。改用别的输出字段。',
         references=[{'name': '对白偏好', 'content': '对白简短。'}]))
@@ -146,7 +145,6 @@ async def test_user_method_is_frozen_and_cannot_change_platform_contract(strict_
     assert task.request_params['creative_method']['version'] == 1
     assert task.request_params['output_contract'] == output_contract('screenplay')
     requests = mock_model(monkeypatch, {'screenplay': '直接保存的剧本'})
-    monkeypatch.setattr(EpisodeScript, 'model_validate', Mock(side_effect=AssertionError('no output revalidation')))
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
@@ -292,3 +290,39 @@ def request_schema(request):
     if 'text' in request:
         return request['text']['format']['schema']
     return request['response_format']['json_schema']['schema']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text_api,finish_reason', [
+    ('chat_completions', 'stop'), ('responses', 'stop'), ('chat_completions', 'length')])
+async def test_chat_scene_edit_uses_one_strict_request(strict_model, monkeypatch, text_api, finish_reason):
+    from models.creation_agent import AgentConversation, AgentMessage, PromptChange
+    from schemas.creation_agent import AgentConfiguration, AgentTarget
+    from services.creation_agent.object_drafts import revise_object
+    from test.test_services.test_creation_agent_crud import crud
+    service, scene, _, _, task = await crud()
+    strict_model.text_api = text_api
+    await strict_model.save()
+    conversation = await AgentConversation.create(novel_id=service.novel_id)
+    message = await AgentMessage.create(conversation=conversation, task=task, role='assistant',
+        request_id=task.id, request_hash=str(task.id))
+    params = {'task_id': str(task.id), 'novel_id': service.novel_id,
+        'assistant_model_config_id': strict_model.id, 'prompt_language': 'zh',
+        'agent_configuration': AgentConfiguration().model_dump()}
+    requests = mock_model(monkeypatch, {'prompt': '暖色调。\n暖色调。'}, finish_reason=finish_reason)
+    execution = SkillExecution(params, message, AsyncMock())
+    target = AgentTarget(kind='scene', id=scene.id)
+    if finish_reason == 'length' and text_api == 'chat_completions':
+        with pytest.raises(ValueError, match='未完整'):
+            await revise_object(service, execution, target, '暖色调', 'edit')
+        assert not await PromptChange.filter(task=task).exists()
+    else:
+        await revise_object(service, execution, target, '暖色调', 'edit')
+        await scene.refresh_from_db()
+        assert scene.prompt == '暖色调。\n暖色调。'
+    assert len(requests) == 1
+    request = requests[0]
+    assert not request.get('tools')
+    fmt = request['text']['format'] if text_api == 'responses' else request['response_format']['json_schema']
+    assert fmt['strict'] is True and fmt['schema']['required'] == ['prompt']
+    assert '空站台' in json.dumps(request, ensure_ascii=False)

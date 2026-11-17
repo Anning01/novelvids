@@ -253,27 +253,6 @@ async def test_chat_structure_creation_and_visual_edit_use_the_same_complete_ser
         current_execution.reset(token)
 
 
-@pytest.mark.asyncio
-async def test_old_task_snapshot_still_requests_and_preserves_its_original_prompt_schema():
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from schemas.agent_workflow import SkillShot, SkillStoryboard
-    from services.creation_agent.skill_execution import current_execution
-    from services.storyboard.generator import generate_storyboard
-
-    raw = snapshot_skills()
-    raw['contents'].pop('storyboard_contract')
-    shot = SkillShot.model_validate({**_shot().model_dump(), 'prompt':'Historical prompt stays verbatim.'})
-    result = SkillStoryboard(shots=[shot])
-    execution = SimpleNamespace(snapshot=SkillSnapshot.model_validate(raw), params={'assistant_model_config_id':1},
-                                generate=AsyncMock(return_value=result))
-    token = current_execution.set(execution)
-    try:
-        saved, _ = await generate_storyboard(None, 'Original chapter', [], 'unused', prompt_language='zh')
-        assert saved.shots[0].prompt == 'Historical prompt stays verbatim.'
-        assert execution.generate.call_args.args[2] is SkillStoryboard
-    finally:
-        current_execution.reset(token)
 
 
 @pytest.mark.asyncio
@@ -428,53 +407,8 @@ def test_visual_roster_uses_registered_asset_or_form_names():
         validate_skill_storyboard_shot(shot, snapshot, 'zh', characters())
 
 
-@pytest.mark.asyncio
-async def test_numbered_screenplay_is_generated_once_and_preserves_source_scenes():
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from schemas.agent_workflow import StructuredSkillStoryboard
-    from services.creation_agent.skill_execution import current_execution
-    from services.storyboard.generator import generate_storyboard
-    from services.storyboard.handler import StoryboardTaskHandler
-    from services.storyboard.chunking import screenplay_sections
-    from models.novel import Novel
-    from models.chapter import Chapter
-
-    text = '第1集\n**1-1　前院　外　日**\n家丁引医。\n1－2　前院　外　日\n老者报信。\n### 1-3 卧房 内 日\n父亲哭求。'
-    snapshot = SkillSnapshot.model_validate(snapshot_skills())
-    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
-    prototype = {**_shot().model_dump(exclude={'prompt'}), 'blocking_map':{**SHOT, 'layout':LAYOUT}}
-    batch = StructuredSkillStoryboard.model_validate({'shots': [
-        {**prototype, 'sequence': index, 'source_scene_number': number}
-        for index, number in enumerate(['1-1', '1-2', '1-3'], 1)]})
-    execution = SimpleNamespace(snapshot=snapshot, params={'assistant_model_config_id':1},
-                                generate=AsyncMock(return_value=batch))
-    token = current_execution.set(execution)
-    try:
-        result, metadata = await generate_storyboard(None, text, [], 'fake', shot_duration_range=[4, 30])
-    finally:
-        current_execution.reset(token)
-    calls = [call.args[1] for call in execution.generate.await_args_list]
-    assert len(calls) == 1
-    assert calls[0]['chapter'] == text
-    assert calls[0]['source_scene_numbers'] == ['1-1', '1-2', '1-3']
-    assert metadata['batch_count'] == 1
-    assert execution.generate.await_args.kwargs['activity_label'] == '生成整集分镜'
-    assert [shot.sequence for shot in result.shots] == [1, 2, 3]
-    novel = await Novel.create(name='边界')
-    chapter = await Chapter.create(novel=novel, number=1, name='第一集', content=text, screenplay=text)
-    scenes = await StoryboardTaskHandler()._save_scenes(chapter.id, result, metadata, 0)
-    assert [s.prompt_params['source_scene_number'] for s in scenes] == ['1-1', '1-2', '1-3']
-    assert screenplay_sections('苏言：从1-1说到1-2。') == [(None, '苏言：从1-1说到1-2。')]
 
 
-@pytest.mark.parametrize('language', ['zh', 'en'])
-def test_episode_instruction_covers_all_scenes_and_source_numbers(language):
-    from prompts.storyboard import episode_storyboard_instruction, build_storyboard_messages
-    instruction = episode_storyboard_instruction(language)
-    assert 'source_scene_number' in instruction
-    assert ('完整一集' if language == 'zh' else 'complete episode') in instruction
-    assert instruction in build_storyboard_messages('1-1 院落\n1-2 卧房', [], language)[0]['content']
 
 
 def test_episode_candidate_repair_preserves_valid_shots_and_checks_source_scene():

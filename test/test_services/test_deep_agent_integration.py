@@ -340,7 +340,7 @@ def test_sdk_counter_respects_both_admin_token_and_character_budgets():
 @pytest.mark.asyncio
 async def test_truncated_public_prose_is_not_reported_as_a_completed_run(monkeypatch, tmp_path):
     from contextlib import asynccontextmanager
-    conversation, request, _ = await session_fixture(runtime='deepagents')
+    conversation, request, _ = await session_fixture(runtime='deepagents', write_scope='chapter')
     monkeypatch.setattr(settings, 'CREATION_AGENT_CHECKPOINT_PATH', str(tmp_path / 'truncated.db'))
     async def respond(messages, info):
         yield '这是一段尚未写完的正文'

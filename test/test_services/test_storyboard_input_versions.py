@@ -84,7 +84,7 @@ async def test_v19_save_guard_still_protects_changed_inputs_and_existing_scenes(
     from services.storyboard.validation import prepare_skill_storyboard
     frozen = snapshot()
     storyboard = prepare_skill_storyboard(StructuredSkillStoryboard(shots=[raw_shot(1)]), frozen, 'zh', [], 'cinematic')
-    token = current_execution.set(SimpleNamespace(params=params, snapshot=frozen))
+    token = current_execution.set(SimpleNamespace(params={**params, 'output_contract': {'name': 'storyboard', 'version': 1}}, snapshot=frozen, before_request=__import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock()))
     try:
         with pytest.raises(ValueError, match='新修改'):
             await StoryboardTaskHandler()._save_scenes(params['chapter_id'],

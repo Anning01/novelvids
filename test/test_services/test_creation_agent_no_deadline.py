@@ -104,7 +104,7 @@ async def test_explicit_stop_interrupts_an_unbounded_model_wait(monkeypatch):
 async def test_agent_transport_has_no_request_deadline():
     from types import SimpleNamespace
     from services.creation_agent.handler import configured_model
-    model = configured_model(SimpleNamespace(base_url='https://example.invalid/v1', api_key='test-key', model='test', thinking=None), AgentConfiguration())
+    model = configured_model(SimpleNamespace(api_protocol='openai_compatible', base_url='https://example.invalid/v1', api_key='test-key', model='test', thinking=None), AgentConfiguration())
     try:
         assert model.client.timeout is None
     finally:

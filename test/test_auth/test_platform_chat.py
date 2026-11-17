@@ -208,7 +208,6 @@ async def test_missing_usage_kept_for_review_without_inventing_a_fee(setup_call,
 @pytest.mark.asyncio
 async def test_local_studio_structured_output_and_concurrent_retry_use_frozen_price(setup_call, monkeypatch):
     from pydantic import BaseModel
-    from services.llm.json_output import create_json_completion
     http,headers,model,_,_,_=setup_call
     started, release = asyncio.Event(), asyncio.Event()
     submitted = []
@@ -228,8 +227,9 @@ async def test_local_studio_structured_output_and_concurrent_retry_use_frozen_pr
     class Episode(BaseModel):
         episode:int
     async def run():
-        return await create_json_completion(studio,model=model,response_model=Episode,messages=[{"role":"user","content":"第一集"}],
-                                            supports_json_output=True)
+        response = await studio.chat.completions.create(model=model, messages=[{"role":"user","content":"第一集"}],
+            response_format={"type": "json_object"})
+        return Episode.model_validate_json(response.choices[0].message.content), response
     original=asyncio.create_task(run())
     try:
         await asyncio.wait_for(started.wait(),3)

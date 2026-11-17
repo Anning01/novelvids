@@ -7,26 +7,15 @@ import pytest
 
 from prompts.skill_pack import render_skill
 from prompts.storyboard import (
-    build_storyboard_messages,
     entity_reference_names,
     format_storyboard_prompt,
     normalized_storyboard_reference_fields,
     referenced_entities,
 )
 from schemas.scene import SceneEntity, SoraScenePromptConfig, Storyboard
-from services.llm.json_output import JsonCompletionTruncatedError
-from services.storyboard.chunking import NarrativeChunker
-from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
 
 
-def test_saved_creative_rules_are_scoped_facts_in_generation_messages():
-    import json
-    rules = [{"content": "林夏保持灰色风衣", "scope": {"kind": "project", "asset_id": 8}}]
-    messages = build_storyboard_messages("清晨，林夏走进咖啡馆。", [_entity()], creative_constraints=rules)
-    assert "林夏保持灰色风衣" not in messages[0]["content"]
-    facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
-    assert facts["constraints"] == rules
 
 
 def _entity() -> SceneEntity:
@@ -63,18 +52,6 @@ def _shot(sequence: int, title: str = "夜访小楼") -> SoraScenePromptConfig:
     )
 
 
-def test_storyboard_messages_render_language_entities_and_narrative():
-    import json
-    narrative = "夜色里，小楼的窗户忽然亮起。"
-    messages = build_storyboard_messages(narrative, [_entity()], "zh")
-    assert [m["role"] for m in messages] == ["system", "user"]
-    assert messages[0]["content"].startswith(render_skill("storyboard", "zh") + "\n")
-    assert '"nickname":"郊区小楼"' in messages[0]["content"]
-    facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
-    assert facts["assets"][0] == {"asset_type": "场景", "canonical_name": "郊区小楼",
-        "aliases": ["小楼", "旧宅"], "visual_description": "红砖外墙，窗框斑驳", "reference_syntax": "@{郊区小楼}"}
-    assert facts["manuscript"] == narrative
-    assert narrative not in messages[0]["content"]
 
 
 def test_storyboard_strategy_factory_supports_legacy_name_and_safe_fallback():
@@ -83,55 +60,10 @@ def test_storyboard_strategy_factory_supports_legacy_name_and_safe_fallback():
     assert storyboard_strategy_factory.resolve("unknown-old-value").key == "cinematic"
 
 
-def test_narration_strategy_requires_non_overlapping_timed_voice_tracks():
-    import json
-    from prompts.skill_pack import read_skill
-    strategy = storyboard_strategy_factory.resolve("narration")
-    messages = build_storyboard_messages("章节正文", [_entity()], strategy=strategy)
-    assert "旁白和内心独白不得与对白重叠" in messages[0]["content"]
-    assert json.loads(messages[1]["content"])["untrusted_task_facts"]["strategy"] == "narration"
-    resource = json.loads(read_skill("strategies"))["narration"]
-    assert "同一时间只能有一个可辨识的人声主体" in resource["rules"]
 
 
-@pytest.mark.asyncio
-async def test_storyboard_generator_uses_centralized_message_renderer():
-    storyboard = Storyboard(shots=[])
-    completion = SimpleNamespace(
-        model="storyboard-model",
-        id="response-id",
-        created=1,
-        usage=None,
-        choices=[SimpleNamespace(message=SimpleNamespace(refusal=None))],
-    )
-    completion_call = AsyncMock(return_value=(storyboard, completion))
-
-    with patch(
-        "services.storyboard.generator.create_json_completion",
-        completion_call,
-    ):
-        result, _metadata = await generate_storyboard(
-            client=object(),
-            long_text="章节正文",
-            entities=[_entity()],
-            model="storyboard-model",
-            prompt_language="zh",
-        )
-
-    assert result == storyboard
-    assert completion_call.await_args.kwargs["messages"] == build_storyboard_messages(
-        "章节正文",
-        [_entity()],
-        "zh",
-    )
 
 
-def test_narrative_chunker_splits_long_chapters_on_semantic_boundaries():
-    chunks = NarrativeChunker(600).split("第一句。" * 220)
-
-    assert len(chunks) > 1
-    assert all(len(chunk) <= 600 for chunk in chunks)
-    assert "".join(chunks) == "第一句。" * 220
 
 
 def test_professional_prompt_renders_only_assets_referenced_by_the_shot():
@@ -325,54 +257,8 @@ def test_normalized_storyboard_reference_fields_handles_attached_chinese_prose()
     assert updates["description"] == "走出单元楼。@{羽宁}沿着步道走。"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('context_limit', [None, 100_000])
-async def test_storyboard_generator_keeps_large_multiscene_episode_in_one_call(context_limit):
-    completion = SimpleNamespace(model='storyboard-model', id='response-1', created=1,
-        usage=None, choices=[SimpleNamespace(message=SimpleNamespace(refusal=None))])
-    completion_call = AsyncMock(return_value=(Storyboard(shots=[_shot(1), _shot(2)]), completion))
-    text = '1-1 前院 外 日\n' + '第一句。' * 1600 + '\n1-2 卧房 内 夜\n父亲哭求。'
-    with patch('services.storyboard.generator.create_json_completion', completion_call):
-        result, metadata = await generate_storyboard(client=object(), long_text=text,
-            entities=[_entity()], model='storyboard-model', max_context_characters=context_limit)
-    assert completion_call.await_count == 1
-    content = completion_call.await_args.kwargs['messages'][-1]['content']
-    assert '1-1 前院 外 日' in content and '1-2 卧房 内 夜' in content
-    assert content.count('第一句。') == 1600
-    assert len(result.shots) == 2 and metadata['batch_count'] == 1
 
 
-@pytest.mark.asyncio
-async def test_storyboard_generator_retries_a_truncated_batch_as_smaller_chunks():
-    completion = SimpleNamespace(
-        model="storyboard-model",
-        id="response-id",
-        created=1,
-        usage=None,
-        choices=[SimpleNamespace(message=SimpleNamespace(refusal=None))],
-    )
-    completion_call = AsyncMock(
-        side_effect=[
-            JsonCompletionTruncatedError("truncated"),
-            (Storyboard(shots=[_shot(1)]), completion),
-            (Storyboard(shots=[_shot(1)]), completion),
-        ]
-    )
-
-    with patch(
-        "services.storyboard.generator.create_json_completion",
-        completion_call,
-    ):
-        result, metadata = await generate_storyboard(
-            client=object(),
-            long_text="一句话。" * 250,
-            entities=[_entity()],
-            model="storyboard-model",
-        )
-
-    assert completion_call.await_count == 3
-    assert len(result.shots) == 2
-    assert metadata["batch_count"] == 2
 
 
 def test_storyboard_services_do_not_inline_large_prompt_templates():
@@ -421,9 +307,3 @@ def test_script_driven_presentation_survives_structured_render(key, language):
         assert '无 BGM' not in shot.prompt and '无字幕' not in shot.prompt
         assert 'no subtitles' not in shot.prompt.lower()
         assert 'no background music' not in shot.prompt.lower()
-
-
-def test_legacy_storyboard_request_passes_the_model_duration_range_as_facts():
-    import json
-    messages = build_storyboard_messages('雨夜', [], 'zh', shot_duration_range=[4, 15])
-    assert json.loads(messages[1]['content'])['untrusted_task_facts']['shot_duration_range'] == [4, 15]

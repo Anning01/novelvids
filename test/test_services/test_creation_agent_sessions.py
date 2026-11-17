@@ -15,7 +15,7 @@ from services.creation_agent.sessions import agent_sessions
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
-async def session_fixture(runtime='pydantic_ai'):
+async def session_fixture(runtime='pydantic_ai', *, write_scope='selected'):
     config = await AiModelConfig.create(task_type=AiTaskTypeEnum.creation_agent.value,
         name='test-agent', model='test-model', base_url='https://example.invalid/v1', api_key='fake-test-key', supports_tool_calls=True, is_active=True)
     await AgentSettings.update_or_create(id=1, defaults={'configuration': AgentConfiguration(enabled=True, runtime=runtime).model_dump()})
@@ -24,7 +24,7 @@ async def session_fixture(runtime='pydantic_ai'):
     scene = await Scene.create(chapter=chapter, sequence=1, prompt='空站台', duration=6)
     conversation = await agent_sessions.create(novel.id, AuthContext())
     request = AgentRunRequest(request_id=uuid4(), message='让光线更温暖', chapter_id=chapter.id,
-        targets=[{'kind': 'scene', 'id': scene.id}])
+        targets=[{'kind': 'scene', 'id': scene.id}], write_scope=write_scope)
     return conversation, request, config
 
 

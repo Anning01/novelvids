@@ -3,13 +3,6 @@
 from prompts.skill_pack import render_skill, task_facts
 
 
-def render_analysis_messages(*, name, chapter_count, material, prompt_language):
-    return [
-        {"role": "system", "content": render_skill("story", prompt_language)},
-        {"role": "user", "content": task_facts({
-            "name": name, "chapter_count": chapter_count, "manuscript": material,
-        })},
-    ]
 
 
 def render_cover_prompt(*, name, book_types, story_outline, prompt_language="en", aspect_ratio="2:3"):

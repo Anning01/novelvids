@@ -106,3 +106,20 @@ def bind_storyboard_candidates(contract: dict, entities: list[dict]) -> dict:
         fields['blocking_map']['properties']['assets']['items']['properties']['asset_name'] = (
             {'type': ['string', 'null'], 'enum': [*names, None]} if names else {'type': 'null'})
     return result
+
+
+def scene_prompt_edit_contract():
+    return {'name': 'scene_prompt_edit', 'schema': _object({'prompt': {
+        'type': 'string', 'minLength': 1,
+        'description': '修改后的完整分镜提示词，包含未修改的内容。',
+    }})}
+
+
+def scene_prompt_batch_contract(scene_ids):
+    return {'name': 'scene_prompt_edit', 'schema': _object({
+        'prompts': _object({str(identifier): _nullable({
+            'type': 'string', 'minLength': 1,
+            'description': '修改后的完整提示词；无需修改时返回 null。',
+        }) for identifier in scene_ids}),
+        'reply': {'type': 'string', 'description': '简短说明修改内容或回答问题，不使用 Markdown。'},
+    })}

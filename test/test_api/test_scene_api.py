@@ -372,7 +372,7 @@ async def test_generate_no_config(client: AsyncClient):
     )
     body = response.json()
     assert body["code"] == 422
-    assert "tool calling" in body["message"]
+    assert "json schema" in body["message"].lower()
 
 
 @pytest.mark.asyncio
@@ -436,7 +436,7 @@ async def test_extraction_and_storyboard_accept_independent_models(client, confi
     novel = await Novel.create(name="分步选模型")
     chapter = await Chapter.create(novel=novel, number=1, name="第一集", content="原文")
     other = await AiModelConfig.create(name='Storyboard', model='storyboard', task_type=7,
-        base_url='https://example.invalid', api_key='test', supports_tool_calls=True, is_active=True)
+        base_url='https://example.invalid', api_key='test', supports_tool_calls=True, supports_strict_output=True, is_active=True)
     monkeypatch.setattr(ai_task_executor, "run", AsyncMock())
     stages = [(f"/api/chapter/extract/{chapter.id}", {}, configured_creation_agent.id),
               ("/api/scene/generate/", {"chapter_id": chapter.id}, other.id)]

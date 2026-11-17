@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
@@ -21,7 +20,7 @@ from controllers.novel import novel_controller
 from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.novel import Novel
-from prompts.project_analysis import render_analysis_messages, render_cover_prompt
+from prompts.project_analysis import render_cover_prompt
 from services.ai_task_executor import BaseTaskHandler
 from services.chapter_titles import strip_chapter_ordinal
 from services.project_analysis.results import cover_warning
@@ -32,7 +31,6 @@ from services.cover_derivatives import (
 )
 from services.image_generation import generate_images
 from services.image_generation.capabilities import validate_selection
-from services.llm.json_output import create_json_completion, completion_usage
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from utils.prompt_language import normalize_prompt_language
 
@@ -177,6 +175,10 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
                 outline=novel.story_outline or novel.description or "",
                 book_types=novel.tags or [], result={}, stopped=stopped,
             )
+        from services.creation_agent.strict_text import require_text_execution
+        from services.creation_agent.skill_execution import require_workflow_model
+        execution = require_text_execution(request_params)
+        llm_config, _ = await require_workflow_model(request_params)
         chapter_query = Chapter.filter(novel_id=novel_id).order_by("number")
         chapter_count = await chapter_query.count()
         if not chapter_count and not novel.episodes_managed:
@@ -194,38 +196,11 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         if not material.strip():
             raise ValueError(localized_message('项目没有可分析的书稿内容'))
 
-        from services.creation_agent.skill_execution import current_execution, require_workflow_model
-        execution = current_execution.get()
-        if execution:
-            llm_config, _ = await require_workflow_model(request_params)
-            facts = {'name': novel.name, 'manuscript': material, 'chapter_count': chapter_count}
-            if request_params.get('output_contract'):
-                analysis = await execution.generate_strict(facts)
-            else:
-                analysis = (await execution.generate('story', facts, BookAnalysis)).model_dump()
-            token_usage = {}
-        else:
-            llm_config = await ai_model_config_controller.get_active_with_legacy_fallback(
-                AiTaskTypeEnum.project_analysis.value,
-                AiTaskTypeEnum.extraction.value,
-                team_id=request_params.get("team_id"),
-            )
-
-            if await stopped():
-                raise ValueError(localized_message('任务已取消或结束'))
-            llm_client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
-            analysis, completion = await create_json_completion(
-                llm_client,
-                model=llm_config.model,
-                messages=render_analysis_messages(name=novel.name, chapter_count=chapter_count, material=material, prompt_language=prompt_language),
-                response_model=BookAnalysis,
-                prompt_language=prompt_language,
-                supports_json_output=llm_config.supports_json_output,
-                thinking=llm_config.thinking,
-                reasoning_effort=llm_config.reasoning_effort,
-            )
-            token_usage = completion_usage(completion)
-            analysis = analysis.model_dump()
+        facts = {'name': novel.name, 'manuscript': material, 'chapter_count': chapter_count}
+        if await stopped():
+            raise ValueError(localized_message('任务已取消或结束'))
+        analysis = await execution.generate_strict(facts)
+        token_usage = {}
 
         result = {
             **analysis, 'analysis_completed': False,
@@ -240,18 +215,14 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
             from services.creation_objects import project_write
             async with project_write(novel_id):
                 novel.total_chapters = await Chapter.filter(novel_id=novel_id).count()
-                if execution:
-                    await execution.before_request()
+                await execution.before_request()
                 novel.tags = analysis['book_types']
                 novel.story_outline = analysis['story_outline']
                 await novel.save(update_fields=["total_chapters", "tags", "story_outline", "updated_at"])
             return {"novel_id": novel_id}
 
-        if execution:
-            from services.creation_agent.operation_receipts import execute_step
-            await execute_step(execution.params["task_id"], "persist:story", persist_analysis, atomic=True)
-        else:
-            await persist_analysis()
+        from services.creation_agent.operation_receipts import execute_step
+        await execute_step(execution.params["task_id"], "persist:story", persist_analysis, atomic=True)
         result['analysis_completed'] = True
         if await stopped():
             result['cover_status'] = 'cancelled'

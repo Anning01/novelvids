@@ -1,3 +1,4 @@
+import { applySavedLocale } from '@/i18n'
 import { createPinia } from 'pinia'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -556,4 +557,29 @@ it('presents a completed image job once without a redundant status paragraph or 
   await flushPromises()
   expect(wrapper.text()).toContain('图片生成 · 已完成')
   wrapper.unmount()
+})
+
+
+it.each([
+  ['screenplay', '剧本改编', 'Screenplay adaptation'],
+  ['story', '项目分析', 'Project analysis'],
+  ['assets', '资产提取', 'Asset extraction'],
+  ['storyboard', '分镜生成', 'Storyboard generation'],
+])('localizes the %s skill label and updates it when the UI language changes', async (operation, chinese, english) => {
+  applySavedLocale('zh')
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  try {
+    await flushPromises()
+    useCreationAgentStore(pinia).messages = [{ id: 2, role: 'assistant', content: '', task_id: 'text-run', status: 3,
+      changes: [], usage: {}, created_at: '', production: [{ task_id: 'text-run', operation, status: 3 }] }]
+    await flushPromises()
+    expect(wrapper.get('.agent-run-activity__header').text()).toContain(chinese)
+    applySavedLocale('en')
+    await flushPromises()
+    expect(wrapper.get('.agent-run-activity__header').text()).toContain(english)
+  } finally {
+    wrapper.unmount()
+    applySavedLocale('zh')
+  }
 })

@@ -67,6 +67,7 @@ async def prepare_workflow(params: dict) -> dict:
                 "assistant_model_config_id",
                 "agent_configuration",
             )
+            if key in parent.params
         }
         inherited["prompt_language"] = parent.language
         inherited["origin_run_id"] = parent.params["task_id"]
@@ -172,8 +173,6 @@ class SkillExecution:
         media=None,
         additional_instructions: str = "",
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
-        initial_assets: BaseModel | None = None,
-        asset_scope: tuple[tuple[int, str], ...] = (),
         activity_label: str | None = None,
     ):
         from services.creation_agent.handler import configured_model
@@ -206,10 +205,7 @@ class SkillExecution:
                                        if k not in {'request_id', 'resume_from_task_id'}}
         input_key = 'model-input:' + fingerprint(key)
         revision = fingerprint([skill, stable_facts, self.snapshot.revision, self.language, chosen.id,
-                                output_type.model_json_schema(), additional_instructions,
-                                *([initial_assets.model_dump(mode='json')] if initial_assets is not None else [])])
-        if asset_scope:
-            revision = fingerprint([revision, asset_scope])
+                                output_type.model_json_schema(), additional_instructions])
         saved_input, _ = await AgentOperation.get_or_create(task_id=self.params['task_id'], key=input_key,
             defaults={'state': 'completed', 'result': {'revision': revision}})
         if saved_input.result['revision'] != revision:
@@ -325,10 +321,7 @@ class SkillExecution:
         if skill in {'storyboard', 'video'}:
             from prompts.creation_plan import resolved_storyboard_resources_instructions
             additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
-        from services.extraction.validation import AssetCandidateValidator, AssetExtractionValidationError
-        asset_candidates = AssetCandidateValidator(output_type, asset_scope) if skill == 'assets' else None
-        agent_output = (storyboard_candidates.draft_type if storyboard_candidates else
-                        asset_candidates.draft_type if asset_candidates else output_type)
+        agent_output = storyboard_candidates.draft_type if storyboard_candidates else output_type
         if chosen.supports_json_output:
             agent_output = PromptedOutput(agent_output)
         agent = Agent(
@@ -338,7 +331,7 @@ class SkillExecution:
                 "\n" + additional_instructions if additional_instructions else ""
             ),
             output_type=agent_output,
-            retries=0 if skill == 'screenplay' else 2,
+            retries=2,
         )
 
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
@@ -347,16 +340,8 @@ class SkillExecution:
 
         # These phases already receive their full rules and evidence. Additional
         # skill lookups only repeat context and consume the user's call budget.
-        if skill not in {'planning_request', 'source_reading', 'creative_check', 'screenplay', 'storyboard', 'video', 'structured', 'remake'}:
+        if skill not in {'planning_request', 'source_reading', 'creative_check', 'storyboard', 'video', 'structured', 'remake'}:
             agent.tool(read_skill)
-
-        asset_checkpoint = None
-        if asset_candidates:
-            from models.agent_operation import AgentOperation
-            saved = await AgentOperation.get_or_none(task_id=self.params['task_id'], key=f'candidate:assets:{segment}', state='completed')
-            if saved:
-                asset_checkpoint = saved.result
-                asset_candidates.restore(asset_checkpoint, output_type)
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
@@ -375,24 +360,6 @@ class SkillExecution:
                     output = resolve_reading(output, facts, require_paragraphs=True)
                 except ValueError as error:
                     raise ModelRetry(str(error)) from None
-            if skill == "assets":
-                from pydantic_ai import ModelRetry
-                from models.agent_operation import AgentOperation
-                from prompts.extraction import render_asset_repair
-
-                attempted = output.model_dump(mode='json', warnings=False)
-                output = asset_candidates.merge(output)
-                if output_validator:
-                    try:
-                        await output_validator(output)
-                    except ValueError as error:
-                        asset_candidates.issues.append(str(error))
-                await AgentOperation.update_or_create(task_id=self.params['task_id'], key=f'candidate:assets:{segment}',
-                    defaults={'state': 'completed', 'result': {'attempted': attempted,
-                        'accepted': output.model_dump(mode='json'), 'issues': asset_candidates.issues,
-                        'pending': [[list(key), issue] for key, issue in asset_candidates.pending.items()]}})
-                if asset_candidates.issues:
-                    raise ModelRetry(render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues))
             if skill == "image" and isinstance(facts, dict) and facts.get("asset_type") in {1, 2, 3}:
                 from pydantic_ai import ModelRetry
                 from services.extraction.extractor import validate_asset_design
@@ -412,7 +379,7 @@ class SkillExecution:
                 if merged is None:
                     raise ModelRetry(structural_repair(self.language, checkpoint))
                 output = merged
-            if output_validator and skill != 'assets':
+            if output_validator:
                 from pydantic_ai import ModelRetry
                 try:
                     await output_validator(output)
@@ -430,14 +397,10 @@ class SkillExecution:
             await child.save(update_fields=['status'])
             if storyboard_checkpoint and not storyboard_checkpoint['pending'] and not storyboard_checkpoint['protocol_errors']:
                 return storyboard_candidates.result().model_dump(mode='json')
-            if asset_checkpoint and not asset_checkpoint['issues']:
-                return asset_checkpoint['accepted']
             from models.novel import Novel
 
             project = await Novel.get(id=self.params["novel_id"])
             request_aspect_ratio = project.aspect_ratio or "16:9"
-            if initial_assets is not None and asset_candidates and not asset_checkpoint:
-                asset_candidates.merge(initial_assets)
             from prompts.project_settings import audiovisual_guidance
             project_facts = {
                 "name": project.name,
@@ -449,10 +412,10 @@ class SkillExecution:
                 "aspect_ratio": project.aspect_ratio,
                 "storyboard_strategy": project.storyboard_strategy,
             }
-            if skill in ("assets", "image", "storyboard", "video", "remake"):
+            if skill in ("image", "storyboard", "video", "remake"):
                 styles = json.loads(self.snapshot.read("styles"))
                 selected_style = styles.get(project.style_key, {})
-                style_kind = 'image' if skill in {'assets', 'image', 'remake'} else 'video'
+                style_kind = 'image' if skill in {'image', 'remake'} else 'video'
                 project_facts[style_kind + '_style'] = (
                     (project.custom_style_prompt or "").strip()
                     or selected_style.get(style_kind, "")
@@ -509,12 +472,8 @@ class SkillExecution:
                     'candidates': {int(key): value for key, value in storyboard_checkpoint['candidates'].items()},
                     'pending': {int(key): value for key, value in storyboard_checkpoint['pending'].items()}}
                 user_input = [*(user_input if isinstance(user_input, list) else [user_input]), structural_repair(self.language, checkpoint)]
-            if asset_checkpoint and asset_checkpoint['issues']:
-                from prompts.extraction import render_asset_repair
-                user_input = [*(user_input if isinstance(user_input, list) else [user_input]),
-                    render_asset_repair(self.language, asset_candidates.names(), asset_candidates.issues)]
             receipt = await AgentOperation.get(task_id=self.params['task_id'], key=key)
-            if storyboard_checkpoint or asset_checkpoint or receipt.result.get('recovered_failure'):
+            if storyboard_checkpoint or receipt.result.get('recovered_failure'):
                 await self.claim_repair(skill, 'saved_candidate')
 
             with capture_run_messages() as run_messages:
@@ -556,8 +515,6 @@ class SkillExecution:
             await child.save(update_fields=["status"])
             from pydantic_ai.exceptions import UnexpectedModelBehavior
             from services.creation_agent.reliability import RepairExhausted
-            if isinstance(error, (UnexpectedModelBehavior, RepairExhausted)) and asset_candidates and asset_candidates.issues:
-                raise AssetExtractionValidationError(asset_candidates.issues) from error
             if isinstance(error, (UnexpectedModelBehavior, RepairExhausted)) and storyboard_candidates and storyboard_candidates.pending:
                 details = '；'.join(f'{number}: {" / ".join(issues)}' for number, issues in storyboard_candidates.pending.items())
                 raise ValueError(localized_message('部分分镜修正仍未通过，已保留合格镜头与候选：{p0}', p0=details)) from error

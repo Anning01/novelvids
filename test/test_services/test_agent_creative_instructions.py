@@ -37,6 +37,8 @@ async def chat_execution():
 @pytest.mark.asyncio
 async def test_asset_intent_keeps_private_instruction_reference_and_replay():
     request, execution = await chat_execution()
+    from models.config import AiModelConfig
+    await AiModelConfig.filter(task_type=7).update(supports_strict_output=True)
     intent = ProductionIntent(operation='assets', target_id=request.chapter_id, request_id=uuid4())
     request = request.model_copy(update={'production_intents': [intent]})
     token = current_execution.set(execution)
@@ -53,6 +55,8 @@ async def test_asset_intent_keeps_private_instruction_reference_and_replay():
     try:
         grandchild = await prepare_workflow({'novel_id': execution.params['novel_id']})
         assert grandchild['instruction_message_id'] == source.id
+        assert grandchild['skill_snapshot']['contents']
+        assert 'output_contract' not in grandchild
     finally:
         current_execution.reset(token)
     assert 'instruction_message_id' not in await prepare_workflow({'novel_id': execution.params['novel_id']})
@@ -162,3 +166,19 @@ async def test_missing_instruction_fails_before_context_loading_or_generation():
             await execution.generate('storyboard', {}, CreativeOutput)
     context.assert_not_awaited()
     generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_child_workflow_preserves_an_existing_frozen_parent_skill_snapshot():
+    from test.test_services.test_skill_workflow import enabled_project
+    novel, _, _ = await enabled_project()
+    parent_params = await prepare_workflow({'novel_id': novel.id, 'prompt_language': 'en'})
+    parent_params['skill_snapshot']['contents']['image'] = 'Frozen parent image instructions'
+    parent = SkillExecution({**parent_params, 'task_id': str(uuid4())}, None, AsyncMock())
+    token = current_execution.set(parent)
+    try:
+        child = await prepare_workflow({'novel_id': novel.id})
+    finally:
+        current_execution.reset(token)
+    assert child['skill_snapshot'] == parent_params['skill_snapshot']
+    assert child['prompt_language'] == 'en'

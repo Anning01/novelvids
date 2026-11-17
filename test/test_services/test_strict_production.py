@@ -80,8 +80,7 @@ async def test_production_uses_one_strict_request_without_candidate_checks(proje
     # Resolve module-level aliases before temporarily replacing their source functions.
     import services.creation_agent.prompt_edits
     import services.creation_agent.operations
-    for target in ('services.extraction.validation.AssetCandidateValidator.merge',
-        'services.storyboard.candidates.StoryboardCandidateValidator.merge',
+    for target in ('services.storyboard.candidates.StoryboardCandidateValidator.merge',
         'services.storyboard.validation.validate_skill_storyboard_shot',
         'services.storyboard.validation.validate_skill_storyboard_timing',
         'services.creation_agent.prompt_edits.validate_prompt_dependencies'):
@@ -395,3 +394,24 @@ def test_empty_storyboard_candidates_do_not_allow_arbitrary_references():
     assert fields['blocking_map']['properties']['assets']['items']['properties']['asset_name'] == {'type': 'null'}
     assert fields['dialogue']['items']['properties']['speaker']['enum'] == ['旁白', 'Narrator']
     assert 'maxItems' not in original['schema']['properties']['shots']['items']['properties']['visible_asset_names']
+
+
+@pytest.mark.asyncio
+async def test_complete_episode_preserves_all_source_scene_numbers_in_one_call(project, monkeypatch):
+    from copy import deepcopy
+    novel, chapter, _ = project
+    await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, source_chapters=[chapter.number])
+    numbers = ['1-1', '1-2', '1-3']
+    chapter.screenplay = '\n'.join(f'{number} 渡口 外 夜\n阿岚：等一等。' for number in numbers)
+    await chapter.save()
+    shots = [deepcopy(shot_payload()['shots'][0]) for _ in numbers]
+    for number, shot in zip(numbers, shots):
+        shot['source_scene_number'] = number
+    requests = mock_model(monkeypatch, {'shots': shots})
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    scenes = await Scene.filter(chapter=chapter).order_by('sequence')
+    assert [scene.prompt_params['source_scene_number'] for scene in scenes] == numbers
+    assert len(requests) == 1

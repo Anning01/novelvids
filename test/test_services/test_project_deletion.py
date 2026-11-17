@@ -243,39 +243,49 @@ async def test_deleted_project_cannot_admit_another_paid_task():
 
 
 @pytest.mark.parametrize('cancel_during',['analysis','cover'])
-async def test_delete_during_paid_call_stops_future_cover_and_keeps_actual_charges(monkeypatch,cancel_during):
+async def test_delete_during_paid_call_stops_future_cover_and_keeps_actual_charges(monkeypatch, cancel_during):
+    import json
+    import httpx
+    from openai import AsyncOpenAI
     from models.config import AiModelConfig
-    from services.project_analysis.handler import ProjectAnalysisTaskHandler,BookAnalysis
-    project=await Novel.create(name='selected-wrong-project',content='第一章 清晨\n少年醒来。')
-    await Chapter.create(novel=project,number=1,name='清晨',content='少年醒来。')
-    await AiModelConfig.create(name='analysis-model',task_type=5,model='mock-text',base_url='https://example.invalid',api_key='test',is_active=True,
-        pricing={'type':'text','currency':'CNY','input_price_per_1m':10,'output_price_per_1m':20})
-    await AiModelConfig.create(name='cover-model',task_type=2,model='mock-image',base_url='https://example.invalid',api_key='test',is_active=True,image_model_type='seedream_5_pro',api_protocol='volcengine_ark',
-        pricing={'type':'image','currency':'CNY','prices':{'1K':0.3,'1.5K':0.3,'2K':0.3}})
-    task=await AiTask.create(task_type=5,status=1,request_params={'novel_id':project.id})
-    async def delete_while_provider_is_busy():
-        await novel_controller.remove(project.id)
-        assert not await Novel.filter(id=project.id).exists()
-    async def text_call(*args,**kwargs):
-        if cancel_during=='analysis':await delete_while_provider_is_busy()
-        return BookAnalysis(book_types=['科幻'],story_outline='少年在清晨醒来。',key_characters=[]),SimpleNamespace(usage=SimpleNamespace(prompt_tokens=100,completion_tokens=20,total_tokens=120))
+    from services.creation_agent.strict_text import prepare_text_workflow
+    from services.creation_agent.skill_execution import SkillExecution
+    from schemas.agent_workflow import CompletePrompt
+    from test.agent_stream_fixtures import completion_stream_response
+    project = await Novel.create(name='selected-wrong-project', content='第一章 清晨\n少年醒来。')
+    await Chapter.create(novel=project, number=1, name='清晨', content='少年醒来。')
+    await AiModelConfig.create(name='analysis-model', task_type=7, model='mock-text', base_url='https://example.invalid', api_key='test',
+        is_active=True, supports_strict_output=True, pricing={'type': 'text', 'currency': 'CNY', 'input_price_per_1m': 10, 'output_price_per_1m': 20})
+    cover = await AiModelConfig.create(name='cover-model', task_type=2, model='mock-image', base_url='https://example.invalid', api_key='test',
+        is_active=True, image_model_type='seedream_5_pro', api_protocol='volcengine_ark',
+        pricing={'type': 'image', 'currency': 'CNY', 'prices': {'1K': 0.3, '1.5K': 0.3, '2K': 0.3}})
+    params = await prepare_text_workflow({'novel_id': project.id, 'cover_model_config_id': cover.id}, 'story')
+    task = await AiTask.create(task_type=5, status=1, request_params=params)
+    async def respond(request):
+        if cancel_during == 'analysis':
+            await novel_controller.remove(project.id)
+        return completion_stream_response({'id': 'paid-text', 'object': 'chat.completion', 'created': 1, 'model': 'mock-text',
+            'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': json.dumps({'book_types': ['科幻'], 'story_outline': '少年醒来。', 'key_characters': []})}, 'finish_reason': 'stop'}],
+            'usage': {'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}})
+    monkeypatch.setattr('services.creation_agent.handler.AsyncOpenAI', lambda **kw: AsyncOpenAI(**kw,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
+    monkeypatch.setattr(SkillExecution, 'generate', AsyncMock(return_value=CompletePrompt(prompt='封面')))
     async def image_call(**kwargs):
-        await delete_while_provider_is_busy()
-        return [SimpleNamespace(url='https://example.invalid/cover.png',b64_json=None)]
-    image=AsyncMock(side_effect=image_call)
-    monkeypatch.setattr('services.project_analysis.handler.create_json_completion',AsyncMock(side_effect=text_call))
-    monkeypatch.setattr('services.project_analysis.handler.generate_images',image)
-    monkeypatch.setattr('services.project_analysis.handler._save_cover',AsyncMock(return_value='/media/example-cover.png'))
-    monkeypatch.setitem(ai_task_executor._handlers,AiTaskTypeEnum.project_analysis,ProjectAnalysisTaskHandler())
+        await novel_controller.remove(project.id)
+        return [SimpleNamespace(url='https://example.invalid/cover.png', b64_json=None)]
+    image = AsyncMock(side_effect=image_call)
+    monkeypatch.setattr('services.project_analysis.handler.generate_images', image)
+    monkeypatch.setattr('services.project_analysis.handler._save_cover', AsyncMock(return_value='/media/example-cover.png'))
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.status==5
-    assert image.await_count==(1 if cancel_during=='cover' else 0)
-    records=await ModelUsageRecord.filter(novel_id=project.id)
-    assert sum(record.cost for record in records if record.billing_type=='text')==Decimal('0.0014')
-    assert sum(record.cost for record in records if record.billing_type=='image')==(Decimal('0.3') if cancel_during=='cover' else 0)
+    # Completion can race deletion: both cancellation and a rejected late write
+    # are terminal. Neither outcome may submit more work or lose actual usage.
+    assert task.status in {4, 5}, task.error_message
+    assert image.await_count == (1 if cancel_during == 'cover' else 0)
+    records = await ModelUsageRecord.filter(novel_id=project.id)
+    assert sum(record.cost for record in records if record.billing_type == 'text') == Decimal('0.0014')
+    assert sum(record.cost for record in records if record.billing_type == 'image') == (Decimal('0.3') if cancel_during == 'cover' else 0)
     assert not await Novel.filter(id=project.id).exists()
-    assert await ModelUsageRecord.filter(novel_id=project.id).count()==len(records)
 
 
 async def test_cancelled_uncertain_request_remains_available_for_manual_review():
@@ -365,18 +375,18 @@ async def test_recursive_parent_cancellation_does_not_roll_back_when_child_is_al
 
 async def test_cancellation_during_preparation_never_submits_the_analysis_model(monkeypatch):
     from models.config import AiModelConfig
-    from services.project_analysis.handler import ProjectAnalysisTaskHandler
-    project=await Novel.create(name='cancel-before-model',content='第一章 开始\n故事正文。')
-    task=await AiTask.create(task_type=5,status=1,request_params={'novel_id':project.id})
-    await AiModelConfig.create(name='preflight-text',task_type=5,model='mock',base_url='https://example.invalid',api_key='test',is_active=True)
+    from services.creation_agent.strict_text import prepare_text_workflow
+    from test.test_services.test_strict_text_tasks import mock_model
+    project = await Novel.create(name='cancel-before-model', content='第一章 开始\n故事正文。')
+    await AiModelConfig.create(name='preflight-text', task_type=7, model='mock', base_url='https://example.invalid', api_key='test', is_active=True, supports_strict_output=True)
+    params = await prepare_text_workflow({'novel_id': project.id}, 'story')
+    task = await AiTask.create(task_type=5, status=1, request_params=params)
     async def split_and_stop(project_id):
-        await Chapter.create(novel_id=project_id,number=1,name='开始',content='故事正文。')
+        await Chapter.create(novel_id=project_id, number=1, name='开始', content='故事正文。')
         await novel_controller.remove(project_id)
-    request=AsyncMock()
-    monkeypatch.setattr(novel_controller,'split',split_and_stop)
-    monkeypatch.setattr('services.project_analysis.handler.create_json_completion',request)
-    monkeypatch.setitem(ai_task_executor._handlers,AiTaskTypeEnum.project_analysis,ProjectAnalysisTaskHandler())
+    monkeypatch.setattr(novel_controller, 'split', split_and_stop)
+    requests = mock_model(monkeypatch, {})
     await ai_task_executor.run(task)
-    request.assert_not_awaited()
-    assert sum(row.cost for row in await ModelUsageRecord.filter(novel_id=project.id))==0
+    assert requests == []
+    assert sum(row.cost for row in await ModelUsageRecord.filter(novel_id=project.id)) == 0
     assert not await Novel.filter(id=project.id).exists()

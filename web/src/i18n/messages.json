@@ -2,6 +2,7 @@
   "model_reasoning": {
     "本地设置": "Local settings",
       "文本接口": "Text API",
+      "剧本改编": "Screenplay adaptation",
       "常用模型参数参考": "Common model parameter reference",
       "按模型版本和调用接口填写；以下仅为参考，不会自动修改参数。": "Use values for your model version and API. These hints do not change your settings.",
       "强度 low / high / max，默认 high；Responses 中 none 关闭思考。Chat 接口也可用 thinking 的 enabled / disabled 开关。": "Effort: low / high / max; default: high. In Responses, none disables thinking. Chat also supports thinking enabled / disabled.",

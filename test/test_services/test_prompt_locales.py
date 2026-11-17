@@ -11,17 +11,14 @@ from pydantic_ai.models.function import FunctionModel
 
 from prompts.catalog import catalog, read_resource
 from prompts.creation_agent import render_creation_instructions, render_summary_instructions
-from prompts.extraction import render_extraction_system
 from test.visual_fields import trait_labels
-from prompts.project_analysis import render_analysis_messages, render_cover_prompt
+from prompts.project_analysis import render_cover_prompt
 from services.reference.generator import build_sora_compatible_prompt
 from prompts.remake import render_remake_prompt
-from prompts.schema import json_instruction
 from prompts.skill_pack import read_skill
-from prompts.storyboard import build_storyboard_messages
 from schemas.creation_agent import StoryboardVisualChanges
 from services.creation_agent.runtime import creation_agent, CreationAgentDeps
-from services.extraction.extractor import AssetExtractor, AssetExtractionResult, Person
+from services.extraction.extractor import AssetExtractionResult, Person
 from utils.prompt_language import task_language
 
 ROOT = Path(__file__).parents[2] / "prompts"
@@ -63,9 +60,6 @@ def test_enum_aliases_do_not_change_stored_protocol_values():
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_all_rule_renderers_use_the_same_skill_and_explicit_language(language):
     artifacts = [
-        (render_extraction_system(language), "assets"),
-        (build_storyboard_messages("Alex waits.", [], language)[0]["content"], "storyboard"),
-        (render_analysis_messages(name="Signal", chapter_count=2, material="Text", prompt_language=language)[0]["content"], "story"),
         (render_cover_prompt(name="Signal", book_types=[], story_outline="Text", prompt_language=language), "image"),
         (render_creation_instructions(language=language), "editing"),
         (render_summary_instructions(language), "summary"),
@@ -74,11 +68,12 @@ def test_all_rule_renderers_use_the_same_skill_and_explicit_language(language):
     for rendered, skill in artifacts:
         assert read_skill(skill) in rendered
         assert "language=" + language in rendered
-    schema = AssetExtractionResult.model_json_schema()
-    rendered = json_instruction(schema, language)
-    assert read_skill("structured") in rendered
-    assert json.loads(rendered.rsplit("\n", 1)[1]) == schema
-    assert "language=" + language in rendered
+    from prompts.text_tasks import render_text_task, builtin_method
+    for task in ('story', 'screenplay', 'assets', 'storyboard'):
+        method = builtin_method(task)
+        system, user = render_text_task(language=language, skill=method, context={'text': 'User input'})
+        assert f'language={language}' in system
+        assert json.loads(user)['creative_method']['instructions'] == method['instructions']
 
 
 def test_saved_names_and_prompts_remain_verbatim():
@@ -87,20 +82,6 @@ def test_saved_names_and_prompts_remain_verbatim():
         assert build_sora_compatible_prompt({"base_traits": user_text}, language) == user_text
 
 
-@pytest.mark.asyncio
-async def test_extraction_preserves_output_language_without_translating_field_protocol():
-    payload = {"persons": [{"name": "Alex Reed", "label": "person", "base_traits": english_traits()}], "scenes": [], "items": []}
-    completion = SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=json.dumps(payload), refusal=None))], usage=None)
-    create = AsyncMock(return_value=completion)
-    extractor = AssetExtractor(SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))), "test", prompt_language="en")
-    result = await extractor.extract([
-        {"role": "system", "content": render_extraction_system("en")},
-        {"role": "user", "content": "Alex arrives."},
-    ])
-    outgoing = create.call_args.kwargs["messages"]
-    assert "language=en" in outgoing[0]["content"]
-    assert read_skill("structured") in outgoing[0]["content"]
-    assert result.persons[0].base_traits == english_traits()
 
 
 @pytest.mark.asyncio

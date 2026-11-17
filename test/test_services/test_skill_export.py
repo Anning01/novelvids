@@ -67,22 +67,22 @@ def test_saved_rules_come_from_the_same_files_as_the_standalone_package(tmp_path
     assert "FROZEN CONTRACT LABEL" not in instructions(snapshot, "en", "storyboard")
 
 
-def test_task_uses_frozen_repair_rules_and_restores_caller_context():
-    from prompts.extraction import targeted_cast_instructions
+def test_task_uses_frozen_template_resources_and_restores_caller_context():
+    from prompts.skill_pack import template_text
     from prompts.skill_pack import use_skill_snapshot
 
-    original = targeted_cast_instructions("en")
+    original = template_text("asset_templates", "targeted_cast_instructions", "en")
     saved = snapshot_skills()
     resource = json.loads(saved["contents"]["asset_templates"])
     resource["targeted_cast_instructions"]["en"] = "Frozen task instruction"
     saved["contents"]["asset_templates"] = json.dumps(resource)
     with pytest.raises(RuntimeError), use_skill_snapshot(saved):
-        assert targeted_cast_instructions("en") == "Frozen task instruction"
+        assert template_text("asset_templates", "targeted_cast_instructions", "en") == "Frozen task instruction"
         with use_skill_snapshot(None):
-            assert targeted_cast_instructions("en") == original
+            assert template_text("asset_templates", "targeted_cast_instructions", "en") == original
         assert snapshot_skills()["contents"] == saved["contents"]
         raise RuntimeError("interrupted")
-    assert targeted_cast_instructions("en") == original
+    assert template_text("asset_templates", "targeted_cast_instructions", "en") == original
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -113,7 +113,7 @@ def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path
 
 @pytest.mark.parametrize("language,source", [("zh", "导演剧本"), ("en", "director's screenplay")])
 def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_path, language, source):
-    from prompts.extraction import render_cast_instructions, targeted_cast_instructions
+    from prompts.skill_pack import template_text
 
     package = export_skill("novelvids-assets", tmp_path)
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
@@ -121,8 +121,8 @@ def test_asset_inventory_and_export_use_screenplay_as_the_presence_source(tmp_pa
     for key in ("assets", "asset_lifecycle", "image"):
         assert (package / "references" / Path(FILES[key]).name).read_text() == snapshot.read(key)
         assert snapshot.read(key) in prompt
-    assert source in render_cast_instructions(language)
-    assert source in targeted_cast_instructions(language)
+    assert source in template_text("asset_templates", "render_cast_instructions", language)
+    assert source in template_text("asset_templates", "targeted_cast_instructions", language)
     for handoff in ("导演剧本", "风格确认", "资产连续性.md", "参考图"):
         assert handoff in prompt
 
