@@ -30,6 +30,3 @@ license: MIT
 - [拆段接戏的空间定位图](references/blocking.md)
 - [定位图在视频提示词中的引用](references/blocking_prompt.json)
 - [定位线稿绘制工具](../scripts/draw_blocking.py)
-
-- [作品目录交接与用户明确要求时的本地 MCP 同步](../references/work_package.md)
-- [作品文件与 MCP 工具的 JSON Schema（按文件名或工具名选择）](../references/work_package.schema.json)

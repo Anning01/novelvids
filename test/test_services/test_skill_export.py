@@ -30,7 +30,7 @@ def test_stage_exports_without_application_files(tmp_path, name):
     assert metadata.read_bytes() == (source.parent / "agents/openai.yaml").read_bytes()
     title = re.search(r'^description: (猫影[^。\n]+)。', entry, re.MULTILINE)[1]
     assert f'  display_name: "{title}"' in metadata.read_text().splitlines()
-    assert targets and set(targets) | {metadata} == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
+    assert set(targets) | {metadata} == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
     assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
     for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
         assert target.resolve().is_relative_to(package)
@@ -88,9 +88,10 @@ def test_task_uses_frozen_template_resources_and_restores_caller_context():
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_screenplay_export_and_workbench_share_scene_and_voice_notation(tmp_path, language):
     package = export_skill("novelvids-screenplay", tmp_path)
-    rules = (package / "references/screenplay.md").read_text()
+    rules = (package / "SKILL.md").read_text()
     prompt = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "screenplay")
     assert rules in prompt and f"language={language}" in prompt
+    assert prompt.count(rules) == 1
     for marker in ("出场：", "仅声音：", "关键道具：", "△", "（OS）", "（画外）", "旁白：", "【音效】", "【屏显】"):
         assert marker in rules
 

@@ -103,6 +103,47 @@ async def test_strict_generation_has_one_request_and_no_agent_validation(strict_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+@pytest.mark.parametrize('language', ['zh', 'en'])
+@pytest.mark.parametrize('pacing', [None, {'preset': 'fast', 'max_seconds': 75}])
+async def test_screenplay_request_injects_settings_outside_skill_and_saves_result(strict_model, monkeypatch, text_api, language, pacing):
+    strict_model.text_api = text_api
+    await strict_model.save()
+    monkeypatch.setattr('services.language.generation_language', AsyncMock(return_value=language))
+    novel = await Novel.create(name='任务参数')
+    chapter = await Chapter.create(novel=novel, number=1, name='渡口', content='船工守着渡口。', episode_pacing=pacing)
+    text = '1-1 渡口 外 夜\n△ 船工停下。'
+    requests = mock_model(monkeypatch, {'screenplay': text})
+    task = await submit_screenplay(chapter.id, AuthContext())
+    frozen_method = task.request_params['creative_method']['instructions']
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    await chapter.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1 and chapter.screenplay == text and chapter.content == '船工守着渡口。'
+    request = requests[0]
+    messages = request['input'] if text_api == 'responses' else request['messages']
+    content = next(message['content'] for message in messages if message.get('role') == 'user')
+    if isinstance(content, list):
+        content = ''.join(part['text'] for part in content)
+    payload = json.loads(content)
+    assert payload['creative_method']['instructions'] == frozen_method
+    assert payload['creative_method']['references'] == []
+    assert '{{' not in frozen_method
+    task_context = payload['task_context']
+    assert task_context['input']['source_text'] == chapter.content
+    assert task_context['episode_pacing'] == {'preset': 'smart', 'max_seconds': None, **(pacing or {})}
+    requirements = task_context['screenplay_requirements']
+    if pacing:
+        header = 'Target episode duration: about 75s' if language == 'en' else '本集参考时长：约 75 秒'
+        assert header in requirements and '不是硬性上限' in requirements
+    else:
+        assert '省略参考时长行' in requirements
+        assert '本集参考时长：约' not in requirements and 'Target episode duration:' not in requirements
+    assert request_schema(request) == task.request_params['output_contract']['schema']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('finish_reason', ['length', 'content_filter'])
 async def test_incomplete_response_is_never_saved_or_repaired(strict_model, monkeypatch, finish_reason):
     novel = await Novel.create(name='未完成')
