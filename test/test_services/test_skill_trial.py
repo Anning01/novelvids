@@ -167,6 +167,7 @@ async def test_trial_pacing_resolves_the_same_placeholders_as_episode_generation
     payload = json.loads(content)
     assert payload['creative_method']['instructions'] == '配置 {"preset": "fast", "max_seconds": 75}；时长 75'
     assert payload['task_context']['episode_pacing'] == {'preset': 'fast', 'max_seconds': 75}
+    assert '75' in payload['task_context']['screenplay_requirements']
     assert request.skill.instructions == '配置 {{episode_pacing}}；时长 {{max_seconds}}'
 
 

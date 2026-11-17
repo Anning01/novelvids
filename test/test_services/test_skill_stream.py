@@ -37,6 +37,19 @@ def test_selected_package_is_frozen_without_changing_language_or_required_contra
         snapshot.read('novelvids-story/../../.env')
 
 
+def test_screenplay_rules_load_once_and_keep_historical_snapshots():
+    snapshot = SkillSnapshot.model_validate(snapshot_skills())
+    rules = snapshot.read('screenplay')
+    assert instructions(snapshot, 'zh', 'screenplay').count(rules) == 1
+
+    snapshot.contents['novelvids-screenplay'] = 'Frozen entry from before the merge'
+    snapshot.contents['screenplay'] = 'Frozen screenplay rules from before the merge'
+    prompt = instructions(snapshot, 'zh', 'screenplay')
+    assert snapshot.read('novelvids-screenplay') in prompt
+    assert snapshot.read('screenplay') in prompt
+    assert rules not in prompt
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('cancel', [False, True])
 async def test_selected_skill_stream_is_visible_in_snapshot_before_completion(cancel):

@@ -211,14 +211,13 @@ async function send() {
               <p v-if="trialError" class="skill-error" role="alert">{{ trialError }}</p>
             </div>
           <details v-if="hasPacingParameters" ref="parameters" class="trial-parameters" @toggle="parametersExpanded = ($event.target as HTMLDetailsElement).open">
-            <summary>{{ tr('占位符参数（仅试运行）') }}</summary>
-            <p :id="`${id}-parameters-hint`">{{ tr('正式生成时从本集设置填入，保存技能时保留占位符。') }}</p>
+            <summary>{{ tr('试运行设置') }}</summary>
+            <p :id="`${id}-parameters-hint`">{{ tr('仅用于本次试运行，正式生成使用本集设置。') }}</p>
             <div class="trial-parameter-fields">
-              <label>{{ tr('本集节奏') }}<AppSelect v-model="pacing" :options="pacingOptions" :ariaLabel="tr('本集节奏')" :disabled="running" /><code v-pre>{{episode_pacing}}</code></label>
+              <label>{{ tr('本集节奏') }}<AppSelect v-model="pacing" :options="pacingOptions" :ariaLabel="tr('本集节奏')" :disabled="running" /></label>
               <label :for="`${id}-seconds`">{{ tr('本集参考时长（秒）') }}
                 <!-- Trial parameters must not block the separate skill-save action. -->
                 <input :id="`${id}-seconds`" ref="secondsInput" v-model.number="maxSeconds" form="" name="trial-max-seconds" type="number" inputmode="numeric" min="1" :max="Number.MAX_SAFE_INTEGER" step="1" :placeholder="tr('留空按剧情自然展开')" :disabled="running" :aria-describedby="`${id}-parameters-hint`" />
-                <code v-pre>{{max_seconds}}</code>
               </label>
             </div>
           </details>
@@ -293,7 +292,6 @@ summary { font-size: 12px; cursor: pointer; color: var(--app-text-secondary); } 
 .input-label { margin-block-end: 8px; } .trial-input { resize: vertical; min-block-size: 72px; max-block-size: 180px; font-size: 13px; line-height: 1.6; }
 .trial-parameters { flex: none; padding: 10px 20px; border-block-start: 1px solid var(--app-border); max-block-size: 50%; overflow: auto; }
 .trial-parameter-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-inline-size: 520px; margin-block-start: 10px; }
-.trial-parameter-fields code { font-size: 11px; color: var(--app-text-secondary); }
 .trial-parameter-fields input:user-invalid { border-color: var(--app-danger, #b33645); }
 .skill-lab-actions { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .trial-options, .save-options { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }

@@ -30,7 +30,7 @@ FILES = {
     "planning_request": "runtime/planning_request.md",
     "remake": "novelvids-remake/references/remake.md",
     "remake_templates": "novelvids-remake/references/remake_templates.json",
-    "screenplay": "novelvids-screenplay/references/screenplay.md",
+    "screenplay": "novelvids-screenplay/SKILL.md",
     "source_reading": "runtime/source_reading.md",
     "story": "runtime/story.md",
     "story_memory_guide": "novelvids-story/references/story_memory.md",
@@ -170,7 +170,8 @@ def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_k
         + "\n任务语言 language="
         + language
         + "\n"
-        + (snapshot.read(package) + "\n" if (package := FILES[skill].split("/")[0]) in snapshot.contents else "")
+        + (snapshot.read(package) + "\n" if (package := FILES[skill].split("/")[0]) in snapshot.contents
+           and snapshot.read(package) != snapshot.read(skill) else "")
         + snapshot.read(skill)
         + contract
     )

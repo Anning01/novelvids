@@ -72,16 +72,14 @@ function mockSourceEditor(undoValue?: string) {
   vi.mocked(loadVditor).mockResolvedValue(SourceEditor as unknown as Awaited<ReturnType<typeof loadVditor>>)
 }
 
-it('inserts fixed variables from buttons and keeps source Markdown editing available', async () => {
+it.each(['story', 'screenplay', 'assets', 'storyboard'] as const)('edits %s Markdown without offering placeholder insertion', async task => {
   mockSourceEditor()
-  const wrapper = mount(SkillMarkdownEditor, { props: { modelValue: '参考 ', task: 'screenplay' }, attachTo: document.body })
+  const wrapper = mount(SkillMarkdownEditor, { props: { modelValue: '参考 ', task }, attachTo: document.body })
   await flushPromises()
-  const field = wrapper.get('textarea').element
-  field.setSelectionRange(0, field.value.length)
-  await wrapper.findAll('button').find(button => button.text() === '参考时长')!.trigger('click')
-  expect(field.value).toBe('参考 {{max_seconds}}')
-  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['参考 {{max_seconds}}\n'])
-  expect(wrapper.text()).toContain('不能修改名称')
+  expect(wrapper.find('.placeholder-tools').exists()).toBe(false)
+  expect(wrapper.find('[aria-label="插入变量"]').exists()).toBe(false)
+  await wrapper.get('textarea').setValue('参考实际任务要求。')
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['参考实际任务要求。\n'])
   wrapper.unmount()
 })
 

@@ -4,6 +4,26 @@ import json
 import re
 
 _PLACEHOLDER = re.compile(r'\{\{\s*([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\s*\}\}')
+_SCREENPLAY_PACING = {
+    'compact': '压缩过渡与重复反应',
+    'fast': '用主要动作和对白推进',
+    'smart': '按内容自然估时',
+    'slow': '给重要反应留白',
+    'detailed': '展开有叙事作用的细节',
+}
+
+
+def screenplay_task_requirements(pacing: dict, language: str) -> str:
+    preset = pacing['preset']
+    requirements = f'本集节奏：{preset}，{_SCREENPLAY_PACING[preset]}。'
+    seconds = pacing['max_seconds']
+    if seconds is None:
+        return requirements + '本集未设置参考时长，按剧情自然展开，省略参考时长行。'
+    header = f'Target episode duration: about {seconds}s' if language == 'en' else f'本集参考时长：约 {seconds} 秒'
+    return requirements + (
+        f'本集参考时长为 {seconds} 秒，不是硬性上限，允许为完整表达适度超出。'
+        f'在集标题下一行写「{header}」。'
+    )
 
 
 def render_skill_markdown(markdown: str, variables: dict) -> str:
@@ -55,6 +75,9 @@ def render_text_task(*, language: str, skill: dict, context: dict, output_schema
             if reference.get('render_placeholders', True) else reference['content']} for reference in skill['references']]}
     if 'file_manifest' in skill:
         method['files'] = skill['file_manifest']
+    if skill.get('task') == 'screenplay':
+        context = {**context, 'episode_pacing': pacing,
+            'screenplay_requirements': screenplay_task_requirements(pacing, language)}
     return instructions, json.dumps({'creative_method': method,
         'task_context': context}, ensure_ascii=False)
 

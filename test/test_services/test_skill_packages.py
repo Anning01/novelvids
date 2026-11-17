@@ -94,6 +94,13 @@ def test_builtin_folders_are_portable_and_include_their_linked_resources(task):
     assert package.metadata['name']
     package.linked_paths()
     assert SkillPackage.from_archive(package.archive()).files == package.files
+    if task == 'screenplay':
+        from prompts.skill_pack import read_skill
+        method = package.as_method()
+        assert set(package.by_path) == {'SKILL.md', 'agents/openai.yaml'}
+        assert method['instructions'] == read_skill(task)
+        assert method['references'] == []
+        return
     if task != 'story':
         assert any(file['path'].startswith('references/') for file in package.files)
         assert 'agents/openai.yaml' in package.by_path

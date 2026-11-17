@@ -155,9 +155,11 @@ async def test_screenplay_sends_complete_skill_without_lookup_or_output_retry(co
     assert requests[0]["response_format"]["json_schema"]["strict"] is True
     assert requests[0]["response_format"]["json_schema"]["schema"] == task.request_params["output_contract"]["schema"]
     messages = str(requests[0]["messages"])
-    assert "episode_pacing" in messages and "本集按剧情自然展开" in messages
-    assert "Target episode duration:" in messages
-    assert "不是硬性上限" in messages
+    assert "episode_pacing" in messages and "按剧情自然展开" in messages
+    payload = json.loads(next(message['content'] for message in requests[0]['messages'] if message['role'] == 'user'))
+    assert payload['creative_method']['instructions'] == task.request_params['creative_method']['instructions']
+    assert '省略参考时长行' in payload['task_context']['screenplay_requirements']
+    assert '{{episode_pacing}}' not in messages and '{{max_seconds}}' not in messages
 
 
 @pytest.mark.asyncio
