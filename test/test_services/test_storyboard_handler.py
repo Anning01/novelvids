@@ -1,3 +1,4 @@
+from test.text_task_fixtures import execute_storyboard
 import pytest
 
 from models.asset import Asset
@@ -68,14 +69,7 @@ async def test_save_scenes_persists_referenced_assets():
     ]
 
     storyboard = Storyboard(shots=[_shot(1)])
-    scenes = await StoryboardTaskHandler()._save_scenes(
-        chapter_id=chapter.id,
-        storyboard=storyboard,
-        api_metadata={},
-        request_duration=0.0,
-        prompt_language="zh",
-        entities=entities,
-    )
+    scenes = await StoryboardTaskHandler()._persist_scenes(chapter=await Chapter.get(id=chapter.id), storyboard=storyboard, api_metadata={}, request_duration=0.0, prompt_language='zh', entities=entities)
 
     assert len(scenes) == 1
     await scenes[0].fetch_related("assets")
@@ -104,14 +98,7 @@ async def test_save_scenes_normalizes_plain_person_names_before_persisting():
     shot.spatial_relationships = "李公子位于画面中央。"
     shot.dialogue = ["李七夜（惊呼）：我的身体！"]
 
-    scenes = await StoryboardTaskHandler()._save_scenes(
-        chapter_id=chapter.id,
-        storyboard=Storyboard(shots=[shot]),
-        api_metadata={},
-        request_duration=0.0,
-        prompt_language="zh",
-        entities=[entity],
-    )
+    scenes = await StoryboardTaskHandler()._persist_scenes(chapter=await Chapter.get(id=chapter.id), storyboard=Storyboard(shots=[shot]), api_metadata={}, request_duration=0.0, prompt_language='zh', entities=[entity])
 
     scene = scenes[0]
     await scene.fetch_related("assets")
@@ -136,13 +123,7 @@ async def test_save_scenes_persists_narration_strategy_and_voice_track():
     shot.narration = ["0.0s-1.5s: 旁白（克制）：风暴正在逼近。"]
     shot.dialogue = ["2.0s-3.0s: @{张三}（低声）：快走。"]
 
-    scenes = await StoryboardTaskHandler()._save_scenes(
-        chapter_id=chapter.id,
-        storyboard=Storyboard(shots=[shot]),
-        api_metadata={},
-        request_duration=0.0,
-        storyboard_strategy="narration",
-    )
+    scenes = await StoryboardTaskHandler()._persist_scenes(chapter=await Chapter.get(id=chapter.id), storyboard=Storyboard(shots=[shot]), api_metadata={}, request_duration=0.0, storyboard_strategy='narration')
 
     scene = scenes[0]
     assert scene.prompt_params["narration"] == shot.narration
@@ -164,9 +145,7 @@ async def test_shots_persist_ai_selected_variant_and_explicit_base_for_flashback
     variant = await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
     loaded = await Asset.filter(id=asset.id).prefetch_related('variants')
     entities = generation_entities_for_assets(loaded, 2, {})
-    scenes = await StoryboardTaskHandler()._save_scenes(chapter.id,
-        Storyboard(shots=[_shot(1, '@{张三#成年} 推门。'), _shot(2, '@{张三} 在少年时读书。')]),
-        {}, 0, entities=entities)
+    scenes = await StoryboardTaskHandler()._persist_scenes(await Chapter.get(id=chapter.id), Storyboard(shots=[_shot(1, '@{张三#成年} 推门。'), _shot(2, '@{张三} 在少年时读书。')]), {}, 0, entities=entities)
     assert scenes[0].metadata['asset_variant_ids'] == {str(asset.id): variant.id}
     assert scenes[1].metadata['asset_variant_ids'] == {str(asset.id): None}
     assert '@{张三#成年}' in scenes[0].prompt
@@ -181,7 +160,6 @@ async def test_shots_persist_ai_selected_variant_and_explicit_base_for_flashback
 async def test_execute_passes_all_visual_forms_to_model_without_a_creation_plan(monkeypatch):
     from unittest.mock import AsyncMock
     from models.asset_variant import AssetVariant
-    from prompts.storyboard import build_storyboard_messages
 
     novel = await Novel.create(name='分镜模型形态上下文')
     chapter = await Chapter.create(novel=novel, number=2, name='第二章', content='张三长大后拜入新宗门。')
@@ -191,14 +169,11 @@ async def test_execute_passes_all_visual_forms_to_model_without_a_creation_plan(
     async def generate(**kwargs):
         entities = kwargs['entities']
         assert [entity.name for entity in entities] == ['张三', '张三#成年宗门服']
-        messages = build_storyboard_messages(chapter.content, entities, 'zh')
-        rendered = '\n'.join(message['content'] for message in messages)
-        assert '成年青袍' in rendered and 'chapter_numbers' in rendered
-        assert '回忆、闪回应选当时的形象' in rendered
+        assert entities[1].description == '成年青袍'
+        assert entities[1].chapter_numbers == [2]
         return Storyboard(shots=[_shot(1, '@{张三#成年宗门服} 拜入新宗门。')]), {}
     monkeypatch.setattr('services.storyboard.handler.generate_storyboard', generate)
-    monkeypatch.setattr('services.storyboard.handler.AsyncOpenAI', lambda **kwargs: AsyncMock())
-    summary = await StoryboardTaskHandler().execute({'chapter_id': chapter.id,
+    summary = await execute_storyboard({'chapter_id': chapter.id,
         'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'})
     from models.scene import Scene
     scene = await Scene.get(id=summary['scene_ids'][0])
@@ -216,8 +191,7 @@ async def test_same_identity_forms_can_be_saved_in_one_scene():
     asset = await Asset.create(novel=novel, asset_type=1, canonical_name='张三', base_traits='少年')
     adult = await AssetVariant.create(asset=asset, name='成年', base_traits='成年', chapter_numbers=[2])
     entities = generation_entities_for_assets(await Asset.filter(id=asset.id).prefetch_related('variants'), 2, {})
-    result = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[
-        _shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
+    result = await StoryboardTaskHandler()._persist_scenes(await Chapter.get(id=chapter.id), Storyboard(shots=[_shot(1), _shot(2, '@{张三} 和 @{张三#成年} 同时出现。')]), {}, 0, entities=entities)
     assert len(result) == 2
     scene = await Scene.filter(chapter=chapter, sequence=2).prefetch_related('assets').get()
     assert [item.id for item in scene.assets] == [asset.id]
@@ -243,7 +217,7 @@ async def test_storyboard_passes_episode_target_without_rejecting_longer_output(
         assert kwargs["episode_max_seconds"] == (pacing or {}).get("max_seconds")
         return Storyboard(shots=[_shot()]), {}
     monkeypatch.setattr('services.storyboard.handler.generate_storyboard', generate)
-    run = StoryboardTaskHandler().execute({
+    run = execute_storyboard({
         'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test',
     })
     assert (await run)['scenes_created'] == 1
@@ -251,7 +225,7 @@ async def test_storyboard_passes_episode_target_without_rejecting_longer_output(
 
 
 @pytest.mark.asyncio
-async def test_lowering_reference_duration_while_generating_does_not_discard_output(monkeypatch):
+async def test_changed_episode_pacing_does_not_save_a_stale_generation(monkeypatch):
     from models.scene import Scene
 
     novel = await Novel.create(name="生成期间调整时长")
@@ -264,11 +238,9 @@ async def test_lowering_reference_duration_while_generating_does_not_discard_out
         return Storyboard(shots=[_shot()]), {}
 
     monkeypatch.setattr('services.storyboard.handler.generate_storyboard', generate)
-    result = await StoryboardTaskHandler().execute({
-        'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test',
-    })
-    assert result['scenes_created'] == 1
-    assert await Scene.filter(chapter=chapter, duration=4).exists()
+    with pytest.raises(Exception, match='已修改'):
+        await execute_storyboard({'chapter_id': chapter.id})
+    assert not await Scene.filter(chapter=chapter).exists()
 
 
 @pytest.mark.asyncio
@@ -277,7 +249,7 @@ async def test_226_second_storyboard_is_saved_with_180_second_reference():
     chapter = await Chapter.create(novel=novel, number=1, name='第一集', content='原文',
         episode_pacing={'preset': 'fast', 'max_seconds': 180})
     shots = [_shot(i).model_copy(update={'duration': f'{duration}s'}) for i, duration in enumerate([30] * 7 + [16], 1)]
-    rows = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=shots), {}, 0)
+    rows = await StoryboardTaskHandler()._persist_scenes(await Chapter.get(id=chapter.id), Storyboard(shots=shots), {}, 0)
     assert sum(row.duration for row in rows) == 226
     from services.storyboard.validation import validate_storyboard_duration
     with pytest.raises(ValueError):

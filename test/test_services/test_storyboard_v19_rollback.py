@@ -1,3 +1,4 @@
+from test.text_task_fixtures import execute_storyboard
 """Keep v1.9 storyboard admission while reading plans saved by newer releases."""
 from unittest.mock import AsyncMock, patch
 
@@ -38,7 +39,7 @@ async def test_storyboard_entry_does_not_add_v110_preflight_before_model():
     with patch('services.creation_agent.step_context.validate_step_inputs', AsyncMock(side_effect=ValueError('new-preflight'))), \
             patch('services.storyboard.handler.generate_storyboard', generate):
         with pytest.raises(Exception, match='model-boundary-reached'):
-            await StoryboardTaskHandler().execute({**params, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'})
+            await execute_storyboard(params)
     generate.assert_awaited_once()
 
 

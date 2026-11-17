@@ -362,14 +362,18 @@ async def test_language_changes_only_affect_new_tasks_and_survive_recovery(monke
     await ProductionRecovery().recover()
     observed = []
 
-    async def generate(self, skill, facts, output_type, **kwargs):
+    async def generate(self, facts):
         observed.append(self.language)
-        return output_type.model_validate({"persons": [], "scenes": [], "items": []})
+        return {"persons": [], "scenes": [], "items": []}
 
-    monkeypatch.setattr(SkillExecution, "generate", generate)
+    monkeypatch.setattr(SkillExecution, "generate_strict", generate)
     await ai_task_executor.run(old)
     await ai_task_executor.run(new)
     assert observed == ["en", "zh"]
+
+    await old.refresh_from_db()
+    await new.refresh_from_db()
+    assert old.status == new.status == 3
 
 
 @pytest.mark.asyncio

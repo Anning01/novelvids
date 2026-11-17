@@ -142,7 +142,8 @@ def _structured_prompt_model(text):
     from unittest.mock import AsyncMock
 
     def respond(messages, info):
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': text})])
+        import json
+        return ModelResponse(parts=[TextPart(json.dumps({'prompt': text}))])
 
     from test.agent_stream_fixtures import streaming_model
     model = streaming_model(respond)

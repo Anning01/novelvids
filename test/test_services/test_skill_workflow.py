@@ -29,8 +29,7 @@ async def test_remake_json_mode_repairs_model_validation_errors_without_losing_a
     task = await AiTask.create(task_type=6,status=2,request_params=workflow)
     assistant = await conversation_for_task(task)
     valid = {key:value for key,value in remake_shot().items() if key in RemakeShot.model_fields}
-    invalid = {**valid,'segments':[{'duration':3,'description':'内部片段',
-        **{key:valid[key] for key in ('shot_size_and_camera','visual_prose','actions','camera_movement')}}]}
+    invalid = {**valid, 'duration': '0s'}  # Invalid under the current positive-duration contract.
     seen = []
 
     def respond(request):
@@ -306,87 +305,6 @@ async def test_video_submission_returns_reserved_record_and_only_background_call
         assert factory.return_value.submit.call_args.kwargs["prompt"] == "Alex waits."
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("language,custom_style", [("zh", ""), ("en", "Custom ink rendering")])
-@pytest.mark.parametrize("response", ["freeform", "repair_empty", "empty"])
-async def test_legacy_text_generation_uses_snapshot_and_preserves_model_wording(language, custom_style, response):
-    from controllers.chapter import chapter_controller
-    from services.ai_task_executor import ai_task_executor
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
-    from models.asset import Asset
-
-    novel, chapter, assistant = await enabled_project()
-    await AiModelConfig.filter(id=assistant.id).update(supports_json_output=False)  # Historical tool-output transport.
-    novel.style_key = "realistic-general"
-    novel.custom_style_prompt = custom_style
-    await novel.save()
-    from models.config import GeneralConfig
-    await GeneralConfig.create(id=1, prompt_language=language)
-    snapshot = snapshot_skills()
-    snapshot["contents"]["image"] = "Frozen mandatory image layout rules"
-    snapshot["contents"]["styles"] = '{"realistic-general":{"image":"Frozen project rendering"}}'
-    from test.test_services.test_asset_design_instructions import synthetic_asset_contract
-    import json
-    snapshot["contents"]["asset_contract"] = json.dumps(synthetic_asset_contract())
-    visual = "A detective in a charcoal raincoat with narrow lapels and weathered brass buttons."
-    attempts = 0
-
-    def respond(messages, info):
-        nonlocal attempts
-        attempts += 1
-        import json
-        from pydantic_ai.messages import UserPromptPart
-        assert f"任务语言 language={language}" in info.instructions
-        assert "Frozen mandatory image layout rules" in info.instructions
-        assert snapshot["contents"]["assets"] in info.instructions
-        facts = next(json.loads(part.content)["untrusted_task_facts"]
-                     for message in messages for part in message.parts
-                     if isinstance(part, UserPromptPart))
-        assert facts["project"]["image_style"] == (custom_style or "Frozen project rendering")
-        assert facts["project"]["aspect_ratio"] == novel.aspect_ratio
-        tool = info.output_tools[0]
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool.name,
-                    {
-                        "persons": [
-                            {
-                                "name": "Alex",
-                                "label": "人物",
-                                "aliases": [],
-                                "description": "Detective",
-                                "base_traits": visual if response == "freeform" or (response == "repair_empty" and attempts > 1) else "",
-                            }
-                        ],
-                        "scenes": [],
-                        "items": [],
-                    },
-                )
-            ]
-        )
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch("services.creation_agent.handler.configured_model", return_value=model):
-        workflow = await prepare_workflow({'chapter_id': chapter.id, 'novel_id': novel.id,
-            'model_config_id': assistant.id, 'assistant_model_config_id': assistant.id, 'prompt_language': language})
-        task = await ai_task_executor.submit(AiTaskTypeEnum.extraction, workflow)
-        task.request_params["skill_snapshot"] = snapshot
-        await task.save()
-        await ai_task_executor.run(task)
-    await task.refresh_from_db()
-    if response == "empty":
-        assert task.status == 4
-        assert attempts == 2  # One shared repair, rather than two SDK retries.
-        assert not await Asset.filter(novel=novel).exists()
-        return
-    assert task.status == 3, task.error_message
-    assert (
-        await Asset.get(novel=novel, canonical_name="Alex")
-    ).base_traits == visual
-    assert attempts == (1 if response == "freeform" else 2)
-    assert task.response_data["conversation_id"]
 
 
 @pytest.mark.asyncio
@@ -647,7 +565,11 @@ async def test_chat_submission_uses_same_image_admission_and_reuses_receipt(
         assert child.request_params["prompt_language"] == "zh"
         assert "skill_snapshot" not in child.request_params
         assert child.request_params["model_config_id"] == image_model.id
-        assert await AiTask.filter(task_type=2).count() == 1
+        image_tasks = await AiTask.filter(task_type=2)
+        expected_variants = {None, variant.id} if variant else {None}
+        assert len(image_tasks) == len(expected_variants)
+        assert {task.request_params.get('variant_id') for task in image_tasks} == expected_variants
+        assert all(task.request_params['asset_id'] == asset.id for task in image_tasks)
     finally:
         current_execution.reset(token)
 
@@ -715,18 +637,19 @@ async def test_story_write_receipt_preserves_later_edits_and_no_unrequested_cove
 
     novel, chapter, assistant = await enabled_project()
     await Novel.filter(id=novel.id).update(content="Chapter 1. Alex waits.")
-    workflow = await prepare_workflow(
-        {"novel_id": novel.id, "prompt_language": "en", "include_cover": False}
+    from services.creation_agent.strict_text import prepare_text_workflow
+    workflow = await prepare_text_workflow(
+        {"novel_id": novel.id, "prompt_language": "en", "include_cover": False}, "story"
     )
     task = await AiTask.create(task_type=5, status=2, request_params=workflow)
     params = {**workflow, "task_id": str(task.id)}
     execution = SimpleNamespace(
         params=params,
         before_request=AsyncMock(),
-        generate=AsyncMock(
+        generate_strict=AsyncMock(
             return_value=BookAnalysis(
                 book_types=["Drama"], story_outline="An arrival", key_characters=[]
-            )
+            ).model_dump()
         ),
     )
     token = current_execution.set(execution)

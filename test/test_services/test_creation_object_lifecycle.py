@@ -204,7 +204,7 @@ async def test_generated_scene_batch_rolls_back_if_a_reference_was_removed():
         await CreationObjects(novel.id).archive('asset', asset.id)
     generated = Storyboard(shots=[_shot(1, '空站台。'), _shot(2, '@{林夏}独自站着。')])
     with pytest.raises(ValueError, match='移除'):
-        await StoryboardTaskHandler()._save_scenes(chapter.id, generated, {}, 0, entities=[entity])
+        await StoryboardTaskHandler()._persist_scenes(chapter, generated, {}, 0, entities=[entity])
     assert await Scene.filter(chapter=chapter).order_by('sequence').values_list('id', flat=True) == [scene.id for scene in scenes]
 
 

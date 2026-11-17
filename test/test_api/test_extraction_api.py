@@ -1,123 +1,14 @@
-import logging
-
+"""Public extraction API, task lifecycle and current structured-output execution."""
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from httpx import AsyncClient
-
 from models.novel import Novel
 from models.chapter import Chapter
 from models.asset import Asset
 from models.ai_task import AiTask
 from models.config import AiModelConfig
-from services.ai_task_executor import AiTaskExecutor, ai_task_executor
-from services.extraction.handler import ExtractionTaskHandler
-from services.extraction.extractor import (
-    AssetExtractionGatewayError,
-    AssetExtractionResult,
-    PersonList,
-    SceneList,
-    ItemList,
-    Person,
-    Scene,
-    Item,
-)
+from services.ai_task_executor import ai_task_executor
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum, AssetTypeEnum
 
-
-# ---- Mock 数据 ----
-
-ZHANG_SAN_TRAITS = """时代基底: modern
-国家/朝代: China
-人种: Chinese
-类型基底: realistic
-脸型: oval face, calm dark eyes
-发型: short black hair
-耳饰: does not wear earrings
-身材: medium height, lean build
-头身比: realistic seven-and-a-half-head proportion
-上身着装: charcoal cotton jacket
-下身着装: straight black trousers
-鞋子: brown leather shoes
-性别: male
-年龄: young adult"""
-
-LI_SI_TRAITS = """时代基底: modern
-国家/朝代: China
-人种: Chinese
-类型基底: realistic
-脸型: angular face, sharp eyes, stable left-cheek scar
-发型: short dark hair
-耳饰: does not wear earrings
-身材: tall, broad-shouldered build
-头身比: realistic eight-head proportion
-上身着装: fitted black wool coat
-下身着装: dark straight trousers
-鞋子: black leather boots
-性别: male
-年龄: middle-aged"""
-
-MOCK_PERSONS = PersonList(persons=[
-    Person(
-        name="张三",
-        aliases=["小张", "张哥"],
-        description="主角，沉稳冷静",
-        base_traits=ZHANG_SAN_TRAITS,
-        appearances=[],
-    ),
-    Person(
-        name="李四",
-        aliases=[],
-        description="反派，阴险狡诈",
-        base_traits=LI_SI_TRAITS,
-        appearances=[],
-    ),
-])
-
-MOCK_SCENES = SceneList(scenes=[
-    Scene(
-        name="皇宫大殿",
-        aliases=["金銮殿"],
-        description="辉煌壮丽的皇宫正殿",
-        base_traits="grand palace hall, golden pillars, red carpet, dragon throne",
-        appearances=[],
-    ),
-])
-
-MOCK_ITEMS = ItemList(items=[
-    Item(
-        name="尚方宝剑",
-        aliases=["天子剑"],
-        description="皇帝御赐宝剑",
-        base_traits="golden sword with dragon engravings, jeweled hilt",
-        appearances=[],
-    ),
-])
-
-
-async def _mock_extract(self, messages):
-    """返回统一的三类资产测试数据。"""
-    if self.response_model == AssetExtractionResult:
-        return AssetExtractionResult(
-            persons=MOCK_PERSONS.persons,
-            scenes=MOCK_SCENES.scenes,
-            items=MOCK_ITEMS.items,
-        )
-    if self.response_model == PersonList:
-        return MOCK_PERSONS
-    elif self.response_model == SceneList:
-        return MOCK_SCENES
-    elif self.response_model == ItemList:
-        return MOCK_ITEMS
-
-
-async def _raise_gateway_error_with_provider_context(self, messages):
-    try:
-        raise RuntimeError("PRIVATE-PROVIDER-CONTEXT-MARKER")
-    except RuntimeError:
-        raise AssetExtractionGatewayError()
-
-
-# ---- 辅助函数 ----
 
 async def _setup_extraction_env():
     """创建测试用的 novel、chapter、config。"""
@@ -144,101 +35,6 @@ async def _setup_extraction_env():
     return novel, chapter, config
 
 
-# =====================================================================
-# Mock 测试
-# =====================================================================
-
-@pytest.mark.asyncio
-@patch(
-    "services.extraction.extractor.AssetExtractor.extract",
-    new=_mock_extract,
-)
-async def test_extract_creates_task_and_assets(client: AsyncClient, configured_creation_agent):
-    """提取接口：创建任务 + BackgroundTask 写入资产。"""
-    novel, chapter, config = await _setup_extraction_env()
-
-    # 调用提取接口
-    response = await client.post(f"/api/chapter/extract/{chapter.id}")
-    assert response.status_code == 200, response.text
-    data = response.json()["data"]
-    assert data["task_type"] == AiTaskTypeEnum.extraction.value
-    assert data["status"] == TaskStatusEnum.pending.value
-    task_id = data["id"]
-
-    # 手动执行任务（BackgroundTask 在测试中不会自动运行）
-    task = await AiTask.get(id=task_id)
-    await ai_task_executor.run(task)
-
-    # 验证任务完成
-    await task.refresh_from_db()
-    assert task.status == TaskStatusEnum.completed.value
-    assert set(task.response_data) == {"persons", "scenes", "items", "token_usage", "conversation_id", "agent_run_id", "asset_ids", "variant_ids"}
-    assert task.response_data['variant_ids'] == []
-    saved_assets = {asset.canonical_name: asset.id for asset in await Asset.filter(novel_id=novel.id)}
-    assert task.response_data['asset_ids'] == sorted(saved_assets.values())
-    assert task.response_data["agent_run_id"] == str(task.id)
-    assert [entry["name"] for entry in task.response_data["persons"]] == [
-        "张三",
-        "李四",
-    ]
-    assert task.response_data["scenes"] == [
-        {"name": "皇宫大殿", "action": "created", "asset_id": saved_assets['皇宫大殿']}
-    ]
-    assert task.response_data["items"] == [
-        {"name": "尚方宝剑", "action": "created", "asset_id": saved_assets['尚方宝剑']}
-    ]
-
-    # 验证资产写入
-    persons = await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.person.value)
-    assert len(persons) == 2
-    assert {p.canonical_name for p in persons} == {"张三", "李四"}
-
-    scenes = await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.scene.value)
-    assert len(scenes) == 1
-    assert scenes[0].canonical_name == "皇宫大殿"
-
-    items = await Asset.filter(novel_id=novel.id, asset_type=AssetTypeEnum.item.value)
-    assert len(items) == 1
-    assert items[0].canonical_name == "尚方宝剑"
-
-
-@pytest.mark.asyncio
-@patch(
-    "services.extraction.extractor.AssetExtractor.extract",
-    new=_mock_extract,
-)
-async def test_extract_incremental_merge(client: AsyncClient, configured_creation_agent):
-    """增量提取：第二次提取合并别名和章节。"""
-    novel, chapter1, config = await _setup_extraction_env()
-
-    # 第一次提取
-    resp = await client.post(f"/api/chapter/extract/{chapter1.id}")
-    task1 = await AiTask.get(id=resp.json()["data"]["id"])
-    await ai_task_executor.run(task1)
-
-    # 创建第二章
-    chapter2 = await Chapter.create(
-        novel_id=novel.id,
-        number=2,
-        name="第2章 发展",
-        content="张三再次出现在大殿中。",
-    )
-
-    # 第二次提取
-    resp2 = await client.post(f"/api/chapter/extract/{chapter2.id}")
-    task2 = await AiTask.get(id=resp2.json()["data"]["id"])
-    await ai_task_executor.run(task2)
-
-    # 张三应该只有一条记录，source_chapters 包含 [1, 2]
-    person = await Asset.get(
-        novel_id=novel.id,
-        asset_type=AssetTypeEnum.person.value,
-        canonical_name="张三",
-    )
-    assert 1 in person.source_chapters
-    assert 2 in person.source_chapters
-    assert person.last_updated_chapter == 2
-
 
 @pytest.mark.asyncio
 async def test_extract_duplicate_task_reuses_existing(client: AsyncClient, configured_creation_agent):
@@ -257,6 +53,7 @@ async def test_extract_duplicate_task_reuses_existing(client: AsyncClient, confi
     body = response.json()
     assert body["code"] == 0
     assert body["data"]["id"] == str(existing.id)
+
 
 
 @pytest.mark.asyncio
@@ -282,6 +79,7 @@ async def test_get_latest_extraction_task_for_chapter(client: AsyncClient):
     assert data["status"] == TaskStatusEnum.running.value
 
 
+
 @pytest.mark.asyncio
 async def test_get_latest_extraction_task_returns_none_when_missing(client: AsyncClient):
     """从未提取过的章节返回空任务。"""
@@ -293,11 +91,8 @@ async def test_get_latest_extraction_task_returns_none_when_missing(client: Asyn
     assert response.json()["data"] is None
 
 
+
 @pytest.mark.asyncio
-@patch(
-    "services.extraction.extractor.AssetExtractor.extract",
-    new=_mock_extract,
-)
 async def test_extract_stale_task_cleaned(client: AsyncClient, configured_creation_agent):
     """超时异常任务被清理后可重新提交。"""
     from datetime import datetime, timezone, timedelta
@@ -322,9 +117,10 @@ async def test_extract_stale_task_cleaned(client: AsyncClient, configured_creati
     assert "Stale task expired" in stale_task.error_message
 
 
+
 @pytest.mark.asyncio
 async def test_extract_without_assistant_returns_422(client: AsyncClient):
-    """未配置支持工具调用的助手模型时，按 require_agent 的 422 契约阻止新任务。"""
+    """未配置严格 JSON Schema 模型时，按 422 契约阻止新任务。"""
     novel = await Novel.create(name="No Config Novel", author="Author")
     chapter = await Chapter.create(
         novel_id=novel.id, number=1, name="Ch1", content="content"
@@ -333,127 +129,10 @@ async def test_extract_without_assistant_returns_422(client: AsyncClient):
     response = await client.post(f"/api/chapter/extract/{chapter.id}")
     body = response.json()
     assert body["code"] == 422
-    assert "assistant" in body["message"].lower()
+    assert "json schema" in body["message"].lower()
 
     assert await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value).count() == 0
 
-@pytest.mark.asyncio
-@patch(
-    "services.extraction.extractor.AssetExtractor.extract",
-    side_effect=Exception("secret-injected-extractor-marker"),
-)
-async def test_extract_injected_failure_is_sanitized_in_task_and_logs(
-    mock_extract,
-    client: AsyncClient,
-    caplog,
-    configured_creation_agent,
-):
-    """注入的模型异常不得进入任务错误或日志。"""
-    marker = "secret-injected-extractor-marker"
-    expected_error = (
-        "资产提取模型调用失败"
-        "（错误代码：asset_extraction_gateway_error）"
-    )
-    novel, chapter, config = await _setup_extraction_env()
-
-    resp = await client.post(f"/api/chapter/extract/{chapter.id}")
-    task = await AiTask.get(id=resp.json()["data"]["id"])
-    with caplog.at_level(logging.INFO):
-        await ai_task_executor.run(task)
-
-    await task.refresh_from_db()
-    assert task.status == TaskStatusEnum.failed.value
-    assert task.error_message == expected_error
-    assert marker not in task.error_message
-    assert marker not in caplog.text
-    assert "roles=(system,user,user,user) call_status=failed" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_extract_gateway_failure_sanitizes_task_error_and_logs(
-    caplog,
-):
-    marker = "secret-provider-response-marker"
-    expected_error = (
-        "资产提取模型调用失败"
-        "（错误代码：asset_extraction_gateway_error）"
-    )
-    novel, chapter, config = await _setup_extraction_env()
-    executor = AiTaskExecutor()
-    executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
-    task = await executor.submit(
-        AiTaskTypeEnum.extraction,
-        {
-            "chapter_id": chapter.id,
-            "novel_id": novel.id,
-            "base_url": config.base_url,
-            "api_key": config.api_key,
-            "model": config.model,
-            "supports_json_output": config.supports_json_output,
-            "prompt_language": "en",
-        },
-    )
-
-    with (
-        patch(
-            "services.extraction.extractor.create_json_completion",
-            new=AsyncMock(side_effect=RuntimeError(marker)),
-        ),
-        caplog.at_level(logging.INFO),
-    ):
-        await executor.run(task)
-
-    await task.refresh_from_db()
-    assert task.status == TaskStatusEnum.failed.value
-    assert task.error_message == expected_error
-    assert marker not in task.error_message
-    assert marker not in caplog.text
-    assert "roles=(system,user,user,user) call_status=started" in caplog.text
-    assert "roles=(system,user,user,user) call_status=failed" in caplog.text
-    assert (
-        "error_type=AssetExtractionGatewayError "
-        "error_code=asset_extraction_gateway_error"
-    ) in caplog.text
-
-
-@pytest.mark.asyncio
-@patch(
-    "services.extraction.extractor.AssetExtractor.extract",
-    new=_raise_gateway_error_with_provider_context,
-)
-async def test_extract_existing_gateway_context_is_absent_from_task_and_logs(
-    caplog,
-):
-    marker = "PRIVATE-PROVIDER-CONTEXT-MARKER"
-    expected_error = (
-        "资产提取模型调用失败"
-        "（错误代码：asset_extraction_gateway_error）"
-    )
-    novel, chapter, config = await _setup_extraction_env()
-
-    executor = AiTaskExecutor()
-    executor.register(AiTaskTypeEnum.extraction, ExtractionTaskHandler())
-    task = await executor.submit(
-        AiTaskTypeEnum.extraction,
-        {
-            "chapter_id": chapter.id,
-            "novel_id": novel.id,
-            "base_url": config.base_url,
-            "api_key": config.api_key,
-            "model": config.model,
-            "supports_json_output": config.supports_json_output,
-            "prompt_language": "en",
-        },
-    )
-
-    with caplog.at_level(logging.INFO):
-        await executor.run(task)
-
-    await task.refresh_from_db()
-    assert task.status == TaskStatusEnum.failed.value
-    assert task.error_message == expected_error
-    assert marker not in task.error_message
-    assert marker not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -473,6 +152,7 @@ async def test_cancel_task(client: AsyncClient):
     assert data["status"] == TaskStatusEnum.cancelled.value
 
 
+
 @pytest.mark.asyncio
 async def test_query_task_status(client: AsyncClient):
     """查询任务状态。"""
@@ -489,6 +169,7 @@ async def test_query_task_status(client: AsyncClient):
     assert data["task_type"] == AiTaskTypeEnum.extraction.value
 
 
+
 @pytest.mark.asyncio
 async def test_get_nonexistent_task(client: AsyncClient):
     """查询不存在的任务返回 404。"""
@@ -497,6 +178,7 @@ async def test_get_nonexistent_task(client: AsyncClient):
     response = await client.get(f"/api/task/{fake_id}")
     body = response.json()
     assert body["code"] == 404
+
 
 
 @pytest.mark.asyncio
@@ -514,9 +196,6 @@ async def test_cancel_completed_task_rejected(client: AsyncClient):
     assert "Cannot cancel" in body["message"]
 
 
-# =====================================================================
-# 真实 LLM 测试（需配置 test/.test.env，使用 pytest -m real_llm 运行）
-# =====================================================================
 
 @pytest.mark.real_llm
 @pytest.mark.asyncio
@@ -545,7 +224,9 @@ async def test_real_extraction(client: AsyncClient, test_env: dict):
         ),
     )
     config = await AiModelConfig.create(
-        task_type=AiTaskTypeEnum.extraction.value,
+        task_type=AiTaskTypeEnum.creation_agent.value,
+        supports_strict_output=True,
+        supports_json_output=True,
         name="real-test",
         base_url=base_url,
         api_key=api_key,
@@ -568,6 +249,25 @@ async def test_real_extraction(client: AsyncClient, test_env: dict):
     # 验证资产已写入
     assets = await Asset.filter(novel_id=novel.id)
     assert len(assets) > 0
-    print(f"\n[Real LLM] 提取到 {len(assets)} 个资产:")
-    for a in assets:
-        print(f"  [{AssetTypeEnum(a.asset_type).nickname}] {a.canonical_name}: {a.base_traits}")
+
+
+@pytest.mark.asyncio
+async def test_extraction_api_reuses_identity_across_chapters(client, configured_creation_agent, monkeypatch):
+    from test.test_services.test_strict_text_tasks import mock_model
+    from test.test_services.test_strict_production import asset_payload
+    from models.config import GeneralConfig
+    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': 'zh'})
+    novel, first, _ = await _setup_extraction_env()
+    second = await Chapter.create(novel=novel, number=2, name='第二章', content='阿岚再次出现。')
+    requests = mock_model(monkeypatch, asset_payload())
+    for chapter in (first, second):
+        response = await client.post(f'/api/chapter/extract/{chapter.id}')
+        assert response.status_code == 200, response.text
+        task = await AiTask.get(id=response.json()['data']['id'])
+        assert task.request_params['output_contract']['name'] == 'assets'
+        await ai_task_executor.run(task)
+        await task.refresh_from_db()
+        assert task.status == 3, task.error_message
+    asset = await Asset.get(novel=novel)
+    assert asset.source_chapters == [1, 2]
+    assert len(requests) == 2

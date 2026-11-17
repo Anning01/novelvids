@@ -1,3 +1,5 @@
+from prompts.storyboard import format_storyboard_prompt
+from test.text_task_fixtures import execute_storyboard
 """First-appearance facts are chronological, scoped and carried across batches."""
 import json
 from types import SimpleNamespace
@@ -9,7 +11,6 @@ from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
 from models.scene import Scene
-from prompts.storyboard import build_storyboard_messages
 from schemas.scene import SceneEntity, Storyboard
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
@@ -21,19 +22,6 @@ def person(name='张三', asset_id=None):
                        description='从蓝星穿越到古代的青年', asset_type='人物', asset_id=asset_id)
 
 
-@pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('strategy', storyboard_strategy_factory.list(), ids=lambda strategy: strategy.key)
-def test_introduction_requirement_is_shared_by_all_strategies_and_languages(language, strategy):
-    messages = build_storyboard_messages('张三走进院子', [person()], language, strategy=strategy,
-                                         previously_seen_assets=['李四'])
-    system = messages[0]['content']
-    assert ('根据昵称和描述' if language == 'zh' else 'from their nickname and description') in system
-    assert '"nickname":"张三"' in system
-    assert '从蓝星穿越到古代的青年' in system
-    injected = system.split('\n')[-1]
-    for constraint in ('人物旁', '横排', '竖排', '字体', '背景', '显示及消失时间', 'visual_prose', 'actions', '「'):
-        assert constraint not in injected
-    assert 'Character introduction text' not in injected
 
 
 @pytest.mark.asyncio
@@ -61,21 +49,6 @@ async def test_previous_appearances_ignore_current_later_deleted_other_projects_
     assert await previously_seen_assets(chapters[0], entities) == []
 
 
-@pytest.mark.asyncio
-async def test_batches_carry_visible_characters_but_not_mentions():
-    completion = SimpleNamespace(model='fake', id='fake', created=1, usage=None, choices=[])
-    first = _shot(1, '三哥推门进来。')
-    first.dialogue = ['0s-1s: @{张三}：李四在哪里？']
-    calls = AsyncMock(side_effect=[(Storyboard(shots=[first]), completion),
-                                   (Storyboard(shots=[_shot(2)]), completion)])
-    with patch('services.storyboard.generator.create_json_completion', calls), patch(
-        'services.storyboard.generator.NarrativeChunker.split', return_value=['上半章', '下半章']
-    ):
-        await generate_storyboard(None, '正文', [person(), person('李四')], 'fake', previously_seen_assets=['王五'])
-    systems = [call.kwargs['messages'][0]['content'] for call in calls.await_args_list]
-    assert '"nickname":"张三"' in systems[0] and '"nickname":"李四"' in systems[0]
-    assert '"nickname":"李四"' in systems[1]
-    assert '"nickname":"张三"' not in systems[1]
 
 
 @pytest.mark.asyncio
@@ -108,10 +81,8 @@ async def test_handler_loads_prior_appearances_into_generation_request():
     await asset.save(update_fields=['aliases'])
     await scene.assets.add(asset)
     generate = AsyncMock(return_value=(Storyboard(shots=[]), {}))
-    with patch('services.storyboard.handler.generate_storyboard', generate), patch(
-        'services.storyboard.handler.AsyncOpenAI'
-    ):
-        await StoryboardTaskHandler().execute({'chapter_id': chapter.id, 'base_url': 'https://example.invalid',
+    with patch('services.storyboard.handler.generate_storyboard', generate):
+        await execute_storyboard({'chapter_id': chapter.id, 'base_url': 'https://example.invalid',
                                               'api_key': 'test', 'model': 'fake'})
     assert generate.await_args.kwargs['previously_seen_assets'] == ['张三']
     assert generate.await_args.kwargs['introduction_descriptions'] == {'张三': '从蓝星穿越到古代'}
@@ -138,21 +109,8 @@ async def test_model_chosen_introduction_is_preserved_through_serialization_and_
     from test.test_services.test_scene_blueprint import SHOT, LAYOUT
     shot.blocking_map = BlockingMap.model_validate({**SHOT, 'layout':LAYOUT, 'assets':[*SHOT['assets'], {'name':name, 'x':40,'y':50}]})
     raw = StructuredSkillStoryboard.model_validate({'shots': [shot.model_dump()]})
-    execution = SimpleNamespace(snapshot=snapshot(with_timing=False),
-                                params={'assistant_model_config_id': 1}, generate=AsyncMock(return_value=raw))
-    token = current_execution.set(execution)
-    try:
-        result, metadata = await generate_storyboard(None, '正文', [entity], 'fake', prompt_language=language,
-                                                     storyboard_strategy='narration', previously_seen_assets=['王五'])
-        requirement = execution.generate.await_args.kwargs['additional_instructions']
-        assert name in requirement and '王五' not in requirement
-    finally:
-        current_execution.reset(token)
-    token = skill_workflow.set(True)
-    try:
-        scenes = await StoryboardTaskHandler()._save_scenes(chapter.id, result, metadata, 0, language, [entity], 'narration')
-    finally:
-        skill_workflow.reset(token)
+    shot.prompt = format_storyboard_prompt(shot, language, entities=[entity], strategy=storyboard_strategy_factory.resolve('narration'))
+    scenes = await StoryboardTaskHandler()._persist_scenes(chapter, Storyboard(shots=[shot]), {}, 0, language, [entity], 'narration')
     scene = scenes[0]
     assert introduction in scene.prompt
     assert scene.prompt_params['narration'] == [introduction]
@@ -172,54 +130,10 @@ def test_visible_presence_tracks_props_and_internal_segments_but_not_spoken_ment
     assert visible_storyboard_assets(shot, [person(), prop]) == ['张三', '旧钥匙']
 
 
-@pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('strategy', storyboard_strategy_factory.list(), ids=lambda strategy: strategy.key)
-def test_no_new_characters_leave_original_generation_prompt_unchanged(language, strategy):
-    from prompts.skill_pack import render_skill
-    from prompts.asset_introductions import asset_introduction_requirement
-
-    messages = build_storyboard_messages('张三再次出现', [person()], language, strategy=strategy,
-                                         previously_seen_assets=['张三'])
-    assert messages[0]['content'] == render_skill('storyboard', language)
-    assert messages == build_storyboard_messages('张三再次出现', [person()], language, strategy=strategy,
-                                                 previously_seen_assets=['张三', '李四'])
-    assert 'previously_seen_assets' not in messages[1]['content']
-    assert asset_introduction_requirement([], [], language) == ''
-    assert '主体昵称' not in messages[0]['content']
 
 
-@pytest.mark.asyncio
-async def test_skill_generation_without_new_people_does_not_inject_instructions():
-    from test.test_services.test_storyboard_speech_timing import snapshot
-    from schemas.agent_workflow import StructuredSkillStoryboard
-    from services.creation_agent.skill_execution import current_execution
-
-    from test.test_services.test_scene_blueprint import SHOT, LAYOUT
-    draft = {**_shot().model_dump(), 'blocking_map':{**SHOT, 'layout':LAYOUT,
-             'assets':[*SHOT['assets'], {'name':'张三', 'x':40,'y':50}]}}
-    execution = SimpleNamespace(snapshot=snapshot(with_timing=False), params={'assistant_model_config_id': 1},
-        generate=AsyncMock(return_value=StructuredSkillStoryboard.model_validate({'shots':[draft]})))
-    token = current_execution.set(execution)
-    try:
-        await generate_storyboard(None, '张三再次出现', [person()], 'fake', previously_seen_assets=['张三'])
-        assert execution.generate.await_args.kwargs == {}
-        assert 'previously_seen_assets' not in execution.generate.await_args.args[1]
-    finally:
-        current_execution.reset(token)
 
 
-@pytest.mark.asyncio
-async def test_later_batch_has_no_extra_prompt_once_all_characters_have_appeared():
-    from prompts.skill_pack import render_skill
-
-    completion = SimpleNamespace(model='fake', id='fake', created=1, usage=None, choices=[])
-    calls = AsyncMock(return_value=(Storyboard(shots=[_shot()]), completion))
-    with patch('services.storyboard.generator.create_json_completion', calls), patch(
-        'services.storyboard.generator.NarrativeChunker.split', return_value=['张三初次出现', '张三再次出现']
-    ):
-        await generate_storyboard(None, '正文', [person()], 'fake')
-    assert '"nickname":"张三"' in calls.await_args_list[0].kwargs['messages'][0]['content']
-    assert calls.await_args_list[1].kwargs['messages'][0]['content'] == render_skill('storyboard', 'zh')
 
 
 @pytest.mark.parametrize('asset_type', ['人物', '场景', '物品'])

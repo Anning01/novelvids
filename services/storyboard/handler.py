@@ -2,7 +2,6 @@
 from utils.messages import localized_message
 import time
 from typing import List
-from openai import AsyncOpenAI
 
 from models.chapter import Chapter
 from models.asset import Asset
@@ -15,7 +14,6 @@ from prompts.storyboard import (
 from services.ai_task_executor import BaseTaskHandler
 from services.storyboard.generator import generate_storyboard
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.validation import validate_storyboard_duration
 from services.storyboard.entities import generation_entities_for_assets, shot_variant_bindings
 from services.storyboard.appearances import existing_scene_layouts, previously_seen_assets
 from services.creation_agent.memory import creation_memory
@@ -28,30 +26,17 @@ class StoryboardTaskHandler(BaseTaskHandler):
     """Sora 2 超详细分镜生成任务处理器"""
 
     async def execute(self, request_params: dict) -> dict:
-        """
-        request_params:
-            chapter_id: int - 章节ID
-            base_url: str - API基础URL
-            api_key: str - API密钥
-            model: str - 模型名称
-            supports_json_output: bool - 是否支持 response_format=json_object
-        """
         if request_params.get("operation") == "blocking_maps":
             from services.storyboard.blocking_plans import fill_saved_shots
             return await fill_saved_shots(request_params)
         chapter_id = request_params["chapter_id"]
-        base_url = request_params["base_url"]
-        api_key = request_params["api_key"]
-        model = request_params["model"]
-        supports_json_output = request_params.get("supports_json_output", False)
-        max_context_characters = request_params.get("max_context_characters")
-        thinking = request_params.get("thinking")
-        max_tokens = request_params.get("max_tokens")
+        from services.creation_agent.strict_text import require_text_execution
+        execution = require_text_execution(request_params)
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
 
         # 1. 获取章节和相关资产
         chapter = await Chapter.get(id=chapter_id).prefetch_related("novel")
-        if request_params.get('output_contract') and 'replace_versions' not in request_params:
+        if 'replace_versions' not in request_params:
             existing = await Scene.filter(chapter=chapter).order_by('sequence')
             if existing:
                 return {'chapter_id': chapter_id, 'scene_ids': [scene.id for scene in existing],
@@ -83,21 +68,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
         start_time = time.time()
 
         try:
-            client = None if request_params.get('output_contract') else AsyncOpenAI(base_url=base_url, api_key=api_key)
-            
             storyboard, api_metadata = await generate_storyboard(
-                client=client,
                 long_text=chapter.production_text,
                 episode_pacing=chapter.episode_pacing,
                 episode_max_seconds=duration_limit,
                 entities=entities,
-                model=model,
-                supports_json_output=supports_json_output,
                 prompt_language=prompt_language,
-                max_context_characters=max_context_characters,
-                thinking=thinking,
-                reasoning_effort=request_params.get('reasoning_effort'),
-                max_tokens=max_tokens,
                 storyboard_strategy=strategy.key,
                 creative_constraints=creative_constraints,
                 previously_seen_assets=seen_assets,
@@ -183,53 +159,36 @@ class StoryboardTaskHandler(BaseTaskHandler):
         from services.creation_agent.skill_execution import current_execution
         from services.creation_agent.operation_receipts import execute_step
         execution = current_execution.get()
-        if execution:
-            strict = bool(execution.params.get('output_contract'))
-            if not strict:
-                # Validate all candidate shots before any persistent changes.
-                from services.creation_agent.prompt_edits import validate_prompt_dependencies
-                from services.creation_agent.operations import CreationOperations
-                from services.storyboard.validation import validate_skill_storyboard_shot
-                for shot in storyboard.shots:
-                    validate_storyboard_duration(shot, execution.params.get("shot_duration_range"))
-                    validate_skill_storyboard_shot(shot, execution.snapshot, prompt_language, entities or [])
-                    validate_prompt_dependencies(shot.prompt, entities or [])
-                    CreationOperations.validate_timing(shot.prompt, float(shot.duration.removesuffix('s')))
-            async def persist():
-                async with project_write(chapter.novel_id):
-                    await execution.before_request()
-                    if strict:
-                        from services.creation_agent.strict_text import verify_chapter_input
-                        await verify_chapter_input(execution.params)
-                    from services.creation_agent.step_context import validate_step_inputs
-                    await validate_step_inputs(execution.params)
-                    from models.ai_task import AiTask
-                    from services.creation_agent.object_state import object_version
-                    task = await AiTask.get(id=execution.params['task_id'])
-                    if strict and 'scene_input_versions' in execution.params:
-                        current = {str(row.id): await object_version(row) for row in await Scene.filter(chapter_id=chapter_id)}
-                        if current != execution.params['scene_input_versions']:
-                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
-                    before = execution.params.get('replace_versions')
-                    if before is not None:
-                        old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
-                        if not strict and {str(row.id): await object_version(row) for row in old_scenes} != before:
-                            raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
-                        objects = CreationObjects(chapter.novel_id)
-                        snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
-                        task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
-                        await task.save(update_fields=['request_params'])
-                    rows = await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                        prompt_language, entities, storyboard_strategy, optimized_prompts)
-                    return {'scene_ids': [row.id for row in rows]}
-            result = await execute_step(execution.params['task_id'], 'persist:storyboard', persist, atomic=True)
-            return await Scene.filter(id__in=result['scene_ids']).order_by('sequence')
-        async with project_write(chapter.novel_id):
-            return await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
-                                              prompt_language, entities, storyboard_strategy, optimized_prompts)
+        from services.creation_agent.strict_text import require_text_execution, verify_chapter_input
+        execution = require_text_execution(execution.params if execution else {})
+        async def persist():
+            async with project_write(chapter.novel_id):
+                await execution.before_request()
+                await verify_chapter_input(execution.params)
+                from services.creation_agent.step_context import validate_step_inputs
+                await validate_step_inputs(execution.params)
+                from models.ai_task import AiTask
+                from services.creation_agent.object_state import object_version
+                task = await AiTask.get(id=execution.params['task_id'])
+                if 'scene_input_versions' in execution.params:
+                    current = {str(row.id): await object_version(row) for row in await Scene.filter(chapter_id=chapter_id)}
+                    if current != execution.params['scene_input_versions']:
+                        raise ValueError(localized_message('原分镜已有新修改，请重新生成'))
+                before = execution.params.get('replace_versions')
+                if before is not None:
+                    old_scenes = await Scene.filter(chapter_id=chapter.id).order_by('sequence')
+                    objects = CreationObjects(chapter.novel_id)
+                    snapshots = {str(row.id): await objects.archive('scene', row.id, current_storyboard_task=task) for row in reversed(old_scenes)}
+                    task.request_params = {**task.request_params, 'replaced_scene_snapshots': snapshots}
+                    await task.save(update_fields=['request_params'])
+                rows = await self._persist_scenes(chapter, storyboard, api_metadata, request_duration,
+                    prompt_language, entities, storyboard_strategy, optimized_prompts)
+                return {'scene_ids': [row.id for row in rows]}
+        result = await execute_step(execution.params['task_id'], 'persist:storyboard', persist, atomic=True)
+        return await Scene.filter(id__in=result['scene_ids']).order_by('sequence')
 
     async def _persist_scenes(self, chapter: Chapter, storyboard, api_metadata: dict, request_duration: float,
-                             prompt_language: str, entities: list[SceneEntity] | None, storyboard_strategy: str | None, optimized_prompts: dict | None = None) -> List[Scene]:
+                             prompt_language: str = "zh", entities: list[SceneEntity] | None = None, storyboard_strategy: str | None = None, optimized_prompts: dict | None = None) -> List[Scene]:
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         await chapter.refresh_from_db(fields=["episode_pacing"])
@@ -314,28 +273,12 @@ class StoryboardTaskHandler(BaseTaskHandler):
             # 如果有拒绝信息，添加到 metadata
             if "refusal" in api_metadata:
                 scene_metadata["refusal"] = api_metadata["refusal"]
-            from utils.prompt_language import skill_workflow
-            if skill_workflow.get():
-                prompt = shot.prompt
-                if not (execution and execution.params.get('output_contract')):
-                    from services.creation_agent.prompt_edits import validate_prompt_dependencies
-                    from services.creation_agent.operations import CreationOperations
-                    validate_prompt_dependencies(prompt, entities or [])
-                    CreationOperations.validate_timing(prompt, duration_value)
-                prompt_params['prompt_language'] = prompt_language
-                prompt_params['rendering_version'] = 'agent-skills-v1'
-                if execution and execution.params.get('output_contract'):
-                    prompt_params['prompt_contract_version'] = execution.params['output_contract']['version']
-                elif execution and "storyboard_contract" in execution.snapshot.contents:
-                    import json
-                    prompt_params['prompt_contract_version'] = json.loads(execution.snapshot.read("storyboard_contract"))["version"]
-            else:
-                prompt = format_storyboard_prompt(
-                    shot,
-                    prompt_language,
-                    entities=entities or [],
-                    strategy=strategy,
-                )
+            prompt = shot.prompt or format_storyboard_prompt(shot, prompt_language,
+                entities=entities or [], strategy=strategy)
+            prompt_params['prompt_language'] = prompt_language
+            prompt_params['rendering_version'] = 'agent-skills-v1'
+            if execution:
+                prompt_params['prompt_contract_version'] = execution.params['output_contract']['version']
             if optimized_prompts and shot.sequence in optimized_prompts:
                 prompt_params["model_optimized_prompt"] = optimized_prompts[shot.sequence]
                 prompt_params["generic_prompt"] = prompt

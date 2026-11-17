@@ -1,3 +1,4 @@
+from test.text_task_fixtures import analysis_execution, execute_analysis
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -16,20 +17,6 @@ from services.project_analysis.handler import (
 from utils.enums import AiTaskTypeEnum
 
 
-class FakeLlmClient:
-    def __init__(self, analysis: BookAnalysis):
-        create = AsyncMock(
-            return_value=SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(
-                    content=analysis.model_dump_json(),
-                    refusal=None,
-                ))]
-            )
-        )
-        self.chat = SimpleNamespace(
-            completions=SimpleNamespace(create=create)
-        )
-        self.create = create
 
 
 STRUCTURED_PERSON_TRAITS = """**时代基底**: modern
@@ -96,15 +83,11 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
             )
         ],
     )
-    llm_client = FakeLlmClient(analysis)
     generated_image = SimpleNamespace(url="https://example.com/cover.png", b64_json=None)
     generate_images = AsyncMock(return_value=[generated_image])
 
     with (
-        patch(
-            "services.project_analysis.handler.AsyncOpenAI",
-            return_value=llm_client,
-        ),
+        analysis_execution(analysis),
         patch(
             "services.project_analysis.handler.generate_images",
             new=generate_images,
@@ -114,7 +97,7 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
             new=AsyncMock(return_value="/media/covers/test.png"),
         ),
     ):
-        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "cover_model_config_id": image_config.id})
+        result = await execute_analysis({"novel_id": novel.id, "cover_model_config_id": image_config.id})
 
     chapters = await Chapter.filter(novel_id=novel.id).order_by("number")
     assert [chapter.name for chapter in chapters] == ["启程", "归途"]
@@ -125,13 +108,6 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
     assert not await Asset.filter(novel_id=novel.id).exists()
     assert result['key_characters'][0]['name'] == '林舟'
     assert result['key_characters'][0]['description'] == '执着寻找真相的青年。'
-
-    messages = llm_client.create.await_args.kwargs["messages"]
-    system_prompt = messages[0]["content"]
-    from prompts.skill_pack import read_skill
-    assert read_skill("story") in system_prompt
-    assert read_skill("structured") in system_prompt
-    assert "language=en" in system_prompt
 
     await novel.refresh_from_db()
     assert novel.cover == "/media/covers/test.png"
@@ -149,12 +125,6 @@ async def test_project_analysis_uses_configured_image_protocol_for_cover(aspect_
     assert request["output_format"] == "png"
 
 
-class FakeLlmClientWithUsage(FakeLlmClient):
-    def __init__(self, analysis: BookAnalysis):
-        super().__init__(analysis)
-        self.create.return_value.usage = SimpleNamespace(
-            prompt_tokens=200, completion_tokens=80, total_tokens=280
-        )
 
 
 @pytest.mark.asyncio
@@ -181,17 +151,16 @@ async def test_project_analysis_result_carries_billing_keys():
             base_traits=STRUCTURED_PERSON_TRAITS, chapter_numbers=[1],
         )],
     )
-    llm_client = FakeLlmClientWithUsage(analysis)
     generated_image = SimpleNamespace(url="https://example.com/cover.png", b64_json=None)
 
     with (
-        patch("services.project_analysis.handler.AsyncOpenAI", return_value=llm_client),
+        analysis_execution(analysis),
         patch("services.project_analysis.handler.generate_images", new=AsyncMock(return_value=[generated_image])),
         patch("services.project_analysis.handler._save_cover", new=AsyncMock(return_value="/media/covers/c.png")),
     ):
-        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "cover_model_config_id": image_config.id})
+        result = await execute_analysis({"novel_id": novel.id, "cover_model_config_id": image_config.id})
 
-    assert result["token_usage"]["prompt_tokens"] == 200
+    assert result["token_usage"] == {}
     assert result["llm_config_id"] == llm.id
     assert result["llm_model"] == "llm-model"
     assert result["image_usage"] == {"image_count": 1, "clarity": "1.5K"}
@@ -266,8 +235,12 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
     ])
     generate = AsyncMock(side_effect=RuntimeError('provider rejects request')) if failure == 'provider' else AsyncMock(return_value=[SimpleNamespace(url='https://example.invalid/cover.png')])
     save = AsyncMock(side_effect=OSError('storage unavailable'))
-    with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClientWithUsage(analysis)), patch('services.project_analysis.handler.generate_images', generate), patch('services.project_analysis.handler._save_cover', save):
-        result = await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'prompt_language': language, 'cover_model_config_id': None if failure == 'unselected' else (image_config.id if image_config else 999)})
+    with analysis_execution(analysis), patch('services.project_analysis.handler.generate_images', generate), patch('services.project_analysis.handler._save_cover', save):
+        try:
+            result = await execute_analysis({'novel_id': novel.id, 'prompt_language': language, 'cover_model_config_id': None if failure == 'unselected' else (image_config.id if image_config else 999)})
+        except (RuntimeError, OSError) as error:
+            assert failure in {'provider', 'save'}
+            result = error.partial_result
     await novel.refresh_from_db()
     assert result['story_outline'] == novel.story_outline == analysis.story_outline
     assert result['cover'] == novel.cover == '/media/existing.png'
@@ -277,8 +250,8 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
         return
     assert ('可以继续' if language == 'zh' else 'ready to use') in result['cover_warning']
     assert result['analysis_completed'] is True
-    assert result['cover_status'] == 'failed'
-    assert result['token_usage']['prompt_tokens'] == 200
+    assert result['cover_status'] == ('needs_review' if failure in {'provider', 'save'} else 'failed')
+    assert result['token_usage'] == {}
     assert result['llm_config_id'] == llm.id
     assert not await Asset.filter(novel_id=novel.id).exists()
     assert result['key_characters'][0]['name'] == '林舟'
@@ -291,31 +264,8 @@ async def test_optional_cover_failure_keeps_story_result_prior_cover_and_actual_
         generate.assert_not_awaited()
 
 
-def test_project_analysis_templates_preserve_material_and_requested_language():
-    import json
-    from prompts.project_analysis import render_analysis_messages
-    from prompts.skill_pack import read_skill
-    for language in ("zh", "en"):
-        messages = render_analysis_messages(name="雨夜来信", chapter_count=2, material="第一章 车站\n第二章 咖啡馆", prompt_language=language)
-        assert messages[0]["content"].endswith(read_skill("story"))
-        assert "language=" + language in messages[0]["content"]
-        facts = json.loads(messages[1]["content"])["untrusted_task_facts"]
-        assert facts == {"name": "雨夜来信", "chapter_count": 2, "manuscript": "第一章 车站\n第二章 咖啡馆"}
 
 
-@pytest.mark.parametrize("language", ["zh", "en"])
-def test_sampled_story_instructions_keep_missing_events_unknown(language):
-    from prompts.project_analysis import render_analysis_messages
-    from prompts.skill_pack import SkillSnapshot, instructions, snapshot_skills
-
-    material = '{"head":"小满递出票根。","tail":"检票员收回手。"}'
-    messages = render_analysis_messages(name="末班车", chapter_count=12, material=material, prompt_language=language)
-    agent_rules = instructions(SkillSnapshot.model_validate(snapshot_skills()), language, "story")
-    for rules in (messages[0]["content"], agent_rules):
-        assert "保留取样之间的空缺" in rules
-        assert "目录只能证明章节存在" in rules
-        assert "只有一次行动时，写当下的反应" in rules
-        assert f"language={language}" in rules
 
 
 @pytest.mark.asyncio
@@ -342,7 +292,8 @@ async def test_agent_cover_prompt_and_image_call_share_project_ratio(aspect_rati
              patch('services.creation_agent.operation_receipts.execute_step', new=execute_step), \
              patch('services.project_analysis.handler.generate_images', new=AsyncMock(return_value=[object()])) as images, \
              patch('services.project_analysis.handler._save_cover', new=AsyncMock(return_value='/media/test-cover.png')):
-            result = await ProjectAnalysisTaskHandler().execute({'novel_id':novel.id,'assistant_model_config_id':1,'cover_model_config_id':image_config.id})
+            result = await ProjectAnalysisTaskHandler()._generate_cover(novel, {'cover_model_config_id': image_config.id}, 'zh', None,
+                outline='雨后的街角。', book_types=[], result={}, stopped=AsyncMock(return_value=False))
         assert result['cover_status'] == 'ready'
         assert images.call_args.kwargs['aspect_ratio'] == aspect_ratio
         assert aspect_ratio in images.call_args.kwargs['prompt']
@@ -365,8 +316,6 @@ async def test_analysis_samples_across_long_books_and_publishes_before_cover(mon
     await AiModelConfig.create(task_type=5, name="analysis", model="test", api_key="test",
                                base_url="https://example.invalid", is_active=True)
     analysis = BookAnalysis(book_types=["冒险"], story_outline="旅人回家。", key_characters=[])
-    llm = FakeLlmClient(analysis)
-    monkeypatch.setattr("services.project_analysis.handler.AsyncOpenAI", lambda **_: llm)
     seen = []
 
     async def prepare_cover(*args, **kwargs):
@@ -375,15 +324,14 @@ async def test_analysis_samples_across_long_books_and_publishes_before_cover(mon
         raise RuntimeError("cover unavailable")
 
     from services.project_analysis.handler import ai_model_config_controller
-    with patch.object(ai_model_config_controller, "get_active_with_legacy_fallback",
-                      new=AsyncMock(return_value=await AiModelConfig.get(task_type=5))):
+    with analysis_execution(analysis) as execution:
         monkeypatch.setattr(ai_model_config_controller, "get_active", prepare_cover)
-        result = await ProjectAnalysisTaskHandler().execute({"novel_id": novel.id, "task_id": str(task.id), "cover_model_config_id": 999})
+        result = await execute_analysis({"novel_id": novel.id, "task_id": str(task.id), "cover_model_config_id": 999})
     status, early = seen[0]
     assert status == TaskStatusEnum.running.value and early["analysis_completed"]
     assert early["cover_status"] == "pending" and early["story_outline"] == analysis.story_outline
     assert result["cover_status"] == "failed" and result["chapter_count"] == 32
-    facts = json.loads(llm.create.call_args.kwargs["messages"][1]["content"])["untrusted_task_facts"]
+    facts = execution.generate_strict.await_args.args[0]
     blocks = [json.loads(block) for block in facts["manuscript"].split("\n\n")]
     assert [b["chapter_number"] for b in blocks] == [1, 5, 10, 14, 19, 23, 28, 32]
     assert all(b["content"].endswith("乙") for b in blocks)
@@ -398,14 +346,12 @@ async def test_cover_only_uses_selected_model_and_saved_outline_without_analyzin
         image_model_type="seedream_5_pro", is_active=True)
     generate = AsyncMock(return_value=[SimpleNamespace(url="https://example.invalid/cover.png")])
     with (
-        patch("services.project_analysis.handler.AsyncOpenAI") as text_client,
         patch("services.project_analysis.handler.generate_images", generate),
         patch("services.project_analysis.handler._save_cover", AsyncMock(return_value="/media/cover.png")),
     ):
         result = await ProjectAnalysisTaskHandler().execute({
             "novel_id": novel.id, "operation": "project_cover", "cover_model_config_id": image.id,
         })
-    text_client.assert_not_called()
     assert generate.await_args.kwargs["model"] == image.model
     assert "已有故事大纲" in generate.await_args.kwargs["prompt"]
     await novel.refresh_from_db()

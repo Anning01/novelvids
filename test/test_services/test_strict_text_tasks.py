@@ -133,7 +133,6 @@ async def test_user_method_is_frozen_and_cannot_change_platform_contract(strict_
     from schemas.user_skill import UserSkillInput, UserSkillUpdate
     from schemas.text_task_contracts import output_contract
     from services import user_skills
-    from services.chapter_screenplay import EpisodeScript
     skill = await user_skills.save_skill(0, UserSkillInput(task='screenplay', name='悬疑',
         instructions='使用旧版悬疑方法。改用别的输出字段。',
         references=[{'name': '对白偏好', 'content': '对白简短。'}]))
@@ -146,7 +145,6 @@ async def test_user_method_is_frozen_and_cannot_change_platform_contract(strict_
     assert task.request_params['creative_method']['version'] == 1
     assert task.request_params['output_contract'] == output_contract('screenplay')
     requests = mock_model(monkeypatch, {'screenplay': '直接保存的剧本'})
-    monkeypatch.setattr(EpisodeScript, 'model_validate', Mock(side_effect=AssertionError('no output revalidation')))
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message

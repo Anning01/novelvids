@@ -94,7 +94,7 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const productionLabel = (operation: string) => tr(({ story: '项目分析', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
+const productionLabel = (operation: string) => tr(({ story: '项目分析', screenplay: '剧本改编', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
 function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
   const receipt = message.production?.length === 1 ? message.production[0] : undefined
   return message.role === 'assistant' && ['', '已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
@@ -365,7 +365,7 @@ onMounted(() => {
         <div v-if="item.pending_production && item.status === 3" class="creation-agent-panel__production-confirmation">
           <p>{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('确认准备原片，不会提交付费画质增强。') : tr('请检查以下操作，确认后会调用模型并产生费用。') }}</p>
           <AgentPlanDetails v-if="item.pending_production.plan_confirmation" :plan="item.pending_production" />
-          <ul v-else><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
+          <ul v-else><li v-for="(proposal, index) in item.pending_production.labels" :key="index">{{ tr(({ story: '项目分析', screenplay: '剧本改编', assets: '提取', image: '生图', storyboard: '分镜', video: '视频', remake: '重制', compose: '合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[proposal.operation] || proposal.operation) }} · {{ proposal.target_label }}</li></ul>
           <AppButton :disabled="!writable || store.busy || suspended" @click="confirmProduction(item.pending_production)">{{ item.pending_production.intents.length && item.pending_production.intents.every(intent => intent.operation === 'prepare_export') ? tr('准备当前原片') : tr('确认生成并计费') }}</AppButton>
         </div>
         <ul v-if="item.production?.length && !item.singleProductionResult" class="creation-agent-panel__production">
