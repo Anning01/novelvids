@@ -560,6 +560,7 @@ async def test_api_获取所有枚举(client: AsyncClient):
         "seedance_2_fast",
         "seedance_2_mini",
         "seedance_2_5",
+        "seedance_2_5_flash",
         "minimax_h3",
         "minimax_h3_autodl",
         "wan_3",
@@ -567,6 +568,8 @@ async def test_api_获取所有枚举(client: AsyncClient):
     assert video_types["seedance_2"]["value"] == "seedance_2"
 
     assert video_types["seedance_2"]["label"] == "Doubao Seedance 2.0"
+    assert video_types["seedance_2_5_flash"]["value"] == "seedance_2_5_flash"
+    assert video_types["seedance_2_5_flash"]["label"] == "Doubao Seedance 2.5 Flash"
     print(f"    枚举接口: keys={list(data.keys())}, video_model_type count={len(data['video_model_type'])}")
 
 

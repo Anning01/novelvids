@@ -120,6 +120,25 @@ it('keeps platform connection unavailable without a super administrator session'
   wrapper.unmount()
 })
 
+it.each(['light', 'dark'])('defaults a new text model to the creation purpose without claiming strict support in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const wrapper = mountPage(teamAdminStore())
+  try {
+    await flushPromises()
+    await wrapper.findAll('.model-header-actions button').find(button => button.text() === '添加模型')!.trigger('click')
+    const form = wrapper.get('form.model-modal')
+    expect(form.getComponent(AppMultiSelect).props('modelValue')).toEqual(['7'])
+    expect(form.text()).toContain('剧本、设定和分镜文本使用「创作助手」用途')
+    const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
+    expect(format.props('modelValue')).toBe('text')
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})
+
 it('opens platform connection and account in dialogs outside the model layout', async () => {
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)

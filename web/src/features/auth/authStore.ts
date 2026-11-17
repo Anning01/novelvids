@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, clearAuthToken, getActiveTeamId, getAuthToken, redirectToLogin, setActiveTeamId, setAuthToken } from '@/api'
-import type { AuthMe, AuthUser, LoginResult, Membership, TeamRole } from '@/types'
+import type { AuthMe, AuthUser, LoginResult, Membership, RegisterInput, TeamRole } from '@/types'
 
 const PLATFORM_USER_KEY = 'novelvids_platform_user'
 
@@ -26,6 +26,7 @@ export const useAuthStore = defineStore('auth', {
     ownsTeam: false,
     provider: 'password' as 'password' | 'qiling',
     legalReady: false,
+    registrationEnabled: false,
   }),
   getters: {
     isLoggedIn: (state) => state.enabled === true && Boolean(state.user && state.token),
@@ -63,6 +64,7 @@ export const useAuthStore = defineStore('auth', {
         this.qilingEnabled = status.data.qiling_enabled === true
         this.provider = status.data.provider ?? (this.qilingEnabled ? 'qiling' : 'password')
         this.legalReady = status.data.legal_ready === true
+        this.registrationEnabled = status.data.registration_enabled === true
       } catch {
         // 状态探测失败时保守处理：视为未启用，不阻塞应用
         this.enabled = false
@@ -114,7 +116,7 @@ export const useAuthStore = defineStore('auth', {
     async login(username: string, password: string): Promise<void> {
       await this.acceptSession((await api.login(username, password)).data)
     },
-    async register(data: { username: string; password: string; nickname?: string; invite_token: string }): Promise<void> {
+    async register(data: RegisterInput): Promise<void> {
       await this.acceptSession((await api.register(data)).data)
     },
     async refreshMe(): Promise<void> {

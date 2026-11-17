@@ -349,7 +349,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   editingSyncedPricing.value = false
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: [String(category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
+  form.value = { task_types: [String(category.id === 'llm' ? 7 : category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
   const asrPreset = generationCapabilities.value.audio_recognition
   asrPrice.value = asrPreset?.pricing?.price_per_minute ?? 0
   if (category.id === 'asr' && asrPreset) Object.assign(form.value, { base_url: asrPreset.base_url, model: asrPreset.model, api_protocol: asrPreset.api_protocol })
@@ -695,7 +695,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
     <section v-if="isTeamAdmin" class="model-source-banner">
       <div class="model-source-copy">
         <strong>{{ configs.length ? tr('本团队已配置 {p0} 个模型', { p0: configs.length }) : tr('尚未配置团队模型') }}</strong>
-        <p>{{ tr('此处只管理本团队自己的模型配置；平台模型不对团队显示。未配置时，生成任务将使用平台模型，费用从团队余额扣除。') }}</p>
+        <p>{{ tr('此处只管理团队自建模型。启用后自动使用自建来源；当前任务没有可用自建模型时，使用平台模型，费用从团队余额扣除。') }}</p>
       </div>
     </section>
     <section class="model-category-grid" :aria-label="tr('模型能力分类')">
@@ -790,6 +790,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
           <label v-if="selectedCategory.taskTypes.length > 1" class="is-full">
             <span>{{ tr('能力用途') }}</span>
             <AppMultiSelect v-model="form.task_types" :ariaLabel="tr('能力用途')" :options="taskOptions" />
+            <small v-if="selectedCategory.id === 'llm'">{{ tr('剧本、设定和分镜文本使用「创作助手」用途，并需要 JSON Schema 严格输出能力。') }}</small>
             <small>{{ tr('可同时选择多个用途；勾选“重制”表示该模型支持视频输入并可用于来源视频拆解。') }}</small>
           </label>
           <label class="is-full"><span>{{ tr('配置名称') }}</span><input v-model="form.name" name="model-config-name" required autocomplete="off" :placeholder="tr('例如：豆包 Seed 1.6')" /></label>

@@ -10,6 +10,7 @@ const router = createRouter({
       meta: {platformOnly: true, public: ['models', 'docs'].includes(section)},
     })),
     { path: '/login', name: 'login', component: () => import('./pages/LoginPage.vue'), meta: { public: true, fullscreen: true } },
+    { path: '/register', name: 'register', component: () => import('./pages/LoginPage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/mcp/connect/:code', name: 'local-mcp-connect', component: () => import('./pages/LocalMcpConnectPage.vue'), meta: {fullscreen: true} },
     { path: '/invite/:token', name: 'invite', component: () => import('./pages/InvitePage.vue'), meta: { public: true, fullscreen: true } },
     { path: '/', component: () => import('./pages/HomePage.vue') },
@@ -53,7 +54,7 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.ready) await auth.bootstrap()
   if (auth.deploymentRole === 'platform') {
-    if (!to.meta.platformOnly && !['/login','/profile','/billing','/orders','/teams','/members','/users','/settings'].includes(to.path) && to.name !== 'invite') {
+    if (!to.meta.platformOnly && !['/login','/register','/profile','/billing','/orders','/teams','/members','/users','/settings'].includes(to.path) && to.name !== 'invite') {
       return auth.canAccessBilling ? '/platform/usage' : '/platform/models'
     }
     if (['/platform/usage','/platform/keys'].includes(to.path) && auth.isLoggedIn && !auth.canAccessBilling) return '/platform/models'

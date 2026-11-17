@@ -2,7 +2,7 @@ import type { SheetHistory } from '@/shared/storyboardSheetHistory'
 import { generationRequest, finishGenerationRequest } from '@/shared/generationRequests'
 
 import { tr } from '@/i18n'
-import type { ModelPricing, ProjectOverview } from './types'
+import type { ModelPricing, ProjectOverview, RegisterInput } from './types'
 import type { BillingStatement, BillingStatementFilters, BillingStatementParties } from './types'
 import { diagnosticScope, recordRequestFailure, diagnosticReport, type DiagnosticEntry } from '@/shared/diagnostics'
 import { downloadFile, saveBlob } from '@/shared/downloadFile'
@@ -309,7 +309,7 @@ export const api = {
   visualStyles: () => request<SingleResponse<VisualStyleItem[]>>('/config/visual-styles'),
   authStatus: () => request<SingleResponse<AuthStatus>>('/auth/status'),
   login: (username: string, password: string) => request<SingleResponse<import('./types').LoginResult>>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  register: (data: { username: string; password: string; nickname?: string; invite_token: string }) => request<SingleResponse<import('./types').LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  register: (data: RegisterInput) => request<SingleResponse<import('./types').LoginResult>>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   changePassword: (oldPassword: string, newPassword: string) => request<SingleResponse<null>>('/auth/change-password', { method: 'POST', body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) }),
   resetTeamMemberPassword: (userId: number, data: { new_password: string }, teamId?: number) => request<SingleResponse<null>>(`/team/members/${userId}/reset-password${qs({ team_id: teamId })}`, { method: 'POST', body: JSON.stringify(data) }),
   createUser: (data: { username: string; password: string; nickname?: string }) => request<SingleResponse<UserItem>>('/users', { method: 'POST', body: JSON.stringify(data) }),

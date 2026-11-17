@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
+from tortoise.exceptions import IntegrityError
+from tortoise.transactions import in_transaction
 from utils.messages import localized_message
 from utils.enums import UserStatusEnum
 
@@ -28,13 +30,26 @@ class AuthService:
         return await self.issue_session(user)
 
     async def register(self, data: RegisterIn) -> LoginOut:
-        """经邀请链接注册：创建账号、加入团队并直接登录。"""
+        """创建普通账号和自有团队；邀请注册保留原有团队加入规则。"""
         from services.invites import register_via_invite
+        from services.team_provisioning import create_owned_team
 
-        user, _ = await register_via_invite(
-            data.username, data.password, data.nickname, data.invite_token
-        )
-        return await self.issue_session(user)
+        if data.invite_token is not None:
+            user, _ = await register_via_invite(
+                data.username, data.password, data.nickname, data.invite_token
+            )
+            return await self.issue_session(user)
+        if not settings.PASSWORD_SIGNUP_ENABLED:
+            raise HTTPException(403, localized_message('暂未开放账号注册，请使用邀请链接'))
+        password_hash = hash_password(data.password)
+        async with in_transaction():
+            try:
+                user = await User.create(username=data.username, nickname=data.nickname.strip() or data.username,
+                    password_hash=password_hash, is_super_admin=False)
+            except IntegrityError:
+                raise HTTPException(400, localized_message('用户名已被使用')) from None
+            await create_owned_team(user.id)
+            return await self.issue_session(user)
 
     async def issue_session(self, user: User) -> LoginOut:
         token = new_session_token()
