@@ -52,3 +52,18 @@ it('stops an in-flight request while keeping the draft and output', async () => 
   expect(modal().text()).toContain('已停止')
   expect(skillsApi.update).not.toHaveBeenCalled()
 })
+
+it('focuses the safe confirmation action when closing a dirty editor and never discards on repeated Escape', async () => {
+  wrapper = mount(SkillEditorDialog, { props: { task: 'story', source } })
+  await flushPromises()
+  await modal().get('textarea[name="skill-instructions"]').setValue('# changed')
+  await modal().get('button[aria-label="关闭"]').trigger('click')
+  const resume = modal().findAll('button').find(item => item.text() === '继续编辑')!
+  expect(document.activeElement).toBe(resume.element)
+  expect(resume.attributes('aria-describedby')).toBeTruthy()
+  await modal().trigger('cancel')
+  expect(modal().attributes('open')).toBeDefined()
+  await resume.trigger('click')
+  expect(document.activeElement).toBe(modal().get('input[name="skill-name"]').element)
+  expect(modal().get('.discard-area').attributes('aria-hidden')).toBe('true')
+})

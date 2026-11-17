@@ -994,5 +994,8 @@
   "已有分段结果已保存，可重新生成本章以补齐内容": "Existing segment results are saved. Regenerate this episode to complete it.",
   "正在检查创作要求": "Checking creative requirements",
   "资产名称匹配到多个对象，请修改别名后重试": "The asset name matches multiple objects. Edit its aliases and retry.",
-  "待补全的设定已有新修改，已保留人工编辑，请重新生成": "The design has new edits. Your edits are preserved; generate it again."
+  "待补全的设定已有新修改，已保留人工编辑，请重新生成": "The design has new edits. Your edits are preserved; generate it again.",
+  "所选模型不可用，请重新选择": "The selected model is unavailable. Please select another model.",
+  "内容超过模型上下文上限，请缩短技能或测试输入": "The content exceeds this model’s context limit. Shorten the skill or test input.",
+  "试运行未完成，请检查模型设置或缩短输入后重试": "The trial did not complete. Check the model settings or shorten the input and try again."
 }

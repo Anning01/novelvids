@@ -27,7 +27,7 @@ def body(config_id, **updates):
 
 async def config(**updates):
     return await AiModelConfig.create(name='试运行', task_type=7, model='test',
-        base_url='https://model.invalid', api_key='not-a-real-key', supports_json_output=True,
+        base_url='https://model.invalid', api_key='not-a-real-key', supports_json_output=True, supports_strict_output=True,
         thinking='enabled', reasoning_effort='high', is_active=True, **updates)
 
 
@@ -35,19 +35,19 @@ async def config(**updates):
 async def test_trial_uses_draft_production_schema_and_request_only_overrides():
     chosen = await config()
     request = body(chosen.id, thinking='disabled', reasoning_effort='')
-    snapshot, instructions, content = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    snapshot, instructions, content, contract = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
     assert snapshot.thinking == 'disabled' and snapshot.reasoning_effort is None
     await chosen.refresh_from_db()
     assert chosen.thinking == 'enabled' and chosen.reasoning_effort == 'high'
     assert json.loads(content)['creative_method']['instructions'] == request.skill.instructions
-    assert 'output_schema=' in instructions and 'story_outline' in instructions
+    assert 'output_schema=' not in instructions and 'story_outline' in contract['schema']['properties']
     assert json.loads(content)['task_context']['input'] == '测试素材'
-    for changes in ({'team_id': 2}, {'supports_json_output': False}, {'is_active': False}):
+    for changes in ({'team_id': 2}, {'supports_strict_output': False}, {'is_active': False}):
         await AiModelConfig.filter(id=chosen.id).update(**changes)
         with pytest.raises(HTTPException) as caught:
             await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
         assert caught.value.status_code == 400
-        await AiModelConfig.filter(id=chosen.id).update(team_id=None, supports_json_output=True, is_active=True)
+        await AiModelConfig.filter(id=chosen.id).update(team_id=None, supports_strict_output=True, is_active=True)
 
 
 @pytest.mark.asyncio
@@ -56,8 +56,8 @@ async def test_each_category_has_platform_owned_schema(task):
     chosen = await config()
     request = body(chosen.id)
     request.skill.task = task
-    _, instructions, _ = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
-    assert json.loads(instructions.split('output_schema=')[1])['additionalProperties'] is False
+    _, _, _, contract = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    assert contract['schema']['additionalProperties'] is False
 
 
 class FakeStream:
@@ -95,7 +95,7 @@ async def test_trial_stream_single_request_and_accounting_even_on_stop(monkeypat
     request = body(chosen.id)
     ctx = AuthContext(is_super_admin=True)
     model = FakeModel(FakeStream('not json' if mode == 'invalid' else '{"story_outline":"输出"}', mode == 'cancelled'))
-    monkeypatch.setattr(skill_trial, 'configured_model', lambda *args: model)
+    monkeypatch.setattr(skill_trial, 'configured_model', lambda *args, **kwargs: model)
     prepared = await skill_trial.prepare_trial(request, ctx)
     received = []
     try:
@@ -124,3 +124,34 @@ async def test_endpoint_rejects_unknown_models_and_schema_injection():
         assert (await client.post('/skills/trial', json=payload)).status_code == 400
         assert (await client.post('/skills/trial', json={**payload, 'output_schema': {}})).status_code == 422
     assert await AiTask.all().count() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+async def test_trial_endpoint_sends_one_strict_request_through_each_configured_protocol(monkeypatch, text_api):
+    from test.test_services.test_strict_text_tasks import mock_model
+    chosen = await config(text_api=text_api)
+    payload = {'book_types': ['悬疑'], 'story_outline': '船工发现秘密。', 'key_characters': []}
+    requests = mock_model(monkeypatch, payload)
+    app = FastAPI()
+    app.include_router(router, prefix='/skills')
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(is_super_admin=True)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.post('/skills/trial', json=body(chosen.id, thinking='disabled', reasoning_effort='low').model_dump())
+    assert response.status_code == 200 and '"type": "done"' in response.text
+    assert len(requests) == 1
+    assert 'output_schema=' not in json.dumps(requests[0], ensure_ascii=False)
+    output_format = requests[0]['text']['format'] if text_api == 'responses' else requests[0]['response_format']['json_schema']
+    assert output_format['strict'] is True and output_format['schema']['additionalProperties'] is False
+    assert (await ModelUsageRecord.get()).usage['input_tokens'] == 24
+
+
+@pytest.mark.asyncio
+async def test_trial_counts_native_schema_against_configured_context_limit():
+    chosen = await config()
+    request = body(chosen.id)
+    _, instructions, content, _ = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    await AiModelConfig.filter(id=chosen.id).update(max_context_characters=len(instructions) + len(content) + 1)
+    with pytest.raises(HTTPException) as caught:
+        await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    assert caught.value.status_code == 400

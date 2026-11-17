@@ -11,6 +11,7 @@ const props = defineProps<{ task: TextTask; source?: CreativeSkill; copy?: boole
 const emit = defineEmits<{ close: []; saved: [skill: CreativeSkill] }>()
 const id = useId()
 const dialog = ref<HTMLDialogElement>()
+const discardArea = ref<HTMLElement>()
 const editingId = props.source && !props.source.builtin && !props.copy ? props.source.id : null
 const editor = ref<CreativeSkillInput>({ task: props.task,
   name: props.source ? `${props.source.name}${editingId ? '' : tr('（副本）')}` : '',
@@ -51,11 +52,21 @@ async function loadModels() {
 }
 onMounted(async () => { await nextTick(); dialog.value?.showModal(); void loadModels() })
 onBeforeUnmount(() => { controller?.abort(); clearInterval(timer); dialog.value?.close() })
-function requestClose(event?: Event) {
+async function requestClose(event?: Event) {
   event?.preventDefault()
   if (saving.value) return
-  if (dirty.value || running.value) { discard.value = true; return }
+  if (dirty.value || running.value) {
+    discard.value = true
+    await nextTick()
+    discardArea.value?.scrollIntoView({ block: 'nearest' })
+    discardArea.value?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+    return
+  }
   closeEditor()
+}
+function resumeEditing() {
+  discard.value = false
+  dialog.value?.querySelector<HTMLInputElement>('input[name="skill-name"]')?.focus()
 }
 function closeEditor() {
   controller?.abort()
@@ -158,9 +169,9 @@ async function send() {
               <AppButton type="submit" variant="primary" :loading="saving" :disabled="running || disabled">{{ tr('保存技能') }}</AppButton>
             </div>
           </div>
-          <div class="discard-area" :class="{ visible: discard }" :aria-hidden="!discard">
+          <div ref="discardArea" class="discard-area" :class="{ visible: discard }" :aria-hidden="!discard">
             <p :id="`${id}-discard`">{{ tr('关闭将丢弃未保存的修改，并停止试运行。') }}</p>
-            <AppButton type="button" variant="ghost" size="sm" :tabindex="discard ? 0 : -1" @click="discard = false">{{ tr('继续编辑') }}</AppButton>
+            <AppButton type="button" variant="ghost" size="sm" :tabindex="discard ? 0 : -1" :aria-describedby="`${id}-discard`" @click="resumeEditing">{{ tr('继续编辑') }}</AppButton>
             <AppButton type="button" variant="secondary" size="sm" :tabindex="discard ? 0 : -1" :aria-describedby="`${id}-discard`" @click="closeEditor">{{ tr('放弃并关闭') }}</AppButton>
           </div>
         </footer>

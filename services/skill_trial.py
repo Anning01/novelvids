@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 async def prepare_trial(body: SkillTrialInput, ctx):
     configs = await resolve_scope_configs(AiTaskTypeEnum.creation_agent.value, ctx.team_id,
-        capability_filter=lambda row: row.supports_json_output)
+        capability_filter=lambda row: row.supports_strict_output)
     chosen = next((row for row in configs if row.id == body.model_config_id), None)
     if chosen is None:
         raise HTTPException(400, localized_message('所选模型不可用，请重新选择'))
@@ -46,23 +46,25 @@ async def prepare_trial(body: SkillTrialInput, ctx):
             setattr(chosen, field, getattr(body, field) or None)
     language = await generation_language()
     specifications = json.loads(read_skill('asset_contract'))[language] if body.skill.task == 'assets' else None
-    schema = output_contract(body.skill.task, asset_specifications=specifications)['schema']
+    contract = output_contract(body.skill.task, asset_specifications=specifications)
     instructions, content = render_text_task(language=language, skill=body.skill.model_dump(),
-        context={'input': body.input}, output_schema=schema)
-    if chosen.max_context_characters and len(instructions) + len(content) > chosen.max_context_characters:
+        context={'input': body.input})
+    context_size = len(instructions) + len(content) + len(json.dumps(contract, ensure_ascii=False))
+    if chosen.max_context_characters and context_size > chosen.max_context_characters:
         raise HTTPException(400, localized_message('内容超过模型上下文上限，请缩短技能或测试输入'))
     await ensure_solvent(ctx.team_id, ctx.user.id if ctx.user else None)
-    return chosen, instructions, content
+    return chosen, instructions, content, contract
 
 
 async def stream_trial(body, ctx, prepared):
-    chosen, instructions, content = prepared
+    chosen, instructions, content, contract = prepared
     user_id = ctx.user.id if ctx.user else None
     # Standalone calls use the existing zero project attribution, never a real project.
     task = await AiTask.create(task_type=AiTaskTypeEnum.prompt_optimization.value, status=2,
         started_at=datetime.now(timezone.utc), request_params={'operation': 'skill_trial',
             'skill_task': body.skill.task, 'novel_id': 0, 'team_id': ctx.team_id, 'user_id': user_id, 'model_config_id': chosen.id})
-    model = configured_model(chosen, AgentConfiguration())
+    model = configured_model(chosen, AgentConfiguration(), output_contract=contract)
+    model.strict_streaming = True
     protocol = AGUIEventStream(run_input=RunAgentInput(thread_id=str(task.id), run_id=str(task.id),
         messages=[], tools=[], context=[], state={}, forwarded_props={}))
     call = {}

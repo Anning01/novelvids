@@ -93,9 +93,9 @@ async function toggle(skill: CreativeSkill) {
           <thead><tr><th scope="col">{{ tr('技能名称') }}</th><th scope="col">{{ tr('来源') }}</th><th scope="col">{{ tr('状态') }}</th><th scope="col">{{ tr('操作') }}</th></tr></thead>
           <tbody><tr v-for="skill in visible" :key="skill.id">
             <th scope="row"><div class="skill-name">{{ skill.name }}<span v-if="skill.id === defaultId" class="default-tag">{{ tr('默认') }}</span></div><p>{{ skill.description || tr('暂无说明') }}</p></th>
-            <td>{{ skill.builtin ? tr('内置') : tr('我的技能') }}</td>
-            <td><span class="skill-state" :class="{ inactive: !skill.is_active }">{{ skill.is_active ? tr('已启用') : tr('已停用') }}</span></td>
-            <td><SkillRowActions :skill="skill" :default-id="defaultId" :busy="busy" @edit="edit(skill)" @default="setDefault(skill)" @toggle="toggle(skill)" /></td>
+            <td :data-label="tr('来源')">{{ skill.builtin ? tr('内置') : tr('我的技能') }}</td>
+            <td :data-label="tr('状态')"><span class="skill-state" :class="{ inactive: !skill.is_active }">{{ skill.is_active ? tr('已启用') : tr('已停用') }}</span></td>
+            <td :data-label="tr('操作')"><SkillRowActions :skill="skill" :default-id="defaultId" :busy="busy" @edit="edit(skill)" @default="setDefault(skill)" @toggle="toggle(skill)" /></td>
           </tr></tbody>
         </table>
       </div>
@@ -129,7 +129,7 @@ h2 > span { font-size: 12px; font-weight: 400; color: var(--app-text-secondary);
 .skill-search:focus-within { outline: 2px solid var(--app-accent); outline-offset: 2px; } .skill-search input:focus-visible { outline: none; }
 .view-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--app-border); border-radius: 8px; }
 .view-switch [aria-pressed="true"] { color: var(--app-accent); background: var(--app-accent-soft); }
-.skills-table { overflow: auto; border: 1px solid var(--app-border); border-radius: 12px; max-block-size: 70dvh; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
+.skills-table { container-type: inline-size; overflow: auto; border: 1px solid var(--app-border); border-radius: 12px; max-block-size: 70dvh; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
 table { inline-size: 100%; min-inline-size: 720px; border-collapse: separate; border-spacing: 0; text-align: start; font-size: 13px; }
 thead { position: sticky; inset-block-start: 0; z-index: 2; } thead th { color: var(--app-text-secondary); font-size: 12px; font-weight: 500; background: var(--app-surface-muted); }
 th, td { text-align: start; padding: 18px 20px; border-block-end: 1px solid var(--app-border); } tbody tr:last-child > * { border-block-end: 0; }
@@ -147,6 +147,15 @@ tbody th p { margin-block-start: 6px; font-weight: 400; max-inline-size: 56ch; o
 .library-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-block-size: 320px; color: var(--app-text-secondary); border: 1px dashed var(--app-border); border-radius: 12px; }
 .library-empty h3 { font-size: 16px; color: var(--app-text); margin-block-end: 0; }
 .library-error { color: var(--app-danger, #b33645); margin-block: 12px; } .library-status { margin-block: 12px; }
-@media (max-width: 650px) { .skills-page { padding: 24px 16px; } h1 { font-size: 24px; } .skills-page-header { align-items: flex-start; } .skills-page-header p { max-inline-size: 22ch; } .task-tabs { gap: 22px; } .library-filters { inline-size: 100%; } .skill-search { flex: 1; } .skill-search input { inline-size: 100%; } }
+@container (width < 650px) {
+  table, tbody, tr, th, td { display: block; min-inline-size: 0; inline-size: auto; }
+  thead { display: none; }
+  tbody tr { padding: 16px; border-block-end: 1px solid var(--app-border); background: var(--app-surface); }
+  tbody tr:last-child { border-block-end: 0; }
+  tbody th, tbody td { position: static; inline-size: auto; padding: 6px 0; border: 0; }
+  td::before { content: attr(data-label) '：'; color: var(--app-text-secondary); font-size: 12px; margin-inline-end: 8px; }
+  td:last-child::before { content: none; }
+}
+@media (max-width: 650px) { .skills-page { padding: 24px 16px; } h1 { font-size: 24px; } .skills-page-header { align-items: flex-start; } .skills-page-header p { max-inline-size: 22ch; } .task-tabs { gap: 22px; } .library-filters { inline-size: 100%; } .skill-search { flex: 1 1 100%; } .skill-search input { inline-size: 100%; } .view-switch { margin-inline-start: auto; } }
 @media (pointer: coarse) { .skills-page :deep(button), .skill-search { min-block-size: 44px; } .skill-search input { font-size: 16px; } }
 </style>
