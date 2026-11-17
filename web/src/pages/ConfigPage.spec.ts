@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import AppButton from '@/components/AppButton.vue'
@@ -79,7 +79,7 @@ describe('reasoning parameter controls', () => {
 it.each([
   { theme: 'light', jsonOutput: false, strict: true },
   { theme: 'dark', jsonOutput: true, strict: false },
-])('uses one structured output switch for JSON mode in $theme', async ({ theme, strict, jsonOutput }) => {
+])('saves text API and preferred output format in $theme', async ({ theme, strict, jsonOutput }) => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 32, name: '结构化模型', task_type: 7, task_types: [7],
@@ -92,17 +92,15 @@ it.each([
     await flushPromises()
     await wrapper.get('[aria-label="编辑配置"]').trigger('click')
     const form = wrapper.get('form.model-modal')
-    const switches = form.findAll('input[aria-label="结构化输出"]')
-    expect(switches).toHaveLength(1)
-    expect(switches[0]!.element).toHaveProperty('checked', jsonOutput)
-    expect(form.findAll('.json-capability-field')).toHaveLength(1)
-    expect(form.text()).not.toContain('支持严格结构化输出（可选能力标记）')
-    expect(form.text()).not.toContain('json_object')
-    await switches[0]!.setValue(!jsonOutput)
+    const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
+    expect(format.props('modelValue')).toBe(strict ? 'json_schema' : 'text')
+    format.vm.$emit('update:modelValue', 'json_schema')
+    form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '文本接口')!.vm.$emit('update:modelValue', 'responses')
     await form.trigger('submit')
     await flushPromises()
-    expect(update).toHaveBeenCalledWith(32, expect.objectContaining({ supports_json_output: !jsonOutput }))
-    expect(update.mock.calls[0]![1]).not.toHaveProperty('supports_strict_output')
+    expect(update).toHaveBeenCalledWith(32, expect.objectContaining({
+      supports_json_output: true, supports_strict_output: true, text_api: 'responses',
+    }))
   } finally {
     wrapper.unmount()
     delete document.documentElement.dataset.appTheme

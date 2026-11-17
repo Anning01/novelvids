@@ -40,3 +40,23 @@ describe('replaceSceneAssetSelection', () => {
     })
   })
 })
+
+it('uses only chapter-associated assets and forms, without mutating historical records', async () => {
+  const { chapterAssetCandidates } = await import('./sceneAssetSelection')
+  const asset = {
+    id: 1, novel_id: 1, asset_type: 1, canonical_name: '角色', created_at: '', updated_at: '',
+    source_chapters: [1, 2], is_global: true,
+    variants: [
+      { id: 11, asset_id: 1, name: '第一章', chapter_numbers: [1], images: [], created_at: '', updated_at: '' },
+      { id: 12, asset_id: 1, name: '第二章', chapter_numbers: [2], images: [], created_at: '', updated_at: '' },
+      { id: 13, asset_id: 1, name: '未关联', chapter_numbers: [], images: [], created_at: '', updated_at: '' },
+    ],
+  }
+  const assets = [asset, { ...asset, id: 2, source_chapters: [2] }, { ...asset, id: 3, source_chapters: [] }]
+  expect(chapterAssetCandidates(assets, 1).map(item => [item.id, item.variants?.map(v => v.id)]))
+    .toEqual([[1, [11]]])
+  expect(chapterAssetCandidates(assets, 2).map(item => [item.id, item.variants?.map(v => v.id)]))
+    .toEqual([[1, [12]], [2, [12]]])
+  expect(chapterAssetCandidates(assets, undefined)).toEqual([])
+  expect(asset.variants).toHaveLength(3)
+})

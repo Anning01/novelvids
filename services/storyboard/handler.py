@@ -61,10 +61,7 @@ class StoryboardTaskHandler(BaseTaskHandler):
             or chapter.novel.storyboard_strategy
         )
         all_assets = await Asset.filter(novel_id=chapter.novel_id)
-        assets = [a for a in all_assets if a.is_global or chapter.number in (a.source_chapters or [])]
-        from services.creation_agent.step_context import context_assets
-        additional_assets = await context_assets(request_params)
-        assets = list({asset.id: asset for asset in [*assets, *additional_assets]}.values())
+        assets = [a for a in all_assets if chapter.number in (a.source_chapters or [])]
 
         # 2. 构建实体上下文
         from services.creation_agent.step_context import step_context

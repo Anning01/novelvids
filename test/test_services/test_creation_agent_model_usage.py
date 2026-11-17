@@ -117,3 +117,87 @@ async def test_non_storyboard_models_keep_completed_stream_recovery(monkeypatch)
             assert stream.provider_details['stream_transport_interrupted'] is True
     finally:
         await model.client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_responses_preserves_usage_and_native_output_contract(monkeypatch, streaming):
+    from test.test_services.test_strict_text_tasks import mock_model
+    from schemas.text_task_contracts import output_contract
+    requests = mock_model(monkeypatch, {'screenplay': '本集剧本'})
+    config = SimpleNamespace(api_protocol='openai_compatible', text_api='responses',
+        base_url='https://example.invalid/v1', api_key='synthetic', model='test',
+        thinking='disabled', reasoning_effort='high', supports_strict_output=True, supports_json_output=True)
+    model = handler.configured_model(config, AgentConfiguration(), output_contract=output_contract('screenplay'))
+    try:
+        messages = [ModelRequest(parts=[UserPromptPart('创作剧本')])]
+        if streaming:
+            async with model.request_stream(messages, {'max_tokens': 100}, ModelRequestParameters()) as stream:
+                async for _ in stream:
+                    pass
+                usage = stream.usage()
+                assert stream.finish_reason == 'stop'
+        else:
+            result = await model.request(messages, {'max_tokens': 100}, ModelRequestParameters())
+            usage = result.usage
+            assert result.finish_reason == 'stop'
+        assert usage.input_tokens == 24
+        assert usage.output_tokens == 12
+        assert usage.cache_read_tokens == 4
+        assert requests[0]['max_output_tokens'] == 100
+        assert requests[0]['reasoning']['effort'] == 'none'
+        assert 'thinking' not in requests[0] and 'response_format' not in requests[0]
+        assert requests[0]['text']['format']['strict'] is True
+    finally:
+        await model.client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('event_type,index_field', [
+    ('response.reasoning_text.delta', 'content_index'),
+    ('response.reasoning_summary_text.delta', 'summary_index'),
+])
+async def test_responses_thinking_reaches_activity_before_response_finishes(monkeypatch, event_type, index_field):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_stream import SkillRunActivity
+    result = {'id': 'resp-thinking', 'object': 'response', 'created_at': 1, 'model': 'test',
+        'status': 'in_progress', 'output': [], 'usage': None}
+    sink = SkillRunActivity(AsyncMock(task_id='child', conversation_id=1), 'owner')
+    sink.publish_event = AsyncMock()
+    class LiveBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            events = [
+                {'type': 'response.created', 'response': result},
+                {'type': 'response.output_item.added', 'output_index': 0,
+                 'item': {'id': 'thinking', 'type': 'reasoning', 'summary': [], 'encrypted_content': 'private-signature'}},
+                {'type': event_type, 'item_id': 'thinking', 'output_index': 0, index_field: 0, 'delta': '正在拆分'},
+                {'type': event_type, 'item_id': 'thinking', 'output_index': 0, index_field: 0, 'delta': '镜头。'},
+            ]
+            for index, event in enumerate(events):
+                yield ('data: ' + json.dumps({**event, 'sequence_number': index}) + '\n\n').encode()
+            # The HTTP stream is still open. A buffered implementation fails here.
+            sent = [call.args[0] for call in sink.publish_event.await_args_list]
+            assert any('正在拆分' in event['value'].get('detail_delta', '') for event in sent)
+            yield ('data: ' + json.dumps({'type': 'response.completed', 'sequence_number': 4,
+                'response': {**result, 'status': 'completed'}}) + '\n\n').encode()
+    def respond(request):
+        assert json.loads(request.content)['stream'] is True
+        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=LiveBody())
+    monkeypatch.setattr(handler, 'AsyncOpenAI', lambda **kwargs: AsyncOpenAI(
+        **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))))
+    model = handler.configured_model(SimpleNamespace(api_protocol='openai_compatible', text_api='responses',
+        base_url='https://example.invalid/v1', api_key='test', model='test'), AgentConfiguration())
+    try:
+        async with model.request_stream([ModelRequest(parts=[UserPromptPart('生成分镜')])], {}, ModelRequestParameters()) as stream:
+            await sink(None, stream)
+            native = stream.get()
+        sent = [call.args[0] for call in sink.publish_event.await_args_list]
+        text = ''.join(event['value'].get('detail_delta', '') for event in sent)
+        assert text == '正在拆分镜头。'
+        assert 'private-signature' not in str(sent)
+        if index_field == 'content_index':
+            part = native.parts[0]
+            assert part.content == ''
+            assert part.provider_details['raw_content'] == ['正在拆分镜头。']
+    finally:
+        await model.client.close()

@@ -73,7 +73,7 @@ import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
 import { resolveSceneGenerationState, type SceneStatusRailItem } from '@/shared/sceneGenerationStatus'
-import { replaceSceneAssetSelection, updateSceneAssetSelection, selectedVariantIds, readSceneVariantBindings, type SceneVariantBindings } from '@/shared/sceneAssetSelection'
+import { chapterAssetCandidates, replaceSceneAssetSelection, updateSceneAssetSelection, selectedVariantIds, readSceneVariantBindings, type SceneVariantBindings } from '@/shared/sceneAssetSelection'
 import { readVideoReferenceMedia as readReferenceMedia, buildVideoInputImageReferences, referencedVideoMedia, videoReferenceMentionSyntax } from '@/shared/scenePromptReferences'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
 import { readAutoEnhancement, isVideoGenerationActive, autoEnhancementLabel, preserveAutoEnhancement, autoEnhancementAvailable, currentAutoEnhancement, enhancementEstimate } from '@/shared/autoEnhancement'
@@ -444,7 +444,7 @@ const assetGroups = computed(() => [
   { type: AssetTypeEnum.PERSON, get label() { return tr('出镜角色') }, icon: UsersRound, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.PERSON) },
   { type: AssetTypeEnum.SCENE, get label() { return tr('分镜场景') }, icon: ImageIcon, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.SCENE) },
   { type: AssetTypeEnum.ITEM, get label() { return tr('场景道具') }, icon: Boxes, items: assets.value.filter(item => item.asset_type === AssetTypeEnum.ITEM) },
-])
+].map(group => ({ ...group, candidates: chapterAssetCandidates(group.items, activeChapter.value?.number) })))
 
 async function persistVideoModelPreference(modelId: number) {
   try {
@@ -2682,7 +2682,7 @@ onBeforeUnmount(() => {
                 <h2>{{ tr('分镜信息') }}</h2>
                 <label><span>{{ tr('分镜描述') }}</span><textarea :value="draftFor(scene).description" rows="5" :placeholder="tr('请输入分镜描述')" @input="updateSceneText(scene, 'description', $event)" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
-                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.items.reduce((sum, asset) => sum + 1 + (asset.variants?.length || 0), 0) }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
+                  <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.candidates.reduce((sum, asset) => sum + 1 + (asset.variants?.length || 0), 0) }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
                   <div
                     v-if="selectedAssetsFor(scene, group).length"
                     class="selected-assets"
@@ -2735,7 +2735,7 @@ onBeforeUnmount(() => {
                     :open="openAssetPickerKey === assetPickerKey(scene, group.type)"
                     :anchor-id="assetPickerAnchorId(scene, group.type)"
                     :label="group.label"
-                    :assets="group.items"
+                    :assets="group.candidates"
                     :selected-asset-ids="draftFor(scene).selectedAssetIds"
                     :selected-variant-ids="resolvedSelectedVariantIdsFor(scene)"
                     :initial-asset-id="assetPickerFocusIds[assetPickerKey(scene, group.type)] || 0"
@@ -2902,6 +2902,7 @@ onBeforeUnmount(() => {
       :kind="editingAssetKind(editingAsset)"
       :novel-id="projectId"
       :asset="editingAsset"
+      :chapter-id="activeChapter?.id"
       :chapter-number="activeChapter?.number"
       :episode-numbers="chapters.map(item => item.number)"
       @close="closeAssetEditor"

@@ -41,7 +41,7 @@ function choose(value: string) {
 
 <template>
   <AppSelect :model-value="selected" :ariaLabel="label" density="compact"
-    :options="[{value: '', label: loading ? tr('正在读取模型…') : options.length ? label : tr('暂无 JSON 输出模型')}, ...options]"
+    :options="[{value: '', label: loading ? tr('正在读取模型…') : options.length ? label : tr('暂无 JSON Schema 输出模型')}, ...options]"
     :disabled="disabled || !options.length" @update:model-value="choose" />
   <template v-if="error">
     <small role="alert">{{ error }}</small>

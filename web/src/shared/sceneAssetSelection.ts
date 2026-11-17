@@ -1,3 +1,5 @@
+import type { Asset } from '@/types'
+
 export type SceneVariantSelection = number | null | Array<number | null>
 export type SceneVariantBindings = Record<number, SceneVariantSelection>
 
@@ -65,4 +67,12 @@ export function replaceSceneAssetSelection(
   delete bindings[replaceAssetId]
   bindings[replacement.assetId] = replacement.variantId
   return { selectedAssetIds, selectedVariantIds: bindings }
+}
+
+/** Match the chapter roster sent to storyboard generation, without changing saved bindings. */
+export function chapterAssetCandidates(assets: Asset[], chapterNumber: number | undefined): Asset[] {
+  if (chapterNumber === undefined) return []
+  return assets.filter(asset => (asset.source_chapters || []).includes(chapterNumber))
+    .map(asset => ({ ...asset, variants: (asset.variants || [])
+      .filter(variant => (variant.chapter_numbers || []).includes(chapterNumber)) }))
 }

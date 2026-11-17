@@ -25,13 +25,33 @@ def local_workspace(monkeypatch):
 async def strict_model():
     return await AiModelConfig.create(name='strict-text', model='strict-model', task_type=7,
         base_url='https://model.invalid/v1', api_key='test', is_active=True,
-        supports_json_output=True, supports_strict_output=False, supports_tool_calls=False)
+        supports_json_output=True, supports_strict_output=True, supports_tool_calls=False)
 
 
 def mock_model(monkeypatch, payload, *, finish_reason='stop', refusal=None):
     requests = []
     def respond(request):
         requests.append(json.loads(request.content))
+        if request.url.path.endswith('/responses'):
+            result = {'id': 'resp-test', 'object': 'response', 'created_at': 1, 'model': 'strict-model',
+                'status': 'completed', 'output': [],
+                'usage': {'input_tokens': 24, 'output_tokens': 12, 'total_tokens': 36,
+                    'input_tokens_details': {'cached_tokens': 4}, 'output_tokens_details': {'reasoning_tokens': 2}}}
+            item = {'id': 'msg-test', 'type': 'message', 'role': 'assistant', 'status': 'in_progress', 'content': []}
+            if not requests[-1].get('stream'):
+                result['output'] = [{**item, 'status': 'completed', 'content': [
+                    {'type': 'output_text', 'text': json.dumps(payload, ensure_ascii=False), 'annotations': []}]}]
+                return httpx.Response(200, json=result)
+            events = [
+                {'type': 'response.created', 'response': {**result, 'status': 'in_progress', 'usage': None}},
+                {'type': 'response.output_item.added', 'output_index': 0, 'item': item},
+                {'type': 'response.content_part.added', 'item_id': item['id'], 'output_index': 0, 'content_index': 0,
+                    'part': {'type': 'output_text', 'text': '', 'annotations': []}},
+                {'type': 'response.output_text.delta', 'item_id': item['id'], 'output_index': 0, 'content_index': 0,
+                    'delta': json.dumps(payload, ensure_ascii=False)},
+                {'type': 'response.completed', 'response': result}]
+            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=''.join(
+                'data: ' + json.dumps({**event, 'sequence_number': index}) + '\n\n' for index, event in enumerate(events)))
         return completion_stream_response({'id': 'strict', 'created': 1, 'model': 'strict-model',
             'object': 'chat.completion', 'choices': [{'index': 0, 'message': {
                 'role': 'assistant', 'content': json.dumps(payload, ensure_ascii=False) if refusal is None else None,
@@ -44,9 +64,15 @@ def mock_model(monkeypatch, payload, *, finish_reason='stop', refusal=None):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('operation', ['story', 'screenplay'])
-async def test_strict_generation_has_one_request_and_no_agent_validation(strict_model, monkeypatch, operation):
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+@pytest.mark.parametrize('strict,json_mode', [(True, True), (True, False)])
+async def test_strict_generation_has_one_request_and_no_agent_validation(strict_model, monkeypatch, operation, strict, json_mode, text_api):
     from controllers.novel import novel_controller
     from models.agent_operation import AgentOperation
+    strict_model.text_api = text_api
+    strict_model.supports_strict_output = strict
+    strict_model.supports_json_output = json_mode
+    await strict_model.save()
     novel = await Novel.create(name='渡口', content='船工守着渡口。', episodes_managed=True)
     chapter = await Chapter.create(novel=novel, number=1, name='渡口', content='船工守着渡口。')
     payload = ({'book_types': ['悬疑'], 'story_outline': '船工发现秘密。', 'key_characters': []}
@@ -62,9 +88,12 @@ async def test_strict_generation_has_one_request_and_no_agent_validation(strict_
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     assert len(requests) == 1
-    output = requests[0]['response_format']
-    assert output == {'type': 'json_object'}
-    assert request_schema(requests[0])['additionalProperties'] is False
+    output = requests[0]['text']['format'] if text_api == 'responses' else requests[0]['response_format']
+    if text_api == 'responses' and strict:
+        output = {'type': 'json_schema', 'json_schema': {k: v for k, v in output.items() if k != 'type'}}
+    assert output == {'type': 'json_schema', 'json_schema': {
+        'name': operation, 'schema': task.request_params['output_contract']['schema'], 'strict': True}}
+    assert 'output_schema=' not in json.dumps(requests[0], ensure_ascii=False)
     assert not requests[0].get('tools')
     legacy.assert_not_awaited()
     assert not await AgentOperation.filter(task=task, key__startswith='recovery:repair').exists()
@@ -88,11 +117,11 @@ async def test_incomplete_response_is_never_saved_or_repaired(strict_model, monk
 
 
 @pytest.mark.asyncio
-async def test_models_without_json_mode_are_not_selected(configured_creation_agent):
+async def test_json_object_only_models_are_not_selected(configured_creation_agent):
     from fastapi import HTTPException
     novel = await Novel.create(name='严格模式')
     chapter = await Chapter.create(novel=novel, number=1, name='原稿', content='原文')
-    await AiModelConfig.filter(id=configured_creation_agent.id).update(supports_json_output=False)
+    await AiModelConfig.filter(id=configured_creation_agent.id).update(supports_json_output=True, supports_strict_output=False)
     with pytest.raises(HTTPException) as error:
         await submit_screenplay(chapter.id, AuthContext())
     assert error.value.status_code == 422
@@ -244,7 +273,7 @@ async def test_provider_rejecting_json_mode_is_not_retried_or_downgraded(strict_
     requests = []
     def reject(request):
         requests.append(json.loads(request.content))
-        return httpx.Response(400, json={'error': {'message': 'json_object not supported', 'type': 'invalid_request_error'}})
+        return httpx.Response(400, json={'error': {'message': 'json_schema not supported', 'type': 'invalid_request_error'}})
     monkeypatch.setattr('services.creation_agent.handler.AsyncOpenAI', lambda **kwargs: AsyncOpenAI(
         **kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(reject))))
     novel = await Novel.create(name='不支持严格协议')
@@ -254,10 +283,12 @@ async def test_provider_rejecting_json_mode_is_not_retried_or_downgraded(strict_
     await task.refresh_from_db()
     await chapter.refresh_from_db()
     assert task.status == 4 and chapter.screenplay == '已有稿'
-    assert len(requests) == 1 and requests[0]['response_format']['type'] == 'json_object'
+    assert len(requests) == 1 and requests[0]['response_format']['type'] == 'json_schema'
     receipt = await AgentOperation.get(task=task, key='model:strict:screenplay')
     assert receipt.state == 'failed' and task.stage != 'needs_review'
 
 
 def request_schema(request):
-    return json.loads(request['messages'][0]['content'].split('\noutput_schema=', 1)[1])
+    if 'text' in request:
+        return request['text']['format']['schema']
+    return request['response_format']['json_schema']['schema']

@@ -93,7 +93,7 @@ async def begin_platform_image(base_url, model, api_key):
 def platform_text_client(config):
     from services.remake.capacity_transport import PlatformCapacityTransport
     async def before_request(request):
-        if request.method != "POST" or not request.url.path.endswith("/chat/completions"):
+        if request.method != "POST" or not request.url.path.endswith(("/chat/completions", "/responses")):
             return
         active = active_model_call.get()
         if active is None:

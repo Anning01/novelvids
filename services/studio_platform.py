@@ -1,4 +1,5 @@
 """Synchronize public model capabilities and prices without importing upstream secrets."""
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -31,6 +32,7 @@ class CatalogModel(BaseModel):
     is_active: bool = True
     tool_calls: bool = False
     json_output: bool = False
+    text_api: Literal["chat_completions", "responses"] = "chat_completions"
     strict_output: bool = False
     pricing: dict | None = None
     processing_options: dict | None = None
@@ -153,7 +155,7 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                           base_url=base_url, api_key=key, api_protocol="novelvids", is_active=True, concurrency=entry.concurrency,
                           image_model_type=entry.image_model_type, video_model_type=entry.video_model_type,
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
-                          supports_strict_output=entry.strict_output,
+                          supports_strict_output=entry.strict_output, text_api=entry.text_api,
                           processing_options=processing_options)
             if row:
                 row.update_from_dict(values)

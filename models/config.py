@@ -61,6 +61,7 @@ class AiModelConfig(AbstractBaseModel):
         description="是否支持 response_format=json_object",
     )
     supports_tool_calls = fields.BooleanField(default=False, description="是否支持多轮工具调用")
+    text_api = fields.CharField(max_length=24, default="chat_completions", description="文本调用接口")
     supports_strict_output = fields.BooleanField(default=False, description="是否支持严格 JSON Schema 输出")
     max_context_characters = fields.IntField(
         null=True,

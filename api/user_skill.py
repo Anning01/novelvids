@@ -13,7 +13,7 @@ _EDITOR = Depends(require_roles('admin', 'creator'))
 @router.get('/models', response_model=ResponseSchema)
 async def models(ctx: AuthContext = _EDITOR):
     configs = await resolve_scope_configs(AiTaskTypeEnum.creation_agent.value, ctx.team_id,
-        capability_filter=lambda config: config.supports_json_output)
+        capability_filter=lambda config: config.supports_strict_output)
     return ResponseSchema(data=[{'id': row.id, 'name': row.name, 'model': row.model} for row in configs])
 
 

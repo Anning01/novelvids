@@ -26,6 +26,6 @@ it('shows the strict model empty state and supports retry after a load error', a
   vi.mocked(skillsApi.models).mockResolvedValue({ code: 0, message: '', data: [] })
   await wrapper.findAll('button').find(button => button.text() === '重试')!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('暂无 JSON 输出模型')
+  expect(wrapper.text()).toContain('暂无 JSON Schema 输出模型')
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 })

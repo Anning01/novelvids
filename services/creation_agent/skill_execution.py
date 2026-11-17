@@ -27,14 +27,14 @@ async def require_agent(team_id=None, model_id=None, *, strict_output=False):
     models = await resolve_scope_configs(
         AiTaskTypeEnum.creation_agent.value,
         team_id if settings.AUTH_ENABLED else None,
-        capability_filter=lambda config: config.supports_json_output if strict_output else config.supports_tool_calls,
+        capability_filter=lambda config: config.supports_strict_output if strict_output else config.supports_tool_calls,
     )
     chosen = next(
         (item for item in models if model_id is None or item.id == model_id), None
     )
     if chosen is None:
         raise HTTPException(
-            422, localized_message("请选择已启用且支持 JSON 输出的模型" if strict_output else "请配置已启用且支持工具调用的创作助手模型")
+            422, localized_message("请选择已启用且支持 JSON Schema 严格输出的模型" if strict_output else "请配置已启用且支持工具调用的创作助手模型")
         )
     return chosen, limits
 
