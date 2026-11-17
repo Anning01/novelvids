@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Plus } from 'lucide-vue-next'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type Vditor from 'vditor'
 import { tr } from '@/i18n'
-import AppButton from '@/components/AppButton.vue'
 import type { TextTask } from './skillsApi'
 import { loadVditor } from './vditorLoader'
 import { atomicSelection, placeholderRanges, splitsPlaceholder, type TextSelection } from './placeholderEditing'
@@ -15,12 +13,6 @@ const surface = ref<HTMLElement>()
 const loading = ref(true)
 const failed = ref(false)
 const blocked = ref(false)
-const variables = computed(() => [
-  { key: 'input', label: tr('输入素材') }, { key: 'language', label: tr('输出语言') },
-  ...(['screenplay', 'storyboard'].includes(props.task ?? '') ? [
-    { key: 'episode_pacing', label: tr('本集节奏') }, { key: 'max_seconds', label: tr('参考时长') },
-  ] : []),
-])
 let instance: Vditor | undefined
 let disposed = false
 let renderedValue = ''
@@ -130,20 +122,6 @@ function acceptText(field: HTMLTextAreaElement): boolean {
 function checkInput(event: Event) {
   if (event.target instanceof HTMLTextAreaElement && !acceptText(event.target)) event.stopImmediatePropagation()
 }
-function insertVariable(key: string) {
-  if (props.disabled || loading.value) return
-  const field = sourceField()
-  if (!field || !variables.value.some(variable => variable.key === key)) return
-  field.setSelectionRange(field.value.length, field.value.length)
-  normalizeSelection(field)
-  const value = `{{${key}}}`
-  if (instance) instance.updateValue(value)
-  else {
-    field.setRangeText(value, field.selectionStart, field.selectionEnd, 'end')
-    if (acceptText(field)) emit('update:modelValue', field.value)
-    field.focus()
-  }
-}
 function labelEditor() {
   host.value?.querySelectorAll('[contenteditable="true"], textarea').forEach(element => {
     element.setAttribute('role', 'textbox')
@@ -209,25 +187,14 @@ onBeforeUnmount(() => { disposed = true; observer.disconnect(); document.removeE
       <textarea :value="modelValue.replace(/\r\n|\r/g, '\n')" name="skill-instructions" :aria-label="label ?? tr('创作方法')" :disabled="disabled" @input="emit('update:modelValue', exportedValue(($event.target as HTMLTextAreaElement).value))" />
     </template>
     <div v-show="!failed" ref="host" class="markdown-host" @focusin="labelEditor" />
-    <div v-if="markdown" class="placeholder-tools">
-      <p>{{ tr('可直接编辑 Markdown，也可点击下方变量插入正文末尾。变量只能整体移除，不能修改名称。') }}</p>
-      <div class="placeholder-buttons" role="group" :aria-label="tr('插入变量')">
-        <AppButton v-for="variable in variables" :key="variable.key" type="button" variant="secondary" size="sm" :disabled="disabled || loading" :title="`{{${variable.key}}}`" @click="insertVariable(variable.key)"><Plus :size="14" aria-hidden="true" />{{ variable.label }}</AppButton>
-      </div>
-      <p v-if="blocked" role="status">{{ tr('占位符不可拆改，请整体删除后重新插入。') }}</p>
-    </div>
+    <p v-if="blocked" class="placeholder-warning" role="status">{{ tr('占位符不可拆改，请整体删除后重新输入。') }}</p>
   </div>
 </template>
 
 <style scoped>
 .skill-markdown { min-inline-size: 0; min-block-size: 0; block-size: 100%; display: flex; flex-direction: column; }
 .markdown-host { flex: 1; min-block-size: 0; }
-.placeholder-tools { flex: none; border-block-start: 1px solid var(--app-border); padding: 10px 16px; }
-.placeholder-tools p { margin: 0 0 8px; font-size: 12px; }
-.placeholder-tools p[role='status'] { margin: 8px 0 0; color: var(--app-accent); }
-.placeholder-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-.placeholder-buttons :deep(.app-button--secondary) { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
-.placeholder-buttons :deep(.app-button--secondary:hover:not(:disabled)) { color: var(--app-text); background: var(--app-surface-hover); }
+.placeholder-warning { flex: none; color: var(--app-accent); }
 p { margin: 10px 16px; color: var(--app-text-secondary); font-size: 13px; }
 textarea { flex: 1; resize: none; min-block-size: 240px; padding: 16px; color: var(--app-text); background: var(--app-surface); border: 0; font: 13px/1.8 monospace; }
 .skill-markdown :deep(.vditor) { --panel-background-color: var(--app-surface); --toolbar-background-color: var(--app-surface-muted); --toolbar-icon-color: var(--app-text-secondary); --textarea-background-color: var(--app-surface); --textarea-text-color: var(--app-text); --border-color: var(--app-border); --toolbar-icon-hover-color: var(--app-accent); border: 0; border-radius: 0; }

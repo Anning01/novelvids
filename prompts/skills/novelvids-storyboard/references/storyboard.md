@@ -38,3 +38,11 @@ visual_prose 建立完整初始画面，actions 逐项写动作时间轴，narra
 ## 本集时长
 
 按 episode_pacing 和导演稿安排分段。episode_max_seconds 与 episode_pacing.max_seconds 是本集参考时长，不是整集总时长的硬性上限；优先保证叙事、动作和对白完整，允许为呈现效果适度超出参考值，不为凑秒数强行截断内容。缺省时按剧情自然分镜，旧导演稿里的估时或“时长上限”标题也按参考值理解。总时长为各独立生成段的 duration 之和，段内切镜已计入所属段。每段仍必须遵守所选视频模型支持的时长范围。
+
+## 配套规则
+
+- [输出栏目与时长边界](storyboard_contract.json)
+- [叙事策略](strategies.json)
+- [画面风格，按已选项读取](../../novelvids-image/references/styles.json)
+- [跨镜资产形态与引用](../../novelvids-assets/references/asset_lifecycle.md)
+- [首次出场与指定镜头修订](storyboard_templates.json)

@@ -71,10 +71,13 @@ it('focuses the safe confirmation action when closing a dirty editor and never d
   expect(modal().get('.discard-area').attributes('aria-hidden')).toBe('true')
 })
 
-it('sends trial-only placeholder values while saving the Markdown template unchanged', async () => {
-  const instructions = '节奏 {{episode_pacing}}；参考 {{max_seconds}} 秒'
+it('sends trial settings separately while saving a skill without placeholders unchanged', async () => {
+  const instructions = '按剧情自然展开，保留关键对白。'
   wrapper = mount(SkillEditorDialog, { props: { task: 'screenplay', source: { ...source, task: 'screenplay', instructions } } })
   await flushPromises()
+  expect(modal().get('.trial-parameters summary').text()).toBe('试运行设置')
+  expect(modal().get('.trial-parameters').text()).not.toContain('占位符')
+  expect(modal().find('.trial-parameters code').exists()).toBe(false)
   await modal().get('textarea[name="skill-instructions"]').setValue(skillEntry(instructions))
   await modal().get('button[aria-label="本集节奏"]').trigger('click')
   const menu = new DOMWrapper(document.body).get('[role="listbox"][aria-label="本集节奏"]')
@@ -96,6 +99,23 @@ it('sends trial-only placeholder values while saving the Markdown template uncha
   await flushPromises()
   expect(skillsApi.update).toHaveBeenCalledWith(3, expect.objectContaining({ files: [expect.objectContaining({ content: skillEntry(instructions) })] }), 4)
   expect(vi.mocked(skillsApi.update).mock.calls[0]![1]).not.toHaveProperty('episode_pacing')
+})
+
+it('preserves legacy placeholder text without turning it into skill settings', async () => {
+  const instructions = '节奏 {{episode_pacing}}；参考 {{max_seconds}} 秒'
+  vi.mocked(skillsApi.detail).mockResolvedValueOnce({ code: 0, message: '', data: folderSkill({ ...source, task: 'screenplay', instructions }) })
+  wrapper = mount(SkillEditorDialog, { props: { task: 'screenplay', source: { ...source, task: 'screenplay', instructions } } })
+  await flushPromises()
+  expect(modal().get('textarea[name="skill-instructions"]').element).toHaveProperty('value', skillEntry(instructions))
+  expect(modal().find('.trial-parameters code').exists()).toBe(false)
+  await modal().get('.trial-input').setValue('测试素材')
+  vi.mocked(runSkillTrial).mockResolvedValueOnce()
+  await modal().findAll('button').find(button => button.text() === '发送')!.trigger('click')
+  await flushPromises()
+  expect(runSkillTrial).toHaveBeenCalledWith(expect.objectContaining({
+    skill: expect.objectContaining({ files: [expect.objectContaining({ content: skillEntry(instructions) })] }),
+    episode_pacing: { preset: 'smart', max_seconds: null },
+  }), expect.any(AbortSignal), expect.any(Function))
 })
 
 it.each(['0', '1.5'])('reveals invalid trial duration %s before sending', async seconds => {

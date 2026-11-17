@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -25,20 +26,83 @@ def test_stage_exports_without_application_files(tmp_path, name):
     source = ROOT / package.name / "SKILL.md"
     entry = (package / "SKILL.md").read_text()
     assert f"name: {package.name}\n" in entry
-    targets = [package / match[2] for match in LINK.finditer(entry)]
     metadata = package / "agents/openai.yaml"
     assert metadata.read_bytes() == (source.parent / "agents/openai.yaml").read_bytes()
     title = re.search(r'^description: (猫影[^。\n]+)。', entry, re.MULTILINE)[1]
     assert f'  display_name: "{title}"' in metadata.read_text().splitlines()
-    assert set(targets) | {metadata} == {p for p in package.rglob("*") if p.is_file() and p.name not in {"SKILL.md", "LICENSE"}}
     assert (package / "LICENSE").read_bytes() == (ROOT.parents[1] / "LICENSE").read_bytes()
-    for match, target in zip(LINK.finditer(source.read_text()), targets, strict=True):
-        assert target.resolve().is_relative_to(package)
-        assert target.read_bytes() == (source.parent / match[2]).read_bytes()
+    pending, visited = [(source, package / 'SKILL.md')], set()
+    while pending:
+        original, exported = pending.pop()
+        if exported in visited:
+            continue
+        visited.add(exported)
+        assert exported.resolve().is_relative_to(package)
+        if original.suffix != '.md':
+            assert exported.read_bytes() == original.read_bytes()
+            continue
+        original_text, exported_text = original.read_text(), exported.read_text()
+        normalize = lambda match: match[1] + 'RESOURCE' + match[3]
+        assert LINK.sub(normalize, original_text) == LINK.sub(normalize, exported_text)
+        for before, after in zip(LINK.finditer(original_text), LINK.finditer(exported_text), strict=True):
+            original_url, exported_url = urlsplit(before[2]), urlsplit(after[2])
+            if original_url.scheme or original_url.netloc or not original_url.path:
+                assert before[2] == after[2]
+                continue
+            assert original_url.fragment == exported_url.fragment
+            pending.append(((original.parent / original_url.path).resolve(),
+                            (exported.parent / exported_url.path).resolve()))
+    assert visited | {metadata, package / 'LICENSE'} == {p for p in package.rglob('*') if p.is_file()}
     scripts = {p.name for p in package.rglob("*.py")}
     expected_scripts = {"draw_blocking.py", "storyboard_sheets.py", "select_video_optimizer.py", "attach_shot_draft.py"} if name == "storyboard" else set()
     assert scripts == expected_scripts
     assert list(tmp_path.iterdir()) == [package]
+
+
+def test_export_follows_nested_dependencies_cycles_and_preserves_web_links(tmp_path, monkeypatch):
+    import scripts.export_skill as exporter
+    root = tmp_path / 'skills'
+    folder = root / 'novelvids-example'
+    (folder / 'references').mkdir(parents=True)
+    (folder / 'agents').mkdir()
+    (folder / 'agents/openai.yaml').write_text('interface: {}\n')
+    (folder / 'SKILL.md').write_text('[Guide](references/guide.md)\n')
+    (folder / 'references/guide.md').write_text('[Nested](nested.md#details)\n[Web](https://example.com/docs)\n')
+    (folder / 'references/nested.md').write_text('[Back](guide.md)\n[Data](data.json)\n')
+    (folder / 'references/data.json').write_text('{"kept": true}\n')
+    monkeypatch.setattr(exporter, 'SKILLS', root)
+    package = exporter.export_skill(folder.name, tmp_path / 'output')
+    assert (package / 'references/guide.md').read_text() == '[Nested](nested.md#details)\n[Web](https://example.com/docs)\n'
+    assert (package / 'references/nested.md').read_text() == '[Back](guide.md)\n[Data](data.json)\n'
+    assert (package / 'references/data.json').read_bytes() == (folder / 'references/data.json').read_bytes()
+
+
+@pytest.mark.parametrize('case', ['outside', 'conflicting_name'])
+def test_nested_export_rejects_outside_files_and_conflicting_resources(tmp_path, monkeypatch, case):
+    import scripts.export_skill as exporter
+    root = tmp_path / 'skills'
+    folder = root / 'novelvids-example'
+    (folder / 'references').mkdir(parents=True)
+    (folder / 'agents').mkdir()
+    (folder / 'agents/openai.yaml').write_text('interface: {}\n')
+    (folder / 'SKILL.md').write_text('[Guide](references/guide.md)\n')
+    if case == 'outside':
+        (tmp_path / 'private.json').write_text('{}')
+        guide = '[Outside](../../../private.json)\n'
+        error = 'Unsupported skill reference'
+    else:
+        other = root / 'novelvids-other/references'
+        other.mkdir(parents=True)
+        (other / 'data.json').write_text('{"other": true}')
+        (folder / 'references/data.json').write_text('{}')
+        guide = '[Local](data.json)\n[Other](../../novelvids-other/references/data.json)\n'
+        error = 'Conflicting skill references'
+    (folder / 'references/guide.md').write_text(guide)
+    monkeypatch.setattr(exporter, 'SKILLS', root)
+    destination = tmp_path / 'output'
+    with pytest.raises(ValueError, match=error):
+        exporter.export_skill(folder.name, destination)
+    assert not destination.exists()
 
 
 def test_export_keeps_unrelated_and_preexisting_skills(tmp_path):
@@ -56,7 +120,9 @@ def test_saved_rules_come_from_the_same_files_as_the_standalone_package(tmp_path
     package = export_skill("novelvids-storyboard", tmp_path)
     snapshot = SkillSnapshot.model_validate(snapshot_skills())
     for key in ("storyboard", "storyboard_contract", "styles", "strategies"):
-        assert snapshot.read(key) == (package / "references" / Path(FILES[key]).name).read_text()
+        normalize = lambda match: match[1] + 'RESOURCE' + match[3]
+        assert LINK.sub(normalize, snapshot.read(key)) == LINK.sub(normalize,
+            (package / "references" / Path(FILES[key]).name).read_text())
     templates = json.loads(snapshot.read("storyboard_templates"))
     templates["contract"] = "FROZEN CONTRACT LABEL"
     snapshot.contents["storyboard_templates"] = json.dumps(templates)

@@ -45,3 +45,9 @@ npx --yes skills@latest add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-
 项目模型 `wan_3`（`wan3.0-video`）使用 `wan3-pe`。把所取得的 `wan3-pe/SKILL.md` 放入作品的 `.agents/skills/wan3-pe/` 即可安装。
 
 按原稿语言交付五段式请求，分别整理核心任务、剧情、声音、镜头与约束、负面提示。沿用确认稿的动作和对白，按本次上传顺序在图片、视频、音频三类中分别编号，说明每份参考素材在何处生效。画幅与总时长作为生成参数单独传递。
+
+## 配套映射与工具
+
+- [模型与专项技能映射](video_prompt_models.json)
+- [选择专项技能](../../scripts/select_video_optimizer.py)
+- [按稳定镜头 ID 与通用底稿挂载专项稿](../../scripts/attach_shot_draft.py)

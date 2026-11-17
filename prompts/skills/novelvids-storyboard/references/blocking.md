@@ -17,3 +17,8 @@
 - 运行 `python3 scripts/draw_blocking.py shot.json shot.svg --layout layouts/<场景形态ID>.json`。同一底图可配不同镜头的覆盖层。需要空场景底图的独立图片时，给该命令加 `--base-only`。交给猫影时将相同底图对象嵌入 `structure.blocking_map.layout`，随本镜交付合成图，媒体角色为 blocking。
 
 视频生成时，将合成图作为本镜图片输入，按本次提交的图片顺序引用。提示词交代观众从哪个机位看到谁、从画面哪侧进出、切点前后动作如何接续。坐标留在蓝图数据里。故事版给构图与表演节奏，定位图给空间关系；成片按作品选定的风格呈现。
+
+## 配套模板与工具
+
+- [定位图在视频提示词中的引用](blocking_prompt.json)
+- [定位线稿绘制工具](../../scripts/draw_blocking.py)
