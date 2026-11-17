@@ -136,3 +136,16 @@ it('restores complete adjacent placeholders through editor undo even after the c
   expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['{{input}}{{language}}\n'])
   wrapper.unmount()
 })
+
+it('edits code files as raw text without changing non-breaking spaces, line endings, or template syntax', async () => {
+  mockSourceEditor()
+  const wrapper = mount(SkillMarkdownEditor, { props: { modelValue: 'a\u00a0b\r\n{{template}}\r\n', markdown: false, label: 'scripts/check.py' } })
+  await flushPromises()
+  const field = wrapper.get('textarea')
+  field.element.value = 'a\u00a0b\n{{changed}}\n# edited'
+  await field.trigger('input')
+  expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['a\u00a0b\r\n{{changed}}\r\n# edited'])
+  expect(field.attributes('aria-label')).toBe('scripts/check.py')
+  expect(wrapper.find('.placeholder-tools').exists()).toBe(false)
+  wrapper.unmount()
+})

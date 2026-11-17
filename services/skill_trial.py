@@ -47,7 +47,14 @@ async def prepare_trial(body: SkillTrialInput, ctx):
     language = await generation_language()
     specifications = json.loads(read_skill('asset_contract'))[language] if body.skill.task == 'assets' else None
     contract = output_contract(body.skill.task, asset_specifications=specifications)
-    instructions, content = render_text_task(language=language, skill=body.skill.model_dump(),
+    skill = body.skill.model_dump()
+    if body.skill.files is not None:
+        from services.user_skills import package_from_input
+        try:
+            skill.update(package_from_input(body.skill).as_method())
+        except ValueError as error:
+            raise HTTPException(400, localized_message(str(error))) from None
+    instructions, content = render_text_task(language=language, skill=skill,
         context={'input': body.input, 'episode_pacing': body.episode_pacing.model_dump()})
     context_size = len(instructions) + len(content) + len(json.dumps(contract, ensure_ascii=False))
     if chosen.max_context_characters and context_size > chosen.max_context_characters:

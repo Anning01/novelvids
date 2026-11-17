@@ -8,7 +8,7 @@ import type { TextTask } from './skillsApi'
 import { loadVditor } from './vditorLoader'
 import { atomicSelection, placeholderRanges, splitsPlaceholder, type TextSelection } from './placeholderEditing'
 
-const props = defineProps<{ modelValue: string; disabled?: boolean; task?: TextTask }>()
+const props = withDefaults(defineProps<{ modelValue: string; disabled?: boolean; task?: TextTask; markdown?: boolean; label?: string }>(), { markdown: true })
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const host = ref<HTMLElement>()
 const surface = ref<HTMLElement>()
@@ -24,12 +24,30 @@ const variables = computed(() => [
 let instance: Vditor | undefined
 let disposed = false
 let renderedValue = ''
-let previousText = props.modelValue
+const lineEnding = props.modelValue.match(/\r\n|\r|\n/)?.[0] ?? '\n'
+let previousText = props.modelValue.replace(/\r\n|\r/g, '\n')
 let editSelection: (TextSelection & { before: string }) | undefined
 let historyEdit = false
 const theme = () => document.documentElement.dataset.appTheme === 'dark' ? 'dark' : 'classic'
 const observer = new MutationObserver(() => instance?.setTheme(theme()))
 function sourceField() { return surface.value?.querySelector<HTMLTextAreaElement>('textarea') }
+function exportedValue(value: string) {
+  if (props.markdown) return value
+  const raw = sourceField()?.value ?? value
+  return lineEnding === '\n' ? raw : raw.replace(/\n/g, lineEnding)
+}
+function paste(event: ClipboardEvent) {
+  if (props.markdown) { protectSelection(); return }
+  if (!(event.target instanceof HTMLTextAreaElement) || !event.clipboardData?.types.includes('text/plain') || props.disabled) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  const text = event.clipboardData.getData('text/plain')
+  if (instance) instance.updateValue(text)
+  else {
+    event.target.setRangeText(text, event.target.selectionStart, event.target.selectionEnd, 'end')
+    emit('update:modelValue', exportedValue(event.target.value))
+  }
+}
 function normalizeSelection(field: HTMLTextAreaElement) {
   const selection = atomicSelection(field.value, field.selectionStart, field.selectionEnd)
   if (selection.start !== field.selectionStart || selection.end !== field.selectionEnd) {
@@ -38,6 +56,7 @@ function normalizeSelection(field: HTMLTextAreaElement) {
   editSelection = { before: field.value, ...selection }
 }
 function protectSelection() {
+  if (!props.markdown) return
   const field = sourceField()
   if (field && document.activeElement === field) normalizeSelection(field)
 }
@@ -50,6 +69,7 @@ function beforeToolbarClick(event: MouseEvent) {
   if (event.target instanceof Element && event.target.closest('button[data-type="undo"], button[data-type="redo"]')) allowHistoryEdit()
 }
 function beforeEdit(event: InputEvent) {
+  if (!props.markdown) return
   if (!(event.target instanceof HTMLTextAreaElement)) return
   if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') allowHistoryEdit()
   const field = event.target
@@ -62,16 +82,18 @@ function beforeEdit(event: InputEvent) {
   editSelection = { before: field.value, start: field.selectionStart, end: field.selectionEnd }
 }
 function keydown(event: KeyboardEvent) {
-  if (!(event.target instanceof HTMLTextAreaElement) || event.isComposing) return
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && ['z', 'y'].includes(event.key.toLowerCase())) {
-    allowHistoryEdit()
-    return
-  }
+  if (!(event.target instanceof HTMLTextAreaElement)) return
   if ((event.ctrlKey || event.metaKey) && event.altKey && /^Digit[7-9]$/.test(event.code)) {
     event.preventDefault()
     event.stopImmediatePropagation()
     return
   }
+  if (event.isComposing) return
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && ['z', 'y'].includes(event.key.toLowerCase())) {
+    allowHistoryEdit()
+    return
+  }
+  if (!props.markdown) return
   const field = event.target
   if (field.selectionStart !== field.selectionEnd) { normalizeSelection(field); return }
   const backward = event.key === 'ArrowLeft' || event.key === 'Backspace'
@@ -91,7 +113,7 @@ function keydown(event: KeyboardEvent) {
 }
 function acceptText(field: HTMLTextAreaElement): boolean {
   const selection = editSelection?.before === previousText ? editSelection : undefined
-  if (!historyEdit && splitsPlaceholder(previousText, field.value, selection)) {
+  if (props.markdown && !historyEdit && splitsPlaceholder(previousText, field.value, selection)) {
     const position = Math.min(selection?.start ?? field.selectionStart, previousText.length)
     field.value = previousText
     const safe = atomicSelection(previousText, position, position)
@@ -126,7 +148,7 @@ function labelEditor() {
   host.value?.querySelectorAll('[contenteditable="true"], textarea').forEach(element => {
     element.setAttribute('role', 'textbox')
     element.setAttribute('aria-multiline', 'true')
-    element.setAttribute('aria-label', tr('创作方法'))
+    element.setAttribute('aria-label', props.label ?? tr('创作方法'))
   })
 }
 
@@ -140,21 +162,23 @@ onMounted(async () => {
       lang: language, cdn: '/vditor', mode: 'sv', theme: theme(), value: props.modelValue,
       i18n: { ...window.VditorI18n, splitView: tr('Markdown 源码') },
       cache: { enable: false }, height: '100%', minHeight: 0,
-      toolbar: ['headings', 'bold', 'list', 'link', 'code', '|', 'undo', 'redo'],
+      toolbar: props.markdown ? ['headings', 'bold', 'list', 'link', 'code', '|', 'undo', 'redo'] : ['undo', 'redo'],
       toolbarConfig: { pin: false }, resize: { enable: false },
       preview: { mode: 'editor', hljs: { enable: false }, actions: [], markdown: { codeBlockPreview: false, mathBlockPreview: false, sanitize: true } },
       hint: { emoji: {} },
       after: () => {
         if (disposed) { instance?.destroy(); return }
-        renderedValue = instance?.getValue() ?? ''
+        renderedValue = exportedValue(instance?.getValue() ?? '')
         previousText = sourceField()?.value ?? props.modelValue
         loading.value = false
         if (props.disabled) instance?.disabled()
         labelEditor()
       },
       input: value => {
+        if (disposed) return
         const field = sourceField()
         if (field && !acceptText(field)) return
+        value = exportedValue(value)
         if (loading.value || value === renderedValue) return
         renderedValue = value
         emit('update:modelValue', value)
@@ -164,12 +188,12 @@ onMounted(async () => {
   } catch { failed.value = true; loading.value = false }
 })
 watch(() => props.modelValue, value => {
-  if (!instance || loading.value) { previousText = value; editSelection = undefined; return }
+  if (!instance || loading.value) { previousText = value.replace(/\r\n|\r/g, '\n'); editSelection = undefined; return }
   if (value === renderedValue) return
   instance.setValue(value)
   previousText = sourceField()?.value ?? value
   editSelection = undefined
-  renderedValue = instance.getValue()
+  renderedValue = exportedValue(instance.getValue())
 })
 watch(() => props.disabled, disabled => {
   if (!loading.value) { if (disabled) instance?.disabled(); else instance?.enable() }
@@ -178,14 +202,14 @@ onBeforeUnmount(() => { disposed = true; observer.disconnect(); document.removeE
 </script>
 
 <template>
-  <div ref="surface" class="skill-markdown" @beforeinput.capture="beforeEdit" @input.capture="checkInput" @keydown.capture="keydown" @click.capture="beforeToolbarClick" @select.capture="protectSelection" @pointerup="protectSelection" @paste.capture="protectSelection" @cut.capture="protectSelection">
+  <div ref="surface" class="skill-markdown" @beforeinput.capture="beforeEdit" @input.capture="checkInput" @keydown.capture="keydown" @click.capture="beforeToolbarClick" @select.capture="protectSelection" @pointerup="protectSelection" @paste.capture="paste" @cut.capture="protectSelection">
     <p v-if="loading" role="status">{{ tr('正在加载编辑器…') }}</p>
     <template v-if="failed">
       <p role="status">{{ tr('编辑器暂不可用，可继续编辑 Markdown 源码') }}</p>
-      <textarea :value="modelValue" name="skill-instructions" :aria-label="tr('创作方法')" :disabled="disabled" maxlength="32000" @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)" />
+      <textarea :value="modelValue.replace(/\r\n|\r/g, '\n')" name="skill-instructions" :aria-label="label ?? tr('创作方法')" :disabled="disabled" @input="emit('update:modelValue', exportedValue(($event.target as HTMLTextAreaElement).value))" />
     </template>
     <div v-show="!failed" ref="host" class="markdown-host" @focusin="labelEditor" />
-    <div class="placeholder-tools">
+    <div v-if="markdown" class="placeholder-tools">
       <p>{{ tr('可直接编辑 Markdown，也可点击下方变量插入正文末尾。变量只能整体移除，不能修改名称。') }}</p>
       <div class="placeholder-buttons" role="group" :aria-label="tr('插入变量')">
         <AppButton v-for="variable in variables" :key="variable.key" type="button" variant="secondary" size="sm" :disabled="disabled || loading" :title="`{{${variable.key}}}`" @click="insertVariable(variable.key)"><Plus :size="14" aria-hidden="true" />{{ variable.label }}</AppButton>
@@ -214,4 +238,5 @@ textarea { flex: 1; resize: none; min-block-size: 240px; padding: 16px; color: v
 .skill-markdown :deep(.vditor-toolbar) { padding-inline: 10px; border-block-end: 1px solid var(--app-border); }
 .skill-markdown :deep(button:focus-visible), textarea:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
 .skill-markdown :deep(.vditor-reset pre > code) { color: var(--app-text); background: var(--app-surface-muted); }
+@media (pointer: coarse) { .skill-markdown :deep(.vditor-sv), textarea { font-size: 16px; } }
 </style>

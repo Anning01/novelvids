@@ -139,5 +139,6 @@ async def test_postgres_upgrade_uses_safe_additive_statements(monkeypatch):
     await ensure_text_task_schema()
     sql = '\n'.join(call.args[0] for call in connection.execute_script.await_args_list)
     assert 'ADD COLUMN IF NOT EXISTS supports_strict_output BOOL NOT NULL DEFAULT FALSE' in sql
+    assert "ADD COLUMN IF NOT EXISTS files JSONB NOT NULL DEFAULT '[]'::jsonb" in sql
     assert 'DROP' not in sql and 'DELETE' not in sql
     assert all(call.kwargs['safe'] for call in generator._get_table_sql.call_args_list)

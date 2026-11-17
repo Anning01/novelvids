@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
-import { LayoutGrid, List, Plus, Search, SlidersHorizontal } from 'lucide-vue-next'
+import { LayoutGrid, List, Plus, Search, SlidersHorizontal, Upload } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import SkillEditorDialog from '@/features/creation-agent/SkillEditorDialog.vue'
 import SkillRowActions from '@/features/creation-agent/SkillRowActions.vue'
-import { skillsApi, type CreativeSkill, type TextTask } from '@/features/creation-agent/skillsApi'
+import { skillsApi, type CreativeSkill, type SkillPackageDraft, type TextTask } from '@/features/creation-agent/skillsApi'
 
 const id = useId()
 const tasks: { value: TextTask; label: string }[] = [{ value: 'story', label: '故事分析' }, { value: 'screenplay', label: '剧本改编' }, { value: 'assets', label: '资产提取' }, { value: 'storyboard', label: '分镜生成' }]
@@ -22,6 +22,9 @@ const source = ref('all')
 const view = ref<'table' | 'cards'>('table')
 const editing = ref(false)
 const selected = ref<CreativeSkill>()
+const imported = ref<SkillPackageDraft>()
+const archiveInput = ref<HTMLInputElement>()
+const importing = ref(false)
 let loadVersion = 0
 const filters = computed(() => [{ value: 'all', label: tr('全部来源') }, { value: 'builtin', label: tr('内置技能') }, { value: 'mine', label: tr('我的技能') }])
 const visible = computed(() => skills.value.filter(skill =>
@@ -39,7 +42,20 @@ async function load() {
   finally { if (version === loadVersion) loading.value = false }
 }
 watch(task, () => { status.value = ''; search.value = ''; void load() }, { immediate: true })
-function edit(skill?: CreativeSkill) { selected.value = skill; editing.value = true; status.value = '' }
+function edit(skill?: CreativeSkill) { selected.value = skill; imported.value = undefined; editing.value = true; status.value = '' }
+function closeEditor() { editing.value = false; imported.value = undefined }
+async function importArchive(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importing.value = true; error.value = ''
+  try {
+    imported.value = (await skillsApi.importArchive(task.value, file)).data
+    selected.value = undefined; editing.value = true
+  } catch (caught) { error.value = (caught as Error).message }
+  finally { importing.value = false }
+}
 function saved(skill: CreativeSkill) {
   skills.value = [...skills.value.filter(item => item.id !== skill.id), skill]
   status.value = tr('技能已保存，下一次生成时生效')
@@ -52,9 +68,8 @@ async function setDefault(skill: CreativeSkill) {
 }
 async function toggle(skill: CreativeSkill) {
   busy.value = true; error.value = ''
-  const { id: skillId, builtin: _builtin, version, ...body } = skill
   try {
-    const { data } = await skillsApi.update(skillId, { ...body, is_active: !skill.is_active }, version ?? 1)
+    const { data } = await skillsApi.setActive(skill.id, !skill.is_active, skill.version ?? 1)
     skills.value = skills.value.map(item => item.id === data.id ? data : item)
     if (!data.is_active && defaultId.value === data.id) defaultId.value = 0
     status.value = data.is_active ? tr('技能已启用') : tr('技能已停用')
@@ -67,10 +82,14 @@ async function toggle(skill: CreativeSkill) {
   <main class="skills-page">
     <header class="skills-page-header">
       <div><h1>{{ tr('技能管理') }}</h1><p>{{ tr('整理你的创作方法，调试后用于每一次生成。') }}</p></div>
-      <AppButton type="button" variant="primary" aria-haspopup="dialog" @click="edit()"><Plus :size="17" />{{ tr('新建技能') }}</AppButton>
+      <div class="page-actions">
+        <AppButton type="button" variant="secondary" :loading="importing" :disabled="busy" @click="archiveInput?.click()"><Upload :size="16" />{{ tr('导入 ZIP') }}</AppButton>
+        <input ref="archiveInput" type="file" accept=".zip,.skill,application/zip" hidden :aria-label="tr('导入技能压缩包')" @change="importArchive" />
+        <AppButton type="button" variant="primary" aria-haspopup="dialog" :disabled="importing" @click="edit()"><Plus :size="17" />{{ tr('新建技能') }}</AppButton>
+      </div>
     </header>
     <div class="task-tabs" role="group" :aria-label="tr('技能分类')">
-      <button v-for="item in tasks" :key="item.value" type="button" :aria-pressed="task === item.value" :disabled="busy" @click="task = item.value">{{ tr(item.label) }}</button>
+      <button v-for="item in tasks" :key="item.value" type="button" :aria-pressed="task === item.value" :disabled="busy || importing" @click="task = item.value">{{ tr(item.label) }}</button>
     </div>
     <section class="skills-library" :aria-labelledby="`${id}-list`">
       <div class="library-toolbar">
@@ -107,13 +126,15 @@ async function toggle(skill: CreativeSkill) {
         </li>
       </ul>
     </section>
-    <SkillEditorDialog v-if="editing" :task="task" :source="selected" @close="editing = false" @saved="saved" />
+    <SkillEditorDialog v-if="editing" :task="task" :source="selected" :initial-draft="imported" @close="closeEditor" @saved="saved" />
   </main>
 </template>
 
 <style scoped>
 .skills-page { box-sizing: border-box; max-inline-size: 1480px; margin-inline: auto; padding: 40px clamp(20px, 4vw, 56px); color: var(--app-text); }
 .skills-page-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-block-end: 32px; }
+.page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: end; }
+.page-actions :deep(.app-button--secondary) { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
 h1 { margin: 0; color: var(--app-text); font-size: 28px; line-height: 1.4; } p { margin: 8px 0 0; color: var(--app-text-secondary); font-size: 13px; line-height: 1.6; }
 .task-tabs { display: flex; gap: 28px; border-block-end: 1px solid var(--app-border); overflow-x: auto; margin-block-end: 28px; }
 .task-tabs button { flex: none; border: 0; border-block-end: 2px solid transparent; padding: 12px 2px 14px; color: var(--app-text-secondary); background: transparent; cursor: pointer; font: inherit; font-size: 14px; }

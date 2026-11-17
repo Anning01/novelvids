@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import SkillsPage from './SkillsPage.vue'
 import { skillsApi, type CreativeSkill } from '@/features/creation-agent/skillsApi'
 
-vi.mock('@/features/creation-agent/skillsApi', () => ({ skillsApi: { list: vi.fn(), update: vi.fn(), setDefault: vi.fn() } }))
+vi.mock('@/features/creation-agent/skillsApi', () => ({ skillsApi: { list: vi.fn(), setActive: vi.fn(), importArchive: vi.fn(), setDefault: vi.fn() } }))
 vi.mock('@/features/creation-agent/SkillEditorDialog.vue', () => ({ default: { props: ['source', 'task'], template: '<div class="editor-stub">{{ task }} {{ source?.name }}</div>' } }))
 const builtin: CreativeSkill = { id: 0, task: 'story', name: '故事分析', description: '内置方法', instructions: '# 方法', references: [], builtin: true, is_active: true }
 const custom: CreativeSkill = { ...builtin, id: 3, version: 2, name: '悬疑', description: '关注伏笔', builtin: false }
@@ -11,7 +11,7 @@ let wrapper: ReturnType<typeof mount>
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(skillsApi.list).mockResolvedValue({ code: 0, message: '', data: { items: [builtin, custom], default_skill_id: 3 } })
-  vi.mocked(skillsApi.update).mockResolvedValue({ code: 0, message: '', data: { ...custom, version: 3, is_active: false } })
+  vi.mocked(skillsApi.setActive).mockResolvedValue({ code: 0, message: '', data: { ...custom, version: 3, is_active: false } })
 })
 afterEach(() => wrapper?.unmount())
 it('searches skills and switches to cards without hiding row operations', async () => {
@@ -30,7 +30,7 @@ it('disables the default skill with version checking and restores the builtin de
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '停用')!.trigger('click')
   await flushPromises()
-  expect(skillsApi.update).toHaveBeenCalledWith(3, expect.objectContaining({ is_active: false }), 2)
+  expect(skillsApi.setActive).toHaveBeenCalledWith(3, false, 2)
   expect(wrapper.get('tbody tr:first-child .default-tag').text()).toBe('默认')
   expect(wrapper.get('[role="status"]').text()).toContain('停用')
 })

@@ -2,7 +2,6 @@
 
 import json
 import re
-from prompts.skill_pack import read_skill
 
 _PLACEHOLDER = re.compile(r'\{\{\s*([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\s*\}\}')
 
@@ -20,12 +19,17 @@ def render_skill_markdown(markdown: str, variables: dict) -> str:
     return _PLACEHOLDER.sub(replace, markdown)
 
 
-def builtin_method(task: str) -> dict:
+def builtin_method(task: str, *, include_files=True) -> dict:
     names = {'story': '故事分析', 'screenplay': '剧本改编', 'assets': '资产提取', 'storyboard': '分镜生成'}
-    resource = f'strict_{task}' if task in {'assets', 'storyboard'} else task
-    return {'id': 0, 'task': task, 'name': names[task],
-            'description': '内置创作方法', 'instructions': read_skill(resource), 'references': [],
+    result = {'id': 0, 'task': task, 'name': names[task],
+            'description': '内置创作方法', 'instructions': '', 'references': [],
             'is_active': True, 'builtin': True}
+    if not include_files:
+        return {**result, 'is_summary': True}
+    from prompts.skill_packages import builtin_package
+    from utils.skill_package import PACKAGE_LIMITS
+    package = builtin_package(task)
+    return {**result, **package.as_method(), 'files': package.files, 'limits': PACKAGE_LIMITS}
 
 
 def render_text_task(*, language: str, skill: dict, context: dict, output_schema: dict | None = None) -> tuple[str, str]:
@@ -41,9 +45,13 @@ def render_text_task(*, language: str, skill: dict, context: dict, output_schema
     )
     if output_schema is not None:
         instructions += '\n只返回 JSON 对象，完整遵循以下字段定义，不输出 Markdown。\noutput_schema=' + json.dumps(output_schema, ensure_ascii=False)
-    return instructions, json.dumps({'creative_method': {
+    method = {
         'instructions': render_skill_markdown(skill['instructions'], variables),
-        'references': [{**reference, 'content': render_skill_markdown(reference['content'], variables)} for reference in skill['references']]},
+        'references': [{**reference, 'content': render_skill_markdown(reference['content'], variables)
+            if reference.get('render_placeholders', True) else reference['content']} for reference in skill['references']]}
+    if 'file_manifest' in skill:
+        method['files'] = skill['file_manifest']
+    return instructions, json.dumps({'creative_method': method,
         'task_context': context}, ensure_ascii=False)
 
 

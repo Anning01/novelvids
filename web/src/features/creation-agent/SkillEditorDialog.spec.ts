@@ -2,8 +2,9 @@ import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import SkillEditorDialog from './SkillEditorDialog.vue'
 import { runSkillTrial, skillsApi, type CreativeSkill } from './skillsApi'
+import { folderSkill, packageLimits, skillEntry } from '@/test/skillPackageFixture'
 
-vi.mock('./skillsApi', () => ({ skillsApi: { models: vi.fn(), update: vi.fn(), create: vi.fn() }, runSkillTrial: vi.fn() }))
+vi.mock('./skillsApi', () => ({ skillsApi: { models: vi.fn(), detail: vi.fn(), packageFormat: vi.fn(), update: vi.fn(), create: vi.fn() }, runSkillTrial: vi.fn() }))
 vi.mock('./SkillMarkdownEditor.vue', () => ({ default: { props: ['modelValue', 'disabled'], emits: ['update:modelValue'], template: '<textarea name="skill-instructions" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' } }))
 const source: CreativeSkill = { id: 3, version: 4, name: '我的方法', task: 'story', description: '', instructions: '# 原文\n{{input}}', references: [], is_active: true, builtin: false }
 let wrapper: ReturnType<typeof mount>
@@ -11,13 +12,15 @@ const modal = () => new DOMWrapper(document.body).get('dialog[open]')
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(skillsApi.models).mockResolvedValue({ code: 0, message: '', data: [{ id: 9, name: '测试模型', model: 'model' }] })
+  vi.mocked(skillsApi.detail).mockImplementation(async (_id, task) => ({ code: 0, message: '', data: folderSkill({ ...source, task }) }))
+  vi.mocked(skillsApi.packageFormat).mockResolvedValue({ code: 0, message: '', data: { files: [{ path: 'SKILL.md', content: skillEntry(''), encoding: 'utf-8' }], limits: packageLimits } })
 })
 afterEach(() => wrapper?.unmount())
 
 it('tests unsaved Markdown without saving and selects model preferences within the modal', async () => {
   wrapper = mount(SkillEditorDialog, { props: { task: 'story', source } })
   await flushPromises()
-  await modal().get('textarea[name="skill-instructions"]').setValue('# 未保存\n{{input}}')
+  await modal().get('textarea[name="skill-instructions"]').setValue(skillEntry('# 未保存\n{{input}}'))
   await modal().get('.trial-input').setValue('测试素材')
   await modal().get('button[aria-label="思考模式"]').trigger('click')
   const menu = new DOMWrapper(document.body).get('[role="listbox"][aria-label="思考模式"]')
@@ -29,7 +32,7 @@ it('tests unsaved Markdown without saving and selects model preferences within t
   })
   await modal().findAll('button').find(item => item.text() === '发送')!.trigger('click')
   await flushPromises()
-  expect(runSkillTrial).toHaveBeenCalledWith(expect.objectContaining({ skill: expect.objectContaining({ instructions: '# 未保存\n{{input}}' }), input: '测试素材', model_config_id: 9, thinking: 'enabled', reasoning_effort: null }), expect.any(AbortSignal), expect.any(Function))
+  expect(runSkillTrial).toHaveBeenCalledWith(expect.objectContaining({ skill: expect.objectContaining({ files: [expect.objectContaining({ content: skillEntry('# 未保存\n{{input}}') })] }), input: '测试素材', model_config_id: 9, thinking: 'enabled', reasoning_effort: null }), expect.any(AbortSignal), expect.any(Function))
   expect(skillsApi.update).not.toHaveBeenCalled()
   expect(modal().get('.model-output').text()).toContain('结果')
   expect(modal().get('.model-thoughts').text()).toContain('公开摘要')
@@ -56,7 +59,7 @@ it('stops an in-flight request while keeping the draft and output', async () => 
 it('focuses the safe confirmation action when closing a dirty editor and never discards on repeated Escape', async () => {
   wrapper = mount(SkillEditorDialog, { props: { task: 'story', source } })
   await flushPromises()
-  await modal().get('textarea[name="skill-instructions"]').setValue('# changed')
+  await modal().get('textarea[name="skill-instructions"]').setValue(skillEntry('# changed'))
   await modal().get('button[aria-label="关闭"]').trigger('click')
   const resume = modal().findAll('button').find(item => item.text() === '继续编辑')!
   expect(document.activeElement).toBe(resume.element)
@@ -64,7 +67,7 @@ it('focuses the safe confirmation action when closing a dirty editor and never d
   await modal().trigger('cancel')
   expect(modal().attributes('open')).toBeDefined()
   await resume.trigger('click')
-  expect(document.activeElement).toBe(modal().get('input[name="skill-name"]').element)
+  expect(document.activeElement).toBe(modal().get('textarea[name="skill-instructions"]').element)
   expect(modal().get('.discard-area').attributes('aria-hidden')).toBe('true')
 })
 
@@ -72,6 +75,7 @@ it('sends trial-only placeholder values while saving the Markdown template uncha
   const instructions = '节奏 {{episode_pacing}}；参考 {{max_seconds}} 秒'
   wrapper = mount(SkillEditorDialog, { props: { task: 'screenplay', source: { ...source, task: 'screenplay', instructions } } })
   await flushPromises()
+  await modal().get('textarea[name="skill-instructions"]').setValue(skillEntry(instructions))
   await modal().get('button[aria-label="本集节奏"]').trigger('click')
   const menu = new DOMWrapper(document.body).get('[role="listbox"][aria-label="本集节奏"]')
   await menu.findAll('[role="option"]').find(option => option.text() === '快节奏')!.trigger('click')
@@ -84,13 +88,13 @@ it('sends trial-only placeholder values while saving the Markdown template uncha
   await modal().findAll('button').find(button => button.text() === '发送')!.trigger('click')
   await flushPromises()
   expect(runSkillTrial).toHaveBeenCalledWith(expect.objectContaining({
-    skill: expect.objectContaining({ instructions }), episode_pacing: { preset: 'fast', max_seconds: 75 },
+    skill: expect.objectContaining({ files: [expect.objectContaining({ content: skillEntry(instructions) })] }), episode_pacing: { preset: 'fast', max_seconds: 75 },
   }), expect.any(AbortSignal), expect.any(Function))
   expect(skillsApi.update).not.toHaveBeenCalled()
   vi.mocked(skillsApi.update).mockImplementation(async (id, body) => ({ code: 0, message: '', data: { ...body, id, version: 5, builtin: false } }))
   await modal().get('form').trigger('submit')
   await flushPromises()
-  expect(skillsApi.update).toHaveBeenCalledWith(3, expect.objectContaining({ instructions }), 4)
+  expect(skillsApi.update).toHaveBeenCalledWith(3, expect.objectContaining({ files: [expect.objectContaining({ content: skillEntry(instructions) })] }), 4)
   expect(vi.mocked(skillsApi.update).mock.calls[0]![1]).not.toHaveProperty('episode_pacing')
 })
 

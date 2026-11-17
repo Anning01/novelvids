@@ -9,14 +9,14 @@ from prompts.text_tasks import builtin_method, render_text_task, render_skill_ma
 @pytest.mark.parametrize('pacing', [None, {'preset': 'fast', 'max_seconds': 75}, {'preset': 'slow', 'max_seconds': 180}])
 def test_screenplay_placeholders_use_episode_settings_without_changing_saved_template(language, pacing):
     skill = builtin_method('screenplay')
-    original = skill['instructions']
+    original = next(reference['content'] for reference in skill['references'] if reference['name'] == 'references/screenplay.md')
     system, user = render_text_task(language=language, skill=skill,
         context={'input': {'source_text': '渡口来了一条陌生的船。', 'episode_pacing': pacing}})
-    rendered = json.loads(user)['creative_method']['instructions']
+    rendered = next(reference['content'] for reference in json.loads(user)['creative_method']['references'] if reference['name'] == 'references/screenplay.md')
     assert '{{episode_pacing}}' in original and '{{max_seconds}}' in original
     assert '90 秒' not in original and '90s' not in original
     assert '{{episode_pacing}}' not in rendered and '{{max_seconds}}' not in rendered
-    assert skill['instructions'] == original
+    assert next(reference['content'] for reference in skill['references'] if reference['name'] == 'references/screenplay.md') == original
     assert f'language={language}' in system
     if pacing is None:
         assert '本集参考秒数：null' in rendered and '本集按剧情自然展开' in rendered

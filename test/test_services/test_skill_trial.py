@@ -168,3 +168,23 @@ async def test_trial_pacing_resolves_the_same_placeholders_as_episode_generation
     assert payload['creative_method']['instructions'] == '配置 {"preset": "fast", "max_seconds": 75}；时长 75'
     assert payload['task_context']['episode_pacing'] == {'preset': 'fast', 'max_seconds': 75}
     assert request.skill.instructions == '配置 {{episode_pacing}}；时长 {{max_seconds}}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
+async def test_folder_trial_loads_linked_markdown_in_one_strict_request(monkeypatch, text_api):
+    from test.test_services.test_strict_text_tasks import mock_model
+    from test.test_services.test_skill_packages import FILES, archive
+    from utils.skill_package import SkillPackage
+    package = SkillPackage.from_archive(archive(FILES))
+    chosen = await config(text_api=text_api)
+    requests = mock_model(monkeypatch, {'screenplay': 'test output'})
+    request = SkillTrialInput(skill=UserSkillInput(task='screenplay', files=package.files),
+        model_config_id=chosen.id, input='story', episode_pacing={'preset': 'fast', 'max_seconds': 75})
+    prepared = await skill_trial.prepare_trial(request, AuthContext(is_super_admin=True))
+    events = [event async for event in skill_trial.stream_trial(request, AuthContext(is_super_admin=True), prepared)]
+    assert any('"type": "done"' in event for event in events)
+    assert len(requests) == 1
+    wire = json.dumps(requests[0], ensure_ascii=False)
+    assert '参考 75 秒' in wire and 'references/method.md' in wire
+    assert 'assets/sample.bin' not in wire
