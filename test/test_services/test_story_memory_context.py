@@ -75,6 +75,37 @@ async def test_context_has_world_prior_state_and_current_changes_without_future_
 
 
 @pytest.mark.asyncio
+async def test_extraction_catalog_hides_future_scene_details_but_keeps_explicit_identity(story):
+    from models.asset_variant import AssetVariant
+    from services.extraction.context import ExtractionContextLoader
+    from services.extraction.messages import ExtractionMessageBuilder
+    project, chapters, _, _ = story
+    person = await Asset.create(novel=project, canonical_name='老周', asset_type=1,
+        base_traits='稳定人物外观', source_chapters=[1])
+    variant = await AssetVariant.create(asset=person, name='老周·后章外套',
+        description='后章剧情', base_traits='后章损伤细节', chapter_numbers=[3])
+    future = await Asset.create(novel=project, canonical_name='灾后废墟', asset_type=2,
+        base_traits='第三章才断裂的水管', source_chapters=[3])
+    named = await Asset.create(novel=project, canonical_name='油灯', asset_type=3,
+        description='第三章才发生的事件', base_traits='后章隐藏信息', source_chapters=[3])
+    loader = ExtractionContextLoader()
+    context = await loader.load(novel_id=project.id, chapter_id=chapters[0].id)
+    payload = ExtractionMessageBuilder().build(context)
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert '第三章才断裂的水管' not in encoded and '后章隐藏信息' not in encoded and '后章损伤细节' not in encoded
+    assert future.id not in {asset.id for asset in context.assets}
+    assert next(asset for asset in context.assets if asset.id==named.id).base_traits is None
+    projection = next(asset for asset in context.assets if asset.id==person.id)
+    assert projection.base_traits=='稳定人物外观' and projection.variants[0].id==variant.id
+    await named.refresh_from_db()
+    await future.refresh_from_db()
+    await variant.refresh_from_db()
+    assert named.base_traits=='后章隐藏信息' and future.base_traits=='第三章才断裂的水管' and variant.base_traits=='后章损伤细节'
+    later = await loader.load(novel_id=project.id, chapter_id=chapters[2].id)
+    assert next(asset for asset in later.assets if asset.id==future.id).base_traits=='第三章才断裂的水管'
+
+
+@pytest.mark.asyncio
 async def test_screenplay_uses_confirmed_predecessor_even_when_current_memory_is_stale(story):
     project, chapters, _, commits = story
     await chapter_controller.patch(chapters[1].id, ChapterPatch(screenplay='当前章正在改写。'))
