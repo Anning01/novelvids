@@ -39,4 +39,3 @@ def test_cache_usage_is_bounded_by_total_input(cached, expected):
     raw = SimpleNamespace(prompt_tokens=1000, completion_tokens=20, total_tokens=1020,
                           prompt_cache_hit_tokens=cached)
     assert completion_usage(SimpleNamespace(usage=raw))['cache_read_tokens'] == expected
-
