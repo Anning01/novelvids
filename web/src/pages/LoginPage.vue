@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import { Clapperboard, CirclePlay, QrCode, ScanLine, UsersRound } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ArrowRight, Clapperboard, CirclePlay, Eye, EyeOff, Pause, Play, QrCode, ScanLine, UsersRound } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import QilingLogin from '@/features/auth/QilingLogin.vue'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -17,31 +17,61 @@ const errorMessage = ref('')
 const motion = ref<MediaQueryList>()
 const motionAllowed = ref(false)
 const videoFailed = ref(false)
+const backgroundVideo = ref<HTMLVideoElement>()
+const videoPaused = ref(false)
 const agreed = ref(false)
 const username = ref('')
+const nickname = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const submitting = ref(false)
+const canRegister = computed(() => auth.provider === 'password' && auth.registrationEnabled)
+const isRegistration = computed(() => canRegister.value && route.path === '/register')
 
-async function passwordLogin() {
+async function submitPassword() {
   if (!username.value.trim() || !password.value || submitting.value) return
+  if (auth.legalReady && !agreed.value) return
+  if (isRegistration.value && password.value.length < 8) return
   submitting.value = true
   errorMessage.value = ''
   try {
-    await auth.login(username.value.trim(), password.value)
+    if (isRegistration.value) {
+      await auth.register({ username: username.value.trim(), nickname: nickname.value.trim(), password: password.value })
+    } else {
+      await auth.login(username.value.trim(), password.value)
+    }
     await router.replace(destination())
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : tr('登录失败，请重试')
+    errorMessage.value = error instanceof Error ? error.message : tr(isRegistration.value ? '注册失败，请重试' : '登录失败，请重试')
   } finally {
     submitting.value = false
   }
 }
 
+function switchMode(mode: 'login' | 'register') {
+  if (submitting.value) return
+  void router.replace({ path: mode === 'register' ? '/register' : '/login', query: route.query })
+}
+
+watch(isRegistration, () => {
+  password.value = ''
+  showPassword.value = false
+  errorMessage.value = ''
+})
+
 function syncMotionPreference() {
   motionAllowed.value = !motion.value?.matches
 }
 
+function toggleBackgroundVideo() {
+  videoPaused.value = !videoPaused.value
+  if (videoPaused.value) backgroundVideo.value?.pause()
+  else void backgroundVideo.value?.play().catch(() => { videoFailed.value = true })
+}
+
 onMounted(() => {
   if (auth.isLoggedIn) void router.replace(destination())
+  else if (route.path === '/register' && !canRegister.value) void router.replace({ path: '/login', query: route.query })
   motion.value = window.matchMedia?.('(prefers-reduced-motion: reduce)')
   syncMotionPreference()
   motion.value?.addEventListener('change', syncMotionPreference)
@@ -65,12 +95,13 @@ async function qilingAuthenticated(session: LoginResult) {
 </script>
 
 <template>
-  <main class="cinematic-login">
+  <main class="cinematic-login" :class="{ 'has-password-auth': auth.provider === 'password' }">
     <div class="cinematic-login__background" aria-hidden="true">
       <video
         v-if="motionAllowed && !videoFailed"
+        ref="backgroundVideo"
         :src="BACKGROUND_VIDEO"
-        autoplay muted loop playsinline preload="metadata"
+        :autoplay="!videoPaused" muted loop playsinline preload="metadata"
         @error="videoFailed = true"
       />
     </div>
@@ -110,13 +141,34 @@ async function qilingAuthenticated(session: LoginResult) {
       </div>
 
       <section class="cinematic-login__glass" :class="{ 'is-password': auth.provider === 'password' }" aria-labelledby="login-title">
-        <h2 id="login-title">{{ auth.provider === 'password' ? tr('账号登录') : tr('微信扫码登录') }}</h2>
-        <p>{{ auth.provider === 'password' ? tr('登录后继续创作') : tr('使用器灵账号进入猫影') }}</p>
-        <form v-if="auth.provider === 'password'" class="cinematic-login__password" @submit.prevent="passwordLogin">
-          <label>{{ tr('用户名') }}<input v-model="username" autocomplete="username" required :disabled="submitting" /></label>
-          <label>{{ tr('密码') }}<input v-model="password" type="password" autocomplete="current-password" required :disabled="submitting" /></label>
-          <AppButton type="submit" variant="primary" :loading="submitting" :disabled="!username.trim() || !password || (auth.legalReady && !agreed)">{{ tr('登录') }}</AppButton>
-        </form>
+        <div v-if="canRegister" class="cinematic-login__switch" role="group" :aria-label="tr('登录与注册')" :class="{ 'is-register': isRegistration }">
+          <span aria-hidden="true" />
+          <button type="button" data-mode="login" :aria-pressed="!isRegistration" :disabled="submitting" @click="switchMode('login')">{{ tr('登录') }}</button>
+          <button type="button" data-mode="register" :aria-pressed="isRegistration" :disabled="submitting" @click="switchMode('register')">{{ tr('注册') }}</button>
+        </div>
+        <h2 id="login-title">{{ auth.provider === 'password' ? tr(isRegistration ? '创建账号' : '账号登录') : tr('微信扫码登录') }}</h2>
+        <p>{{ auth.provider === 'password' ? tr(isRegistration ? '让你的第一个故事，从这里开始。' : '登录后继续创作') : tr('使用器灵账号进入猫影') }}</p>
+        <div v-if="auth.provider === 'password'" class="cinematic-login__form-body">
+          <Transition name="auth-form" mode="out-in">
+            <form :key="isRegistration ? 'register' : 'login'" class="cinematic-login__password" :aria-label="tr(isRegistration ? '注册账号' : '账号登录')" :aria-busy="submitting" @submit.prevent="submitPassword">
+              <label for="auth-username">{{ tr('用户名') }}
+                <input id="auth-username" v-model="username" name="username" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" :spellcheck="false" maxlength="100" :placeholder="tr('输入你的用户名')" required :disabled="submitting" />
+              </label>
+              <label v-if="isRegistration" for="auth-nickname">{{ tr('昵称（可选）') }}
+                <input id="auth-nickname" v-model="nickname" name="nickname" type="text" autocomplete="nickname" maxlength="100" :placeholder="tr('创作时，大家怎么称呼你')" :disabled="submitting" />
+              </label>
+              <div class="cinematic-login__password-field">
+                <label for="auth-password">{{ tr('密码') }}</label>
+                <div class="cinematic-login__password-input">
+                  <input id="auth-password" v-model="password" :name="isRegistration ? 'new-password' : 'password'" :type="showPassword ? 'text' : 'password'" :autocomplete="isRegistration ? 'new-password' : 'current-password'" :minlength="isRegistration ? 8 : undefined" maxlength="200" :placeholder="tr(isRegistration ? '设置至少 8 位密码' : '输入你的密码')" :aria-describedby="isRegistration ? 'auth-password-hint' : undefined" required :disabled="submitting" />
+                  <button type="button" :aria-label="tr(showPassword ? '隐藏密码' : '显示密码')" aria-controls="auth-password" :disabled="submitting" @click="showPassword = !showPassword"><component :is="showPassword ? EyeOff : Eye" :size="18" aria-hidden="true" /></button>
+                </div>
+                <small v-if="isRegistration" id="auth-password-hint">{{ tr('至少 8 位，建议组合使用字母、数字和符号。') }}</small>
+              </div>
+              <AppButton type="submit" variant="primary" size="lg" :loading="submitting" :disabled="!username.trim() || !password || (auth.legalReady && !agreed)">{{ tr(isRegistration ? '创建账号，开始创作' : '登录') }}<ArrowRight v-if="!submitting" :size="17" aria-hidden="true" /></AppButton>
+            </form>
+          </Transition>
+        </div>
         <template v-else-if="auth.qilingEnabled && !auth.isLoggedIn">
           <div class="cinematic-login__scan">
             <QilingLogin v-if="agreed && auth.legalReady" auto-start @authenticated="qilingAuthenticated" />
@@ -137,6 +189,9 @@ async function qilingAuthenticated(session: LoginResult) {
         <p v-if="errorMessage" role="alert">{{ errorMessage }}</p>
       </section>
     </div>
+    <button v-if="motionAllowed && !videoFailed" class="cinematic-login__motion" type="button" :aria-label="tr(videoPaused ? '播放背景动画' : '暂停背景动画')" @click="toggleBackgroundVideo">
+      <component :is="videoPaused ? Play : Pause" :size="15" aria-hidden="true" />{{ tr(videoPaused ? '播放背景动画' : '暂停背景动画') }}
+    </button>
   </main>
 </template>
 
@@ -267,6 +322,74 @@ async function qilingAuthenticated(session: LoginResult) {
 .cinematic-login__legal :is(input, a):focus-visible,
 .cinematic-login__glass :deep(.qiling-login a:focus-visible) { outline: 2px solid #d5c5ff; outline-offset: 3px; }
 
+.has-password-auth {
+  --login-panel: var(--app-surface);
+  --login-text: var(--app-text);
+  --login-muted: var(--app-text-secondary);
+  --login-line: var(--app-border);
+  --login-field: var(--app-surface-muted);
+  --login-accent: var(--app-accent);
+  --login-danger: var(--creation-danger);
+}
+.has-password-auth .cinematic-login__layout { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); gap: clamp(36px, 7vw, 112px); }
+.cinematic-login__glass.is-password {
+  --app-text-secondary: var(--login-muted);
+  --app-accent: var(--login-accent);
+  --app-danger: var(--login-danger);
+  align-content: start;
+  justify-items: stretch;
+  padding: 32px;
+  border: 1px solid var(--login-line);
+  border-radius: 16px;
+  color: var(--login-text);
+  background: var(--login-panel);
+  text-align: left;
+  text-shadow: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.is-password h2 { margin-block-start: 24px; font-size: 28px; font-weight: 680; letter-spacing: -.025em; }
+.is-password > p { margin-block: 8px 26px; line-height: 1.6; }
+.cinematic-login__switch { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px; border-radius: 11px; background: var(--login-field); }
+.cinematic-login__switch > span { position: absolute; inset-block: 4px; inset-inline-start: 4px; inline-size: calc(50% - 4px); border-radius: 8px; background: var(--login-panel); box-shadow: 0 2px 7px rgb(18 15 34 / 8%); }
+.cinematic-login__switch.is-register > span { transform: translateX(100%); }
+.cinematic-login__switch button { position: relative; min-block-size: 38px; padding: 8px 12px; border: 0; border-radius: 8px; color: var(--login-muted); background: transparent; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.cinematic-login__switch button[aria-pressed='true'] { color: var(--login-accent); }
+.cinematic-login__switch button:hover:not(:disabled) { color: var(--login-accent); }
+.cinematic-login__switch button:disabled { cursor: wait; opacity: .55; }
+.cinematic-login__form-body { min-inline-size: 0; min-block-size: 292px; }
+.is-password .cinematic-login__password { gap: 17px; }
+.is-password .cinematic-login__password label { color: var(--login-text); font-size: 13px; font-weight: 550; }
+.is-password .cinematic-login__password input { inline-size: 100%; min-block-size: 46px; padding-inline: 13px; border: 1px solid var(--login-line); border-radius: 10px; color: var(--login-text); background: var(--login-field); font: inherit; font-size: 14px; caret-color: var(--login-accent); }
+.is-password .cinematic-login__password input::placeholder { color: var(--login-muted); opacity: 1; font-size: 13px; font-weight: 400; }
+.is-password .cinematic-login__password input:hover:not(:disabled) { border-color: var(--app-border-strong); }
+.is-password .cinematic-login__password input:disabled { opacity: .65; }
+.cinematic-login__password-field { display: grid; gap: 7px; }
+.cinematic-login__password-input { position: relative; }
+.is-password .cinematic-login__password-input input { padding-inline-end: 46px; }
+.cinematic-login__password-input button { position: absolute; inset-inline-end: 4px; inset-block: 4px; display: grid; place-items: center; inline-size: 38px; padding: 0; border: 0; border-radius: 7px; color: var(--login-muted); background: transparent; cursor: pointer; }
+.cinematic-login__password-input button:hover:not(:disabled) { color: var(--login-text); background: var(--app-surface-hover); }
+.cinematic-login__password-field small { color: var(--login-muted); font-size: 11px; line-height: 1.6; font-weight: 400; }
+.is-password .cinematic-login__password :deep(.app-button--primary) { justify-content: space-between; min-block-size: 46px; margin-block-start: 4px; padding-inline: 17px; background: #6251cf; box-shadow: none; font-size: 14px; }
+.is-password .cinematic-login__password :deep(.app-button--primary:hover:not(:disabled)) { background: #5342ba; }
+.is-password .cinematic-login__legal { justify-content: start; margin-block-start: 14px; padding-block-start: 12px; border-block-start: 1px solid var(--login-line); color: var(--login-muted); line-height: 1.5; }
+.is-password .cinematic-login__legal a { color: var(--login-accent); }
+.is-password .cinematic-login__legal a:hover { color: var(--login-text); }
+.is-password .cinematic-login__legal input { accent-color: var(--login-accent); }
+.is-password :is(input, button, a):focus-visible { outline: 2px solid var(--login-accent); outline-offset: 3px; }
+.is-password > [role='alert'] { margin-block: 14px 0; color: var(--login-danger); font-size: 13px; }
+.is-password ::selection { color: var(--login-text); background: var(--app-accent-soft); }
+.cinematic-login__motion { position: absolute; inset-block-end: 20px; inset-inline-start: 5vw; display: inline-flex; align-items: center; gap: 7px; min-block-size: 36px; padding: 8px 11px; border: 1px solid rgb(255 255 255 / 25%); border-radius: 8px; color: #f6f1ff; background: rgb(14 17 27 / 82%); font: inherit; font-size: 11px; cursor: pointer; }
+.cinematic-login__motion:hover { background: #202032; }
+.cinematic-login__motion:focus-visible { outline: 2px solid #d5c5ff; outline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .cinematic-login__switch > span { transition: transform .24s cubic-bezier(.22, 1, .36, 1); }
+  .auth-form-enter-active, .auth-form-leave-active { transition: opacity .16s ease, transform .2s cubic-bezier(.22, 1, .36, 1); }
+  .auth-form-enter-from { opacity: 0; transform: translateY(7px); }
+  .auth-form-leave-to { opacity: 0; transform: translateY(-5px); }
+}
+
 @media (max-width: 740px) {
   .cinematic-login__layout { grid-template-columns: minmax(0, 400px); justify-content: center; gap: 18px; padding: 40px 22px 36px; }
   .cinematic-login__brand { font-size: clamp(27px, 6.6vw, 38px); }
@@ -277,5 +400,14 @@ async function qilingAuthenticated(session: LoginResult) {
   .cinematic-login__stages li { gap: 5px; font-size: 12px; }
   .cinematic-login__stages svg { width: 20px; height: 20px; }
   .cinematic-login__glass { padding: 16px 8px 12px; }
+  .has-password-auth .cinematic-login__layout { grid-template-columns: minmax(0, 420px); gap: 28px; padding-block: 30px; }
+  .has-password-auth .cinematic-login__description, .has-password-auth .cinematic-login__stages, .has-password-auth .cinematic-login__arc { display: none; }
+  .has-password-auth .cinematic-login__brand { font-size: 27px; }
+  .has-password-auth .cinematic-login__brand img { inline-size: 44px; }
+  .has-password-auth .cinematic-login__lead { font-size: 12px; }
+  .cinematic-login__glass.is-password { padding: 24px; }
+  .is-password .cinematic-login__password input { font-size: 16px; }
+  .cinematic-login__motion { position: relative; justify-self: center; inset: auto; margin-block: -10px 20px; }
 }
+@media (pointer: coarse) { .cinematic-login__switch button, .cinematic-login__password-input button { min-block-size: 44px; } }
 </style>

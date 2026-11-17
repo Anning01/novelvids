@@ -50,25 +50,6 @@ def test_fixed_fields_match_the_original_14_and_15_field_contracts(language):
     assert '资产输出协议' in instructions(snapshot, language, 'assets')
 
 
-@pytest.mark.parametrize('language,design', [
-    ('zh', '次卧的正面用暖橙色晨光，反向机位用窗外透入的冷蓝色月光。'),
-    ('en', 'The front view uses amber morning light. The reverse view uses cool blue moonlight.'),
-])
-def test_asset_candidates_preserve_model_wording_and_scene_colors(language, design):
-    from services.extraction.validation import AssetCandidateValidator
-
-    snapshot = synthetic_snapshot()
-    validator = AssetCandidateValidator(AssetExtractionResult)
-    draft = validator.draft_type.model_validate({
-        'persons': [], 'items': [],
-        'scenes': [{'name': '次卧', 'base_traits': design, 'variant': {
-            'name': '夜间', 'base_traits': design, 'change_reason': '切换时段',
-        }}],
-    })
-    accepted = validator.merge(draft)
-    assert not validator.issues
-    assert accepted.scenes[0].base_traits == accepted.scenes[0].variant.base_traits == design
-    assert '资产输出协议' in instructions(snapshot, language, 'assets')
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])

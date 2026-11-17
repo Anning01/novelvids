@@ -58,12 +58,16 @@ async def ensure_text_task_schema() -> None:
     from models.user_skill import UserSkill, TaskSkillPreference
     connection = Tortoise.get_connection('default')
     if connection.capabilities.dialect == 'sqlite':
+        skill_columns = await connection.execute_query_dict('PRAGMA table_info(user_skills)')
+        if skill_columns and 'files' not in {row['name'] for row in skill_columns}:
+            await connection.execute_script("ALTER TABLE user_skills ADD COLUMN files JSON NOT NULL DEFAULT '[]';")
         columns = await connection.execute_query_dict('PRAGMA table_info(ai_model_configs)')
         if columns and 'text_api' not in {row['name'] for row in columns}:
             await connection.execute_script("ALTER TABLE ai_model_configs ADD COLUMN text_api VARCHAR(24) NOT NULL DEFAULT 'chat_completions';")
         if columns and 'supports_strict_output' not in {row['name'] for row in columns}:
             await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN supports_strict_output INT NOT NULL DEFAULT 0;')
     else:
+        await connection.execute_script("ALTER TABLE IF EXISTS user_skills ADD COLUMN IF NOT EXISTS files JSONB NOT NULL DEFAULT '[]'::jsonb;")
         await connection.execute_script("ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS text_api VARCHAR(24) NOT NULL DEFAULT 'chat_completions';")
         await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_strict_output BOOL NOT NULL DEFAULT FALSE;')
     generator = connection.schema_generator(connection)
@@ -139,6 +143,17 @@ async def ensure_agent_operation_schema() -> None:
             'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS collection_lease_until TIMESTAMPTZ;'
             'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS submission_slot BOOL NOT NULL DEFAULT FALSE;'
             'ALTER TABLE chapter_exports ADD COLUMN IF NOT EXISTS source_video_id INT;')
+
+
+async def ensure_model_local_activation_schema() -> None:
+    """Preserve local model choices independently of upstream availability."""
+    connection = Tortoise.get_connection('default')
+    if connection.capabilities.dialect == 'sqlite':
+        columns = await connection.execute_query_dict('PRAGMA table_info(ai_model_configs)')
+        if columns and 'local_enabled' not in {column['name'] for column in columns}:
+            await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN local_enabled INT NOT NULL DEFAULT 1;')
+    else:
+        await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS local_enabled BOOL NOT NULL DEFAULT TRUE;')
 
 
 async def ensure_ai_model_config_schema() -> None:

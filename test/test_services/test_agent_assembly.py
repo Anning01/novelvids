@@ -1,3 +1,4 @@
+from test.text_task_fixtures import execute_storyboard
 import asyncio
 import json
 from pathlib import Path
@@ -297,7 +298,7 @@ async def test_enabled_storyboards_wait_for_an_explicit_sheet_model(monkeypatch)
     monkeypatch.setattr('services.storyboard.sheets.submit_sheet', submit)
     run = AsyncMock()
     monkeypatch.setattr(ai_task_executor, 'run', run)
-    result = await StoryboardTaskHandler().execute({'chapter_id': chapter.id, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'})
+    result = await execute_storyboard({'chapter_id': chapter.id})
     assert result['storyboard_sheet_task_ids'] == []
     submit.assert_not_awaited()
     assert result['scenes_created'] == 1
@@ -334,8 +335,7 @@ async def test_specialist_output_keeps_an_exact_restorable_generic_prompt():
     from schemas.scene import Storyboard
     novel = await Novel.create(name='两稿并存')
     chapter = await Chapter.create(novel=novel, number=1, name='测试集', content='人物看海')
-    rows = await StoryboardTaskHandler()._save_scenes(chapter.id, Storyboard(shots=[_shot(visual_prose='风吹过门口。')]), {}, 0,
-        optimized_prompts={1: {'model_type': 'test', 'prompt': 'official prompt'}})
+    rows = await StoryboardTaskHandler()._persist_scenes(await Chapter.get(id=chapter.id), Storyboard(shots=[_shot(visual_prose='风吹过门口。')]), {}, 0, optimized_prompts={1: {'model_type': 'test', 'prompt': 'official prompt'}})
     assert rows[0].prompt_params['generic_prompt'] == rows[0].prompt
     assert rows[0].prompt_params['model_optimized_prompt']['prompt'] == 'official prompt'
 
@@ -432,6 +432,7 @@ async def test_storyboard_parent_queues_sheets_on_completion_with_selected_image
     from controllers.scene import scene_controller
     from services.storyboard.handler import StoryboardTaskHandler
     conversation, _, _ = await session_fixture()
+    await AiModelConfig.filter(task_type=7).update(supports_strict_output=True)
     await Novel.filter(id=conversation.novel_id).update(storyboard_enabled=True)
     scene = await Scene.get(chapter__novel_id=conversation.novel_id)
     scene.prompt_params = _shot().model_dump()

@@ -1,3 +1,4 @@
+from test.text_task_fixtures import analysis_execution, execute_analysis
 from test.agent_stream_fixtures import streaming_model
 import json
 
@@ -76,12 +77,12 @@ async def test_extraction_context_exposes_placeholder_status_and_existing_varian
     await AssetVariant.create(asset=asset, name='成年', base_traits='成年形象',
         description='长大之后', chapter_numbers=[2], metadata={'internal_note': 'private'})
     context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
-    messages = ExtractionMessageBuilder().build(context, 'zh')
-    known = json.loads(messages[2]['content'])[0]
+    facts = ExtractionMessageBuilder().build(context)
+    known = facts['known_assets'][0]
     assert known['metadata']['analysis_source'] == 'project_analysis'
     assert known['variants'][0]['name'] == '成年'
     assert known['variants'][0]['base_traits'] == '成年形象'
-    assert 'private' not in messages[2]['content']
+    assert 'private' not in str(facts['known_assets'])
 
 
 @pytest.mark.asyncio
@@ -89,7 +90,6 @@ async def test_reanalysis_never_demotes_formal_design_or_erases_media_bindings()
     from unittest.mock import patch
     from models.config import AiModelConfig
     from services.project_analysis.handler import BookAnalysis, ProjectAnalysisTaskHandler, KeyCharacter
-    from test.test_services.test_project_analysis_handler import FakeLlmClient
 
     novel = await Novel.create(name='重新分析保留正式设计', content='第一章\n人物归来。第二章\n人物离开。')
     for number in (1, 2):
@@ -104,9 +104,9 @@ async def test_reanalysis_never_demotes_formal_design_or_erases_media_bindings()
     analysis = BookAnalysis(book_types=[], story_outline='人物归来后离开。', key_characters=[KeyCharacter(name=name, aliases=['新别名'], role='配角',
             description='新的分析概述', base_traits='新的占位', chapter_numbers=[2])
             for name in ('正式人物', '占位人物')])
-    with patch('services.project_analysis.handler.AsyncOpenAI', return_value=FakeLlmClient(analysis)):
+    with analysis_execution(analysis):
         for _ in range(2):
-            await ProjectAnalysisTaskHandler().execute({'novel_id': novel.id, 'include_cover': False})
+            await execute_analysis({'novel_id': novel.id, 'include_cover': False})
     await formal.refresh_from_db()
     await placeholder.refresh_from_db()
     assert formal.base_traits == '已确认形象'
@@ -153,28 +153,6 @@ async def test_variant_failure_rolls_back_placeholder_promotion_and_other_asset_
     assert await AssetVariant.filter(asset=asset).count() == 1
 
 
-@pytest.mark.parametrize('language', ['zh', 'en'])
-@pytest.mark.parametrize('kind,model,key', [('person', Person, 'persons'), ('scene', Scene, 'scenes'), ('item', Item, 'items')])
-def test_variant_prompts_keep_their_own_wording_and_receive_language_guidance(language, kind, model, key):
-    from prompts.skill_pack import SkillSnapshot, snapshot_skills, instructions
-    from services.extraction.validation import AssetCandidateValidator
-    from test.test_services.test_asset_design_instructions import fixed_asset_prompt
-
-    snapshot = SkillSnapshot.model_validate(snapshot_skills())
-    prompt = fixed_asset_prompt(language, kind, snapshot=snapshot)
-    candidate = AssetExtractionResult(persons=[], scenes=[], items=[]).model_copy(update={key: [
-        model(name='主体', base_traits=prompt, variant={'name': '变化形态', 'base_traits': prompt,
-            'change_reason': '章节明确外观变化'})]})
-    rendered = instructions(snapshot, language, 'assets')
-    assert f'language={language}' in rendered
-    assert snapshot.read('asset_lifecycle') in rendered
-    assert snapshot.read('asset_lifecycle') in instructions(snapshot, language, 'storyboard')
-    design = '自由视觉描述' if language == 'zh' else 'Free-form visual design.'
-    getattr(candidate, key)[0].variant.base_traits = design
-    validator = AssetCandidateValidator()
-    accepted = validator.merge(candidate)
-    assert not validator.issues
-    assert getattr(accepted, key)[0].variant.base_traits == design
 
 
 @pytest.mark.parametrize('field', ['name', 'base_traits', 'change_reason'])
@@ -206,12 +184,21 @@ async def test_planned_extraction_records_base_promotion_and_variant_for_replay_
     execution.params.update(creation_step_id=step.id, chapter_id=step.target_id)
     asset = await Asset.create(novel_id=plan.novel_id, asset_type=1, canonical_name='主资产',
         base_traits='分析占位', metadata={'analysis_source': 'project_analysis', 'voice_reference_id': 73})
-    response = result(Person, 'persons', variant={'name': '成年', 'base_traits': '成年形象',
-        'change_reason': '本章从童年回忆转入成年'})
-    extractor = SimpleNamespace(extract=AsyncMock(return_value=response), last_usage={})
-    handler = ExtractionTaskHandler(extractor_factory=lambda *args, **kwargs: extractor)
-    monkeypatch.setattr('services.extraction.handler.AsyncOpenAI', lambda **kwargs: None)
-    params = {**execution.params, 'base_url': 'https://example.invalid', 'api_key': 'test', 'model': 'test'}
+    from test.test_services.test_strict_production import asset_payload
+    from schemas.text_task_contracts import output_contract
+    from prompts.skill_pack import read_skill
+    import json
+    specs = json.loads(read_skill('asset_contract'))['zh']
+    contract = output_contract('assets', asset_specifications=specs)
+    contract['rendering'] = {'asset_specifications': specs, 'aspect_ratio': '16:9'}
+    payload = asset_payload()
+    payload['persons'][0]['name'] = '主资产'
+    payload['persons'][0]['variant'] = {'existing_variant_id': None, 'name': '成年', 'description': '',
+        'change_reason': '本章从童年回忆转入成年', 'design': '成年形象', 'visual_fields': payload['persons'][0]['visual_fields']}
+    execution.params['output_contract'] = contract
+    execution.generate_strict = AsyncMock(return_value=payload)
+    handler = ExtractionTaskHandler()
+    params = execution.params
     token = current_execution.set(execution)
     try:
         saved = await handler.execute(params)
@@ -248,127 +235,12 @@ async def test_chapter_linked_placeholders_require_design_even_when_only_mention
         source_chapters=[1], base_traits='正式设计')
     context = await ExtractionContextLoader().load(novel_id=novel.id, chapter_id=chapter.id)
     assert [asset.id for asset in context.required_design_assets] == [placeholder.id]
-    messages = ExtractionMessageBuilder().build(context, 'zh')
-    registry = json.loads(messages[2]['content'])
+    registry = ExtractionMessageBuilder().build(context)['known_assets']
     assert [asset['id'] for asset in registry if asset.get('requires_design_completion')] == [placeholder.id]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('repair_omission', [True, False])
-@pytest.mark.parametrize('language', ['zh', 'en'])
-async def test_extract_button_retries_omitted_chapter_placeholder_before_saving(repair_omission, language):
-    from unittest.mock import AsyncMock, patch
-    from pydantic_ai.models.function import FunctionModel
-    from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart
-    from controllers.chapter import chapter_controller
-    from services.ai_task_executor import ai_task_executor
-    from test.test_services.test_skill_workflow import enabled_project
-    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
-
-    novel, chapter, _ = await enabled_project()
-    from models.config import GeneralConfig
-    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
-    placeholder = await Asset.create(novel=novel, asset_type=1, canonical_name='被提及峰主',
-        source_chapters=[chapter.number], base_traits='分析生成的简略外貌',
-        metadata={'analysis_source': 'project_analysis', 'voice_reference_id': 73})
-    snapshot = synthetic_snapshot()
-    prompt = fixed_asset_prompt(language, snapshot=snapshot)
-    attempts = 0
-    def respond(messages, info):
-        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
-        nonlocal attempts
-        attempts += 1
-        assert f'language={language}' in info.instructions
-        assert 'requires_design_completion=true' in info.instructions
-        if attempts > 1:
-            assert any(isinstance(part, RetryPromptPart) for message in messages for part in message.parts)
-        persons = ([{'name': '正常人物', 'base_traits': prompt}] if attempts == 1 else
-            [{'name': placeholder.canonical_name, 'base_traits': prompt}] if repair_omission else [])
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
-            {'persons': persons, 'scenes': [], 'items': []})])
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch('services.creation_agent.handler.configured_model', return_value=model):
-        task = await chapter_controller.extract(chapter.id)
-        task.request_params['skill_snapshot'] = snapshot.model_dump()
-        await task.save()
-        await ai_task_executor.run(task)
-    await task.refresh_from_db()
-    await placeholder.refresh_from_db()
-    if repair_omission:
-        assert task.status == 3, task.error_message
-        assert attempts == 2
-        assert placeholder.base_traits == prompt
-        assert 'analysis_source' not in placeholder.metadata
-    else:
-        assert task.status == 4
-        assert attempts == 2  # The task shares one repair allowance across phases.
-        assert '被提及峰主' in task.error_message
-        assert 'asset_extraction_gateway_error' not in task.error_message
-        from models.agent_operation import AgentOperation
-        from models.creation_agent import AgentMessage
-        checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
-        assert checkpoint.result['issues']
-        assert [item['name'] for item in checkpoint.result['accepted']['persons']] == ['正常人物']
-        assert not await Asset.filter(novel=novel, canonical_name='正常人物').exists()
-        model_messages = await AgentMessage.filter(role='assistant').exclude(task_id=task.id)
-        assert any(message.native_messages for message in model_messages)
-        assert placeholder.base_traits == '分析生成的简略外貌'
-        assert placeholder.metadata['analysis_source'] == 'project_analysis'
-    assert placeholder.metadata['voice_reference_id'] == 73
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('language', ['zh', 'en'])
-async def test_asset_repair_only_returns_missing_or_invalid_designs(language):
-    from unittest.mock import AsyncMock, patch
-    from pydantic_ai.models.function import FunctionModel
-    from pydantic_ai.messages import ModelResponse, ToolCallPart, RetryPromptPart
-    from controllers.chapter import chapter_controller
-    from services.ai_task_executor import ai_task_executor
-    from models.config import GeneralConfig
-    from models.agent_operation import AgentOperation
-    from test.test_services.test_skill_workflow import enabled_project
-    from test.test_services.test_asset_design_instructions import fixed_asset_prompt, synthetic_snapshot
-
-    novel, chapter, _ = await enabled_project()
-    await GeneralConfig.update_or_create(id=1, defaults={'prompt_language': language})
-    await Asset.create(novel=novel, asset_type=1, canonical_name='缺失占位', source_chapters=[1],
-        base_traits='占位概述', metadata={'analysis_source': 'project_analysis'})
-    snapshot = synthetic_snapshot()
-    prompt = fixed_asset_prompt(language, snapshot=snapshot)
-    calls = 0
-
-    def respond(messages, info):
-        if 'characters' in info.output_tools[0].parameters_json_schema['properties']:
-            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'characters': []})])
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            persons = [{'name': '合格人物', 'base_traits': prompt}, {'name': '空提示词人物', 'base_traits': ''}]
-        else:
-            retry = next(part.content for msg in reversed(messages) for part in msg.parts if isinstance(part, RetryPromptPart))
-            assert '合格人物' in retry and '空提示词人物' in retry and '缺失占位' in retry
-            assert ('只返回' if language == 'zh' else 'Return only') in retry
-            persons = [{'name': name, 'base_traits': prompt} for name in ('空提示词人物', '缺失占位')]
-            persons.append({'name': '合格人物', 'base_traits': '不允许覆盖已通过的设计'})
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'persons': persons, 'scenes': [], 'items': []})])
-
-    model = streaming_model(respond)
-    model.client = AsyncMock()
-    with patch('services.creation_agent.handler.configured_model', return_value=model):
-        task = await chapter_controller.extract(chapter.id)
-        task.request_params['skill_snapshot'] = snapshot.model_dump()
-        await task.save()
-        await ai_task_executor.run(task)
-    await task.refresh_from_db()
-    assert task.status == 3, task.error_message
-    assert calls == 2
-    assert set(await Asset.filter(novel=novel).values_list('canonical_name', flat=True)) == {'合格人物', '空提示词人物', '缺失占位'}
-    checkpoint = await AgentOperation.get(task=task, key='candidate:assets:')
-    assert checkpoint.result['issues'] == []
-    assert len(checkpoint.result['accepted']['persons']) == 3
 
 
 @pytest.mark.asyncio

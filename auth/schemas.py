@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from config import settings
 
@@ -34,12 +34,22 @@ class ChangePasswordIn(BaseModel):
 
 
 class RegisterIn(BaseModel):
-    """经邀请链接注册新账号。"""
+    """注册普通账号；提供邀请令牌时同时加入被邀请的团队。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     username: str = Field(min_length=1, max_length=100, description="用户名")
     password: str = Field(min_length=8, max_length=200, description="密码（至少 8 位）")
     nickname: str = Field("", max_length=100, description="昵称")
-    invite_token: str = Field(min_length=1, max_length=64, description="邀请令牌")
+    invite_token: str | None = Field(None, min_length=1, max_length=64, description="可选邀请令牌")
+
+    @field_validator('username')
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('用户名不能为空')
+        return value
 
 
 class ProfileUpdateIn(BaseModel):

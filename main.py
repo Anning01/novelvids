@@ -79,6 +79,8 @@ async def _initialize_database_schema() -> None:
     await ensure_billing_integration_schema()
     from services.schema_compat import ensure_model_reasoning_schema
     await ensure_model_reasoning_schema()
+    from services.schema_compat import ensure_model_local_activation_schema
+    await ensure_model_local_activation_schema()
     # PostgreSQL emits column comments for existing tables during safe schema
     # generation. Add fields referenced by the current models first, otherwise
     # startup fails before the compatibility migrations can run.

@@ -23,7 +23,7 @@ from services.extraction.context import (
     ExtractionContext,
     NovelExtractionMetadata,
 )
-from services.extraction.extractor import AssetExtractionResult, AssetExtractor, Person
+from services.extraction.extractor import AssetExtractionResult, Person
 from services.extraction.messages import ExtractionMessageBuilder
 from services.project_analysis.handler import BookAnalysis
 from prompts.project_analysis import render_cover_prompt
@@ -70,15 +70,15 @@ def test_extraction_rules_use_one_skill_and_explicit_output_language(
     prompt_language: str,
     language_name: str,
 ):
-    from prompts.skill_pack import read_skill
+    from prompts.text_tasks import render_text_task, builtin_method
     context = ExtractionContext(novel=NovelExtractionMetadata(name="语言测试", author=None,
         description=None, tags=(), story_outline=None, project_type=None, project_setting=None), assets=(),
         chapter=ChapterExtractionInput(id=1, number=1, name="起点", content="唯一章节事实。"))
-    messages = ExtractionMessageBuilder().build(context, prompt_language)
-    assert read_skill("assets") in messages[0]["content"]
-    assert "language=" + prompt_language in messages[0]["content"]
-    assert "唯一章节事实。" not in messages[0]["content"]
-    assert json.loads(messages[-1]["content"])["content"] == "唯一章节事实。"
+    facts = ExtractionMessageBuilder().build(context)
+    system, user = render_text_task(language=prompt_language, skill=builtin_method('assets'), context=facts)
+    assert 'language=' + prompt_language in system
+    assert '唯一章节事实。' not in system
+    assert json.loads(user)['task_context']['chapter']['content'] == '唯一章节事实。'
 
 
 def test_reference_generation_preserves_prompt_language_verbatim():
@@ -146,40 +146,6 @@ def test_storyboard_prompt_uses_professional_chinese_structure():
     assert "['" not in chinese
 
 
-@pytest.mark.asyncio
-async def test_asset_extractor_forwards_prepared_messages_once():
-    messages = [
-        {"role": "system", "content": "rules-marker"},
-        {"role": "user", "content": "novel-marker"},
-        {"role": "user", "content": "assets-marker"},
-        {"role": "user", "content": "chapter-marker"},
-    ]
-    completion = SimpleNamespace()
-    mocked_completion = AsyncMock(
-        return_value=(
-            AssetExtractionResult(persons=[], scenes=[], items=[]),
-            completion,
-        )
-    )
-    with patch(
-        "services.extraction.extractor.create_json_completion",
-        mocked_completion,
-    ):
-        extractor = AssetExtractor(
-            client=SimpleNamespace(),
-            model="test-model",
-            supports_json_output=True,
-        )
-        result = await extractor.extract(messages)
-
-    assert isinstance(result, AssetExtractionResult)
-    mocked_completion.assert_awaited_once()
-    assert mocked_completion.await_args.kwargs["messages"] == messages
-    assert (
-        mocked_completion.await_args.kwargs["response_model"]
-        is AssetExtractionResult
-    )
-    assert mocked_completion.await_args.kwargs["supports_json_output"] is True
 
 
 def test_asset_extraction_result_requires_all_three_collections():
@@ -196,65 +162,12 @@ def test_asset_extraction_result_rejects_any_missing_collection(missing: str):
         AssetExtractionResult.model_validate(payload)
 
 
-def test_asset_extractor_requires_explicit_model():
-    with pytest.raises(TypeError):
-        AssetExtractor(client=SimpleNamespace())
 
 
-def _pydantic_error_with_marker(marker: str) -> ValidationError:
-    try:
-        Person.model_validate({"name": marker})
-    except ValidationError as error:
-        return error
-    raise AssertionError("expected invalid person payload")
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "error_factory",
-    [
-        lambda marker: RuntimeError(f"provider response: {marker}"),
-        lambda marker: json.JSONDecodeError(
-            f"invalid json: {marker}",
-            f"input_value={marker}",
-            0,
-        ),
-        _pydantic_error_with_marker,
-    ],
-)
-async def test_asset_extractor_maps_gateway_failures_without_leaking_content(
-    error_factory,
-):
-    marker = "secret-provider-marker"
-    mocked_completion = AsyncMock(side_effect=error_factory(marker))
-    extractor = AssetExtractor(client=SimpleNamespace(), model="test-model")
-
-    with (
-        patch(
-            "services.extraction.extractor.create_json_completion",
-            mocked_completion,
-        ),
-        pytest.raises(RuntimeError) as captured,
-    ):
-        await extractor.extract(
-            [{"role": "user", "content": f"chapter={marker}"}]
-        )
-
-    assert type(captured.value).__name__ == "AssetExtractionGatewayError"
-    assert str(captured.value) == SAFE_EXTRACTION_ERROR
-    assert marker not in repr(captured.value)
-    assert captured.value.__suppress_context__ is True
 
 
-@pytest.mark.asyncio
-async def test_asset_extractor_does_not_swallow_cancelled_error():
-    extractor = AssetExtractor(client=SimpleNamespace(), model="test-model")
-    with patch(
-        "services.extraction.extractor.create_json_completion",
-        new=AsyncMock(side_effect=asyncio.CancelledError()),
-    ):
-        with pytest.raises(asyncio.CancelledError):
-            await extractor.extract([])
 
 
 def test_new_character_requires_nonempty_visual_prompt_without_fixed_rows():

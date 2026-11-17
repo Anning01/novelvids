@@ -424,7 +424,9 @@ export interface AuthStatus {
   qiling_enabled?: boolean
   legal_ready?: boolean
   legal_missing?: string[]
+  registration_enabled?: boolean
 }
+export interface RegisterInput { username: string; password: string; nickname?: string; invite_token?: string }
 export interface LoginResult { token: string; user: AuthUser }
 export interface QilingAttempt { attempt: string; authorization_url: string; expires_in: number }
 export type QilingPoll = { status: 'completed'; session: LoginResult } | { status: 'pending' | 'expired' | 'failed' | 'bound' }

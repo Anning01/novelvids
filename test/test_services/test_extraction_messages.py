@@ -4,10 +4,7 @@ from types import MappingProxyType
 
 import pytest
 
-from services.extraction.budget import (
-    ContextBudgetExceededError,
-    ContextBudgetPolicy,
-)
+
 from services.extraction.context import (
     ChapterExtractionInput,
     ExtractionContext,
@@ -76,56 +73,17 @@ def extraction_context() -> ExtractionContext:
     )
 
 
-def _serialized_payload(content: str, boundary: str) -> object:
-    return json.loads(content)
 
 
-def test_builder_separates_rules_novel_registry_and_chapter(
-    extraction_context: ExtractionContext,
-):
-    messages = ExtractionMessageBuilder().build(
-        extraction_context,
-        prompt_language="zh",
-    )
-
-    assert [message["role"] for message in messages] == [
-        "system",
-        "user",
-        "user",
-        "user",
-    ]
-    assert "language=zh" in messages[0]["content"]
-    assert json.loads(messages[1]["content"])["name"] == "厄运之手"
-    assert "都市异能" in messages[1]["content"]
-    assert len(json.loads(messages[2]["content"])) == 3
-    assert all(
-        name in messages[2]["content"] for name in ("宫平", "办公室", "自行车")
-    )
-    assert json.loads(messages[3]["content"])["number"] == 12
-    assert extraction_context.chapter.content in messages[3]["content"]
-
-    assert extraction_context.chapter.content not in "".join(
-        message["content"] for message in messages[:3]
-    )
-    assert "https://asset.example/image.png" not in messages[2]["content"]
-    assert "严格返回以下 JSON" not in "".join(
-        message["content"] for message in messages
-    )
-    assert "```json" not in "".join(message["content"] for message in messages)
 
 
 def test_builder_serializes_only_snapshot_fields_compactly_and_omits_empty_values(
     extraction_context: ExtractionContext,
 ):
-    messages = ExtractionMessageBuilder().build(
-        extraction_context,
-        prompt_language="zh",
-    )
-
-    novel_payload = _serialized_payload(messages[1]["content"], "novel_metadata")
-    asset_payload = _serialized_payload(messages[2]["content"], "asset_registry")
-    chapter_payload = _serialized_payload(messages[3]["content"], "chapter_task")
-
+    facts = ExtractionMessageBuilder().build(extraction_context)
+    # Serialization preserves immutable snapshot values without injecting prompt rules.
+    facts = json.loads(json.dumps(facts, ensure_ascii=False))
+    novel_payload, asset_payload, chapter_payload = facts['project'], facts['known_assets'], facts['chapter']
     assert novel_payload == {
         "name": "厄运之手",
         "description": "小说元信息标记：一部都市异能故事。",
@@ -156,82 +114,12 @@ def test_builder_serializes_only_snapshot_fields_compactly_and_omits_empty_value
         "name": "能力觉醒",
         "content": extraction_context.chapter.content,
     }
-    assert '": "' not in "".join(message["content"] for message in messages[1:])
+    assert set(facts) == {"project", "known_assets", "chapter"}
 
 
-def test_asset_registry_explains_identity_matching_and_current_chapter_filtering(
-    extraction_context: ExtractionContext,
-):
-    from prompts.skill_pack import read_skill
-    messages = ExtractionMessageBuilder().build(extraction_context, prompt_language="zh")
-    assert read_skill("assets") in messages[0]["content"]
-    assert "别名" in messages[0]["content"]
-    assert "规范" not in messages[2]["content"]
 
 
 def test_compress_chapter_numbers_sorts_deduplicates_and_groups_ranges():
     assert compress_chapter_numbers((1, 2, 3, 4, 8, 10, 11)) == "1-4,8,10-11"
     assert compress_chapter_numbers((4, 2, 3, 3, 1)) == "1-4"
     assert compress_chapter_numbers(()) == ""
-
-
-def test_budget_reports_per_message_and_total_characters(
-    extraction_context: ExtractionContext,
-):
-    messages = ExtractionMessageBuilder().build(
-        extraction_context,
-        prompt_language="zh",
-    )
-
-    report = ContextBudgetPolicy(max_context_characters=100_000).validate(
-        messages,
-        asset_count=3,
-        chapter_characters=len(extraction_context.chapter.content),
-    )
-
-    assert report.message_characters == tuple(
-        len(item["content"]) for item in messages
-    )
-    assert report.total_characters == sum(len(item["content"]) for item in messages)
-
-
-def test_budget_rejects_over_limit_context_without_mutating_messages(
-    extraction_context: ExtractionContext,
-):
-    messages = ExtractionMessageBuilder().build(
-        extraction_context,
-        prompt_language="zh",
-    )
-    original_messages = deepcopy(messages)
-
-    with pytest.raises(ContextBudgetExceededError, match="资产 3 个"):
-        ContextBudgetPolicy(max_context_characters=10).validate(
-            messages,
-            asset_count=3,
-            chapter_characters=len(extraction_context.chapter.content),
-        )
-
-    assert messages == original_messages
-
-
-def test_unbounded_budget_never_guesses_a_limit_from_model_names():
-    messages = [
-        {
-            "role": "user",
-            "content": "gpt-4o-mini claude-3-5-sonnet deepseek-v3" * 10_000,
-        }
-    ]
-
-    report = ContextBudgetPolicy(max_context_characters=None).validate(
-        messages,
-        asset_count=0,
-        chapter_characters=0,
-    )
-
-    assert report.total_characters == len(messages[0]["content"])
-
-
-@pytest.mark.parametrize("limit", [0, -1])
-def test_budget_rejects_non_positive_configured_limits(limit: int):
-    with pytest.raises(ValueError, match="上下文字符上限必须大于 0"):
-        ContextBudgetPolicy(max_context_characters=limit)

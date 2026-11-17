@@ -1,8 +1,6 @@
 """Prompt templates and pure renderers for storyboard generation."""
 
-from prompts.skill_pack import render_skill, task_facts
 
-import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -14,7 +12,6 @@ from prompts.storyboard_strategies import (
 )
 from utils.prompt_language import normalize_prompt_language
 from prompts.labels import prompt_label
-from prompts.asset_introductions import asset_introduction_requirement
 
 
 class StoryboardEntity(Protocol):
@@ -259,59 +256,10 @@ def normalized_storyboard_reference_fields(
     return updates
 
 
-def _asset_payload(entities: Sequence[StoryboardEntity]) -> str:
-    payload = [
-        {
-            "asset_type": entity.asset_type,
-            "canonical_name": entity.name,
-            "aliases": entity.aliases,
-            "visual_description": entity.description,
-            "reference_syntax": f"@{{{entity.name}}}",
-            **({"chapter_numbers": entity.chapter_numbers} if getattr(entity, "chapter_numbers", []) else {}),
-        }
-        for entity in entities
-    ]
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _continuation_payload(previous_shot: StoryboardShot) -> str:
-    payload = {
-        "sequence": previous_shot.sequence,
-        "title": previous_shot.description,
-        "duration": str(previous_shot.duration),
-        "time_setting": previous_shot.time_setting,
-        "environment": previous_shot.environment,
-        "spatial_relationships": previous_shot.spatial_relationships,
-        "last_actions": previous_shot.actions[-2:],
-        "transition": previous_shot.transition,
-    }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def build_storyboard_messages(
-    long_text, entities, prompt_language="zh", *, batch_index=0, batch_count=1,
-    next_sequence=1, previous_shot=None, strategy=CINEMATIC_STORYBOARD_STRATEGY,
-    creative_constraints=(),
-    previously_seen_assets=(),
-    introduction_descriptions=None, shot_duration_range=None,
-):
-    system_prompt = render_skill("storyboard", prompt_language)
-    if batch_count == 1:
-        system_prompt += "\n" + episode_storyboard_instruction(prompt_language)
-    requirement = asset_introduction_requirement(entities, previously_seen_assets, prompt_language, introduction_descriptions)
-    if requirement:
-        system_prompt += "\n" + requirement
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": task_facts({
-            "assets": json.loads(_asset_payload(entities)),
-            **({"shot_duration_range": shot_duration_range} if shot_duration_range else {}),
-            "manuscript": long_text, "strategy": strategy.key,
-            "batch_number": batch_index + 1, "batch_count": batch_count,
-            "next_sequence": next_sequence, "constraints": list(creative_constraints),
-            "previous_shot": json.loads(_continuation_payload(previous_shot)) if previous_shot else None,
-        })},
-    ]
 
 
 def _duration_token(value: object) -> str:
@@ -606,25 +554,3 @@ def format_storyboard_prompt(
     for placeholder, voice in protected_voices:
         prompt = prompt.replace(placeholder, voice)
     return prompt
-
-
-def episode_storyboard_instruction(language: str) -> str:
-    if language == "en":
-        return ("Generate all storyboard shots for the complete episode in this response. Plan pacing, continuity "
-                "and asset introductions across all screenplay scenes together; do not stop after the first scene. "
-                "Number shots continuously from 1. Set each shot's source_scene_number to its original screenplay "
-                "scene number (use source_scene_numbers when provided); leave it null only for an unnumbered screenplay.")
-    return ("本次一次性生成完整一集的全部分镜，统一安排所有场次的节奏、接戏和资产首次出场，不要只返回第一场。"
-            "sequence 从 1 开始全局连续编号；每条分镜的 source_scene_number 填写对应的原剧本场号"
-            "（提供 source_scene_numbers 时从中选择），只有无场号剧本才留空。")
-
-
-def scene_continuity_instruction(language: str) -> str:
-    if language == "en":
-        return ("For this request, the numbered screenplay scene is the continuity group. Establish positions "
-                "in words in its first segment and leave blocking_map empty. For each subsequent segment, "
-                "describe the preceding segment's final positions as the starting positions. Supply its own "
-                "blocking diagram or leave the diagram to the separate placement step. Restart at each scene heading.")
-    return ("本次按导演稿场号接戏。每个场号的第一段用文字建立位置，blocking_map 留空；从第二段起，"
-            "以上一段结束时的人物位置、朝向、动作和道具归属为本段起点。续段定位图可在独立的空间调度步骤补全。"
-            "换场号后从第一段重新开始。")

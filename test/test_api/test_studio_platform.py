@@ -10,6 +10,119 @@ from services import studio_platform
 from services.model_resolution import resolve_scope_configs
 
 
+@pytest.mark.asyncio
+async def test_studio_owner_can_toggle_synced_models_without_exposing_keys(monkeypatch):
+    from fastapi import FastAPI
+    from auth.deps import AuthContext, get_auth_context
+    from api.config import router
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(settings, 'DEPLOYMENT_ROLE', 'studio')
+    app = FastAPI()
+    app.include_router(router, prefix='/api/config')
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(is_super_admin=True)
+    model = await AiModelConfig.create(name='Remote local switch', model='nv-901', task_type=7,
+        task_types=[7], base_url='https://platform.example/v1', api_key='private-platform-key',
+        scope=studio_platform.SYNC_SCOPE, is_active=True, supports_strict_output=True)
+    monkeypatch.setattr(studio_platform, '_read_platform_catalog', AsyncMock(return_value=(None, None, None,
+        studio_platform.Catalog(data=[{'id': 'nv-901', 'name': 'Remote', 'task_types': [7]}]))))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        off = await client.post(f'/api/config/{model.id}/deactivate')
+        assert off.status_code == 200, off.text
+        assert off.json()['data']['is_active'] is False
+        assert off.json()['data']['api_key'] is None
+        assert 'private-platform-key' not in off.text
+        await model.refresh_from_db()
+        assert not model.local_enabled
+        assert await resolve_scope_configs(7) == []
+        on = await client.post(f'/api/config/{model.id}/activate')
+        assert on.status_code == 200, on.text
+        assert on.json()['data']['is_active'] is True and on.json()['data']['api_key'] is None
+        await model.refresh_from_db()
+        assert model.local_enabled
+        assert [item.id for item in await resolve_scope_configs(7)] == [model.id]
+        for method, body in [('PATCH', {'model': 'changed'}), ('DELETE', None)]:
+            reply = await client.request(method, f'/api/config/{model.id}', json=body)
+            assert reply.status_code == 409
+        assert (await AiModelConfig.get(id=model.id)).model == 'nv-901'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', [None, {'id': 'nv-901', 'name': 'Remote', 'task_types': [7], 'is_active': False},
+    {'id': 'nv-901', 'name': 'Remote', 'task_types': [4], 'video_model_type': 'future_video'}])
+async def test_local_activation_cannot_override_remote_unavailability(monkeypatch, entry):
+    from fastapi import FastAPI
+    from unittest.mock import AsyncMock
+    from auth.deps import AuthContext, get_auth_context
+    from api.config import router
+    monkeypatch.setattr(settings, 'DEPLOYMENT_ROLE', 'studio')
+    app = FastAPI()
+    app.include_router(router, prefix='/api/config')
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(is_super_admin=True)
+    model = await AiModelConfig.create(name='Unavailable remote', model='nv-901', task_type=7,
+        base_url='https://platform.example/v1', api_key='test-only', scope=studio_platform.SYNC_SCOPE,
+        is_active=False, local_enabled=False)
+    monkeypatch.setattr(studio_platform, '_read_platform_catalog', AsyncMock(return_value=(None, None, None,
+        studio_platform.Catalog(data=[entry] if entry else []))))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.post(f'/api/config/{model.id}/activate')
+        assert response.status_code == 409
+    await model.refresh_from_db()
+    assert not model.is_active and not model.local_enabled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('super_admin,deployment_role,expected', [(False, 'studio', 403), (True, 'platform', 404)])
+async def test_synced_model_toggle_keeps_studio_super_admin_boundary(monkeypatch, super_admin, deployment_role, expected):
+    from fastapi import FastAPI
+    from auth.deps import AuthContext, get_auth_context
+    from api.config import router
+    from auth.models import Team, TeamMember, User
+    monkeypatch.setattr(settings, 'AUTH_ENABLED', True)
+    monkeypatch.setattr(settings, 'DEPLOYMENT_ROLE', deployment_role)
+    app = FastAPI()
+    app.include_router(router, prefix='/api/config')
+    user = await User.create(username='toggle-admin', is_super_admin=super_admin)
+    team = await Team.create(name='Toggle team')
+    membership = await TeamMember.create(user=user, team=team, role='admin')
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(user=user, membership=membership, is_super_admin=super_admin, team_id=team.id)
+    model = await AiModelConfig.create(name='Protected remote', model='nv-902', task_type=7,
+        base_url='https://platform.example/v1', api_key='test-only', scope=studio_platform.SYNC_SCOPE, is_active=True)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        for action in ('activate', 'deactivate'):
+            reply = await client.post(f'/api/config/{model.id}/{action}')
+            assert reply.status_code == expected
+    await model.refresh_from_db()
+    assert model.is_active
+
+
+@pytest.mark.asyncio
+async def test_sync_preserves_local_switch_through_refresh_and_key_rotation(monkeypatch):
+    from controllers.config import ai_model_config_controller
+    monkeypatch.setattr(settings, 'STUDIO_PLATFORM_BASE_URL', 'https://platform.example')
+    catalog = {'data': [{'id': 'nv-901', 'name': 'Remote', 'task_types': [7], 'strict_output': True}]}
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(studio_platform.httpx, 'AsyncClient', lambda **kwargs: original_client(
+        **kwargs, transport=httpx.MockTransport(lambda _: httpx.Response(200, json=catalog))))
+    await studio_platform.sync_platform_models('nv_initial')
+    model = await AiModelConfig.get(scope=studio_platform.SYNC_SCOPE, model='nv-901')
+    await ai_model_config_controller.deactivate(model.id)
+    catalog['data'][0]['concurrency'] = 4
+    catalog['data'].append({'id': 'nv-902', 'name': 'New remote', 'task_types': [7], 'strict_output': True})
+    await studio_platform.sync_platform_models('nv_replacement')
+    await studio_platform.sync_platform_models()
+    await model.refresh_from_db()
+    assert not model.local_enabled and not model.is_active
+    assert model.api_key == 'nv_replacement' and model.concurrency == 4
+    added = await AiModelConfig.get(scope=studio_platform.SYNC_SCOPE, model='nv-902')
+    assert added.local_enabled and added.is_active
+    assert [item.id for item in await resolve_scope_configs(7)] == [added.id]
+    await ai_model_config_controller.activate(model.id)
+    await studio_platform.sync_platform_models()
+    await model.refresh_from_db()
+    assert model.local_enabled and model.is_active
+
+
 @pytest.mark.parametrize(("configured", "expected"), [
     ("", None),
     (" https://platform.example/ ", "https://platform.example/v1"),
@@ -190,7 +303,8 @@ async def test_seedream_catalog_preserves_each_channels_local_tariff(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_unknown_catalog_types_skip_one_channel_and_preserve_local_prices(monkeypatch):
+@pytest.mark.parametrize('locally_disabled', [False, True])
+async def test_unknown_catalog_types_skip_one_channel_and_preserve_local_prices(monkeypatch, locally_disabled):
     entries = [{"id":"nv-31", "name":"Image", "task_types":[2], "image_model_type":"seedream_5_5"},
                {"id":"nv-32", "name":"Video", "task_types":[4], "video_model_type":"future_video"}]
     client = httpx.AsyncClient
@@ -199,6 +313,9 @@ async def test_unknown_catalog_types_skip_one_channel_and_preserve_local_prices(
     result = await studio_platform.sync_platform_models("nv_test")
     assert result["synced"] == 1 and result["unsupported"] == {"nv-32":"future_video"}
     row = await AiModelConfig.get(model="nv-31")
+    if locally_disabled:
+        from controllers.config import ai_model_config_controller
+        await ai_model_config_controller.deactivate(row.id)
     await AiModelConfig.filter(id=row.id).update(pricing={"type":"image","prices":{"low":.4}})
     entries[0]["image_model_type"] = "future_image"
     result = await studio_platform.sync_platform_models()
@@ -208,4 +325,4 @@ async def test_unknown_catalog_types_skip_one_channel_and_preserve_local_prices(
     entries[0]["image_model_type"] = "seedream_5_5"
     await studio_platform.sync_platform_models()
     await row.refresh_from_db()
-    assert row.is_active and row.pricing["prices"]["low"] == .4
+    assert row.is_active is (not locally_disabled) and row.pricing["prices"]["low"] == .4

@@ -1,9 +1,7 @@
-"""Prepare layered fact messages for asset extraction."""
+"""Prepare structured facts for asset extraction."""
 
-import json
 from dataclasses import asdict
 
-from prompts.extraction import render_extraction_system
 from services.extraction.context import ExtractionContext
 
 
@@ -31,20 +29,10 @@ def compress_chapter_numbers(values: tuple[int, ...]) -> str:
     return ",".join(ranges)
 
 
-def _compact_json(payload: object) -> str:
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-
-
 class ExtractionMessageBuilder:
-    """Build rule, metadata, registry, and chapter messages in fixed order."""
+    """Build project, registry and chapter facts without prompt instructions."""
 
-    def build(
-        self,
-        context: ExtractionContext,
-        prompt_language: str,
-    ) -> list[dict[str, str]]:
-        from utils.prompt_language import skill_workflow
-        system_content = "" if skill_workflow.get() else render_extraction_system(prompt_language)
+    def build(self, context: ExtractionContext) -> dict:
         novel_payload = _drop_empty(asdict(context.novel))
         required_ids = {asset.id for asset in context.required_design_assets}
         asset_payload = [
@@ -68,7 +56,4 @@ class ExtractionMessageBuilder:
             for asset in context.assets
         ]
         chapter_payload = asdict(context.chapter)
-        return [{"role": "system", "content": system_content},
-                {"role": "user", "content": _compact_json(novel_payload)},
-                {"role": "user", "content": _compact_json(asset_payload)},
-                {"role": "user", "content": _compact_json(chapter_payload)}]
+        return {'project': novel_payload, 'known_assets': asset_payload, 'chapter': chapter_payload}

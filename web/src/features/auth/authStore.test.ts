@@ -31,6 +31,33 @@ describe('useAuthStore', () => {
     expect(store.canAccessBilling).toBe(true)
   })
 
+  it('uses the server registration switch and keeps it closed for older servers', async () => {
+    stubApi()
+    const store = useAuthStore()
+    await store.bootstrap()
+    expect(store.registrationEnabled).toBe(false)
+    vi.spyOn(api, 'authStatus').mockResolvedValue({ code: 0, message: '', data: {
+      enabled: true, provider: 'password', registration_enabled: true,
+    } })
+    store.$patch({ ready: false })
+    await store.bootstrap()
+    expect(store.registrationEnabled).toBe(true)
+  })
+
+  it('registers without an invite and loads the ordinary account session', async () => {
+    stubApi()
+    const session = { token: 'new-user-session', user: { id: 1, username: 'alice', nickname: '爱丽丝', avatar_url: '', is_super_admin: false } }
+    vi.spyOn(api, 'register').mockResolvedValue({ code: 0, message: '', data: session })
+    const store = useAuthStore()
+    await store.bootstrap()
+    await store.register({ username: 'alice', password: 'password123' })
+    expect(api.register).toHaveBeenCalledWith({ username: 'alice', password: 'password123' })
+    expect(store.token).toBe(session.token)
+    expect(store.activeTeamId).toBe(1)
+    expect(store.isSuperAdmin).toBe(false)
+    expect(store.canAccessSettings).toBe(false)
+  })
+
   it('bootstrap with auth enabled and stored token loads user', async () => {
     stubApi()
     localStorage.setItem('novelvids_token', 'existing')

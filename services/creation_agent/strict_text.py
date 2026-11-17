@@ -20,6 +20,13 @@ from services.user_skills import snapshot_method
 from utils.messages import localized_message
 
 
+def require_text_execution(params):
+    execution = current_execution.get()
+    if execution is None or not params.get('output_contract'):
+        raise ValueError(localized_message('旧版文本任务已停用，请重新发起生成；历史结果和用量记录仍保留。'))
+    return execution
+
+
 async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = None) -> dict:
     chosen, limits = await require_agent(params.get('team_id'), params.get('assistant_model_config_id'), strict_output=True)
     from services.language import generation_language

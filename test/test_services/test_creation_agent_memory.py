@@ -142,7 +142,7 @@ async def test_structured_agent_reply_persists_memory_and_emits_user_facing_text
     from services.creation_agent.handler import CreationAgentTaskHandler
     from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     request = request.model_copy(update={'message': '记住，本章都使用暖光。'})
     task = await agent_sessions.submit(conversation, request, AuthContext())
     async def model(messages, info):

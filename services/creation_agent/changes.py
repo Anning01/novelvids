@@ -102,6 +102,36 @@ class CreationChanges:
             self.observed[('chapter', chapter.id)] = version
             return change
 
+    async def save_scene_prompts(self, prompts: dict[int, str], tool_call_id: str):
+        """Save complete documents atomically with conflict and undo protections."""
+        from services.creation_agent.operations import CreationOperations
+        from schemas.creation_agent import StoryboardVisualChanges
+        digest = _digest(prompts)
+        async with project_write(self.novel_id):
+            await self.authorize()
+            self.scope.writable()
+            await self.require_running()
+            prior = await PromptChange.get_or_none(task_id=self.task_id, tool_call_id=tool_call_id)
+            if prior:
+                if prior.request_hash != digest:
+                    raise PromptEditConflict('同一调用标识不能对应不同操作')
+                return prior
+            # Check every target before mutating any of them.
+            scenes = []
+            for scene_id in prompts:
+                scene = await self.checked('scene', scene_id, set())
+                await self.objects.ensure_idle('scene', scene)
+                scenes.append(scene)
+            records = []
+            for scene in scenes:
+                before = await object_state(scene)
+                params = {key: value for key, value in (scene.prompt_params or {}).items()
+                          if key not in StoryboardVisualChanges.model_fields or key == 'reference_only_types'}
+                await write_fields(self.objects, scene, {'prompt': prompts[scene.id], 'prompt_params': params})
+                records.append(await CreationOperations(self).record('scene', scene, 'update', before))
+            return await PromptChange.create(novel_id=self.novel_id, task_id=self.task_id,
+                tool_call_id=tool_call_id, request_hash=digest, changes=records)
+
     async def prepare_context(self) -> dict:
         """Resolve the frozen selection and its rules before asking the model."""
         await self.authorize()
@@ -150,7 +180,7 @@ class CreationChanges:
         self.creation_rules[chapter.id] = deepcopy(rules)
         return {'chapter_id': chapter.id, 'constraints_for_new_objects': rules}
 
-    async def read(self, targets: list[AgentTarget], *, use_cache: bool = False) -> list[dict]:
+    async def read(self, targets: list[AgentTarget], *, use_cache: bool = False, full_prompt: bool = False) -> list[dict]:
         await self.authorize()
         if not 1 <= len(targets) <= self.max_batch_size:
             raise ValueError(localized_message('读取对象数量超出本轮上限'))
@@ -158,9 +188,9 @@ class CreationChanges:
         # Otherwise a page write between two reads could authorize stale content
         # against a newer version. The lock is released before any model call.
         async with project_write(self.novel_id):
-            return await self._read_locked(targets, use_cache=use_cache)
+            return await self._read_locked(targets, use_cache=use_cache, full_prompt=full_prompt)
 
-    async def _read_locked(self, targets: list[AgentTarget], *, use_cache: bool) -> list[dict]:
+    async def _read_locked(self, targets: list[AgentTarget], *, use_cache: bool, full_prompt: bool = False) -> list[dict]:
         result = []
         for ref in targets:
             await self.creative_target(ref.kind, ref.id)
@@ -173,7 +203,7 @@ class CreationChanges:
             self.observed[key] = version
             self.rules[key] = deepcopy(rules)
             self.observed_dependencies[key] = dependency_version
-            cached = self.read_snapshots.get(key) if use_cache else None
+            cached = self.read_snapshots.get(key) if use_cache and not full_prompt else None
             if cached and cached[0] == (version, dependency_version) and cached[1] == rules:
                 data = deepcopy(cached[2])
                 data['references'] = await self.catalog.references(ref.kind, ref.id)
@@ -181,9 +211,9 @@ class CreationChanges:
                 continue
             reader = PromptEditService(novel_id=self.novel_id, task_id=self.task_id,
                 allowed_targets={key}, max_batch_size=self.max_batch_size)
-            data = (await reader.read_targets(for_model=True))[0]
+            data = (await reader.read_targets(for_model=not full_prompt))[0]
             data.pop('version', None)
-            if data.get('edit_mode') == 'legacy_prompt':
+            if full_prompt or data.get('edit_mode') == 'legacy_prompt':
                 # In legacy mode the rendered prompt is authoritative. Stale
                 # structured parameters invite two competing edit formats and
                 # duplicate a long prompt when the model retries validation.
@@ -197,7 +227,7 @@ class CreationChanges:
             if isinstance(target, Scene):
                 data['chapter_id'] = target.chapter_id
                 data['reference_only_types'] = (target.prompt_params or {}).get('reference_only_types', [])
-            if use_cache:
+            if use_cache and not full_prompt:
                 if len(self.read_snapshots) >= 100:
                     self.read_snapshots.pop(next(iter(self.read_snapshots)))
                 self.read_snapshots[key] = ((version, dependency_version), deepcopy(rules), deepcopy(data))

@@ -489,7 +489,7 @@ async def read_creation_history(ctx: RunContext[CreationAgentDeps], query: Annot
 @creation_agent.tool(sequential=True)
 async def revise_creation_object(ctx: RunContext[CreationAgentDeps], target: AgentTarget,
                                  instructions: Annotated[str, Field(min_length=1, max_length=4000)]) -> dict:
-    """整篇重写单个设定或分镜。只传对象与要求，服务端结构化生成并保存；局部编辑用 patch_creation_prompts。"""
+    """修改单个分镜提示词（包括局部调整）或重写设定。只传对象与要求；服务端读取完整内容、生成并保存，无需先读取分镜。"""
     from services.creation_agent.skill_execution import current_execution
     from services.creation_agent.object_drafts import revise_object
     execution = current_execution.get()
@@ -498,6 +498,8 @@ async def revise_creation_object(ctx: RunContext[CreationAgentDeps], target: Age
     try:
         return change_receipt(await revise_object(crud_service(ctx), execution, target, instructions, ctx.tool_call_id or ''))
     except ValueError as error:
+        if target.kind == 'scene':
+            raise RuntimeError('分镜提示词修改失败：' + str(error)) from error
         raise ModelRetry(str(error)) from None
 
 

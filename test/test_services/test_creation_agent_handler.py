@@ -50,7 +50,7 @@ def test_validation_retry_failure_has_specific_safe_guidance(reason):
 
 @pytest.mark.asyncio
 async def test_repeated_invalid_tool_arguments_report_validation_failure_without_saving(monkeypatch):
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
 
     async def model(messages, info):
@@ -76,7 +76,10 @@ async def test_repeated_invalid_tool_arguments_report_validation_failure_without
 @pytest.mark.asyncio
 @pytest.mark.parametrize('with_constraint', [False, True])
 async def test_handler_persists_events_history_and_usage_without_exposing_private_text(monkeypatch, with_constraint):
-    conversation, request, _ = await session_fixture()
+    from test.test_services.test_strict_text_tasks import mock_model
+    conversation, request, config = await session_fixture()
+    config.supports_strict_output = True
+    await config.save()
     task = await agent_sessions.submit(conversation, request, AuthContext())
     constraint = None
     if with_constraint:
@@ -84,56 +87,31 @@ async def test_handler_persists_events_history_and_usage_without_exposing_privat
         source = await AgentMessage.get(task=task, role='user')
         constraint = await CreationConstraint.create(novel_id=conversation.novel_id, source_message=source,
             fingerprint='handler-rule', content='灯光保持温暖', source_quote='更温暖', scope={'kind': 'project'})
-    calls = 0
-
-    async def model(messages, info):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            yield 'Internal planning: inspect scene_id and tool parameters.'
-            yield {0: DeltaToolCall(name='get_creation_context', json_args='{}', tool_call_id='read')}
-        elif calls == 2:
-            from pydantic_ai.messages import ToolReturnPart
-            context = next(p.content for m in messages for p in m.parts if isinstance(p, ToolReturnPart))
-            target = context['targets'][0]
-            yield {0: DeltaToolCall(name='update_storyboard_prompt', tool_call_id='write', json_args=json.dumps({'edits': [{
-                'scene_id': target['id'],
-                'legacy_prompt': '空站台中央洒下温暖的灯光。',
-            }]}, ensure_ascii=False))}
-        else:
-            yield '已调暖当前镜头。'
-
-    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=model))
+    calls = mock_model(monkeypatch, {'prompts': {str(request.targets[0].id): '空站台中央洒下温暖的灯光。'},
+        'reply': '已调暖当前镜头。'})
     executor = AiTaskExecutor()
     executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
     await executor.run(task)
     await task.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value, task.error_message
+    change = await PromptChange.get(task=task)
     if constraint:
-        from services.creation_agent.memory import creation_memory
-        from schemas.creation_agent import PromptStatusRequest
-        change = await PromptChange.get(task=task)
         assert change.changes[0]['constraint_ids'] == [constraint.id]
-        status = await creation_memory.prompt_status(conversation.novel_id,
-            PromptStatusRequest(chapter_id=request.chapter_id, targets=request.targets))
-        assert status[0]['pending_constraints'] == []
     assert request.message not in str(task.response_data)
     assistant = await AgentMessage.get(task=task, role='assistant')
-    assert assistant.content == '已调暖当前镜头。'
-    assert 'Internal planning' not in str(await agent_event_log.load(assistant))
-    assert assistant.native_messages
+    assert '已调暖当前镜头。' in assistant.content
     assert (await agent_event_log.load(assistant))[-1]['type'] == 'RUN_FINISHED'
-    assert len(assistant.usage['calls']) == 3
-    assert assistant.billing_record_id is not None
-    assert await ModelUsageRecord.filter(ai_task_id=task.id).count() == 1
+    child = await AgentMessage.filter(conversation=conversation, role='assistant').exclude(task=task).get()
+    assert child.native_messages and len(child.usage['calls']) == 1 and len(calls) == 1
+    assert child.billing_record_id is not None
+    assert await ModelUsageRecord.filter(ai_task_id=child.task_id).count() == 1
     assert await PromptChange.filter(task=task).count() == 1
-    scene = await Scene.get(id=request.targets[0].id)
-    assert '温暖的灯光' in scene.prompt
+    assert '温暖的灯光' in (await Scene.get(id=request.targets[0].id)).prompt
 
 
 @pytest.mark.asyncio
 async def test_model_error_is_redacted_and_recorded_as_missing_usage(monkeypatch):
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     async def model(messages, info):
         raise RuntimeError('secret-provider-payload')
@@ -155,7 +133,7 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
     import httpx
     from openai import AsyncOpenAI
 
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
 
     def transport(outgoing):
@@ -190,7 +168,7 @@ async def test_truncated_reasoning_reports_output_limit_and_retains_usage(monkey
 @pytest.mark.asyncio
 async def test_repeated_finalization_does_not_duplicate_billing(monkeypatch):
     from services.billing.recorder import record_ai_task_usage
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     async def model(messages, info):
         yield '请说明希望调整的画面。'
@@ -207,7 +185,7 @@ async def test_repeated_finalization_does_not_duplicate_billing(monkeypatch):
 @pytest.mark.asyncio
 async def test_stop_during_model_request_preserves_cancelled_state_and_prevents_write(monkeypatch):
     from controllers.creation_agent import creation_agent_controller
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     started, release = asyncio.Event(), asyncio.Event()
     calls = 0
@@ -237,7 +215,7 @@ async def test_stop_during_model_request_preserves_cancelled_state_and_prevents_
 
 @pytest.mark.asyncio
 async def test_boot_recovery_records_known_usage_without_replaying_model():
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     task.status = TaskStatusEnum.running.value
     await task.save()
@@ -259,7 +237,9 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
     import httpx
     from openai import AsyncOpenAI
 
-    conversation, request, _ = await session_fixture()
+    conversation, request, config = await session_fixture()
+    config.supports_strict_output = True
+    await config.save()
     task = await agent_sessions.submit(conversation, request, AuthContext())
     scene = await Scene.get(id=request.targets[0].id)
     requests = []
@@ -269,26 +249,11 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
         requests.append(payload)
         assert payload['model'] == 'test-model'
         assert payload['stream'] is True
-        assert {tool['function']['name'] for tool in payload['tools']} == {
-            'get_creation_context', 'update_image_prompt', 'update_storyboard_prompt', 'read_skill', 'get_production_context', 'final_result'}
-        assert 'expected_version' not in json.dumps(payload['tools'])
-        if len(requests) == 1:
-            delta = {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': 'wire-read', 'type': 'function', 'function': {
-                'name': 'get_creation_context', 'arguments': '{}'}}]}
-            finish = 'tool_calls'
-        elif len(requests) == 2:
-            assert any(message['role'] == 'tool' and 'targets' in message['content'] for message in payload['messages'])
-            delta = {'role': 'assistant', 'content': '正在处理内部 scene_id。', 'tool_calls': [{'index': 0, 'id': 'wire-write', 'type': 'function', 'function': {
-                'name': 'update_storyboard_prompt', 'arguments': json.dumps({'edits': [{
-                    'scene_id': scene.id, 'legacy_prompt': '空站台笼罩在暖色灯光下。',
-                }]}, ensure_ascii=False)}}]}
-            finish = 'tool_calls'
-        else:
-            assert any(message['role'] == 'tool' and 'saved' in message['content'] for message in payload['messages'])
-            if reasoning:
-                previous = next(message for message in payload['messages'] if message.get('tool_calls'))
-                assert previous['reasoning_content'] == 'synthetic-reasoning'
-            delta, finish = {'role': 'assistant', 'content': '已调暖灯光。'}, 'stop'
+        assert not payload.get('tools')
+        assert payload['response_format']['json_schema']['strict'] is True
+        delta = {'role': 'assistant', 'content': json.dumps({
+            'prompts': {str(scene.id): '空站台笼罩在暖色灯光下。'}, 'reply': '已调暖灯光。'}, ensure_ascii=False)}
+        finish = 'stop'
         base = {'id': f'completion-{len(requests)}', 'object': 'chat.completion.chunk', 'created': 1, 'model': 'test-model'}
         usage = {'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120}
         if reasoning:
@@ -311,14 +276,15 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
     await executor.run(task)
     await task.refresh_from_db(); await scene.refresh_from_db()
     assert task.status == TaskStatusEnum.completed.value, task.error_message
-    assert len(requests) == 3 and '暖色灯光' in scene.prompt
-    assistant = await AgentMessage.get(task=task, role='assistant')
-    assert assistant.usage['input_tokens'] == 300
-    assert assistant.usage['output_tokens'] == 60
+    assert len(requests) == 1 and '暖色灯光' in scene.prompt
+    parent = await AgentMessage.get(task=task, role='assistant')
+    assistant = await AgentMessage.filter(conversation=conversation, role='assistant').exclude(task=task).get()
+    assert assistant.usage['input_tokens'] == 100
+    assert assistant.usage['output_tokens'] == 20
     assert assistant.usage['missing_usage'] is False
-    assert assistant.content == '已调暖灯光。'
+    assert '已调暖灯光。' in parent.content
     assert 'synthetic-reasoning' not in assistant.content
-    thinking_events = [event for event in await agent_event_log.load(assistant) if event['type'].startswith('THINKING')]
+    thinking_events = [event for event in await agent_event_log.load(assistant) if event.get('name') == 'agent_activity' and event.get('value', {}).get('kind') == 'thinking']
     assert bool(thinking_events) is reasoning
     if reasoning:
         assert 'synthetic-reasoning' in str(thinking_events)
@@ -330,7 +296,7 @@ async def test_openai_compatible_wire_requests_and_reported_usage(monkeypatch, r
 @pytest.mark.asyncio
 async def test_failed_billing_claim_can_retry_without_losing_or_duplicating_usage(monkeypatch):
     from services.billing.recorder import record_ai_task_usage, billing_recorder
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     task.status = TaskStatusEnum.completed.value
     task.started_at = task.created_at
@@ -372,7 +338,7 @@ async def test_agent_can_read_bounded_middle_of_current_chapter_and_correct_inva
     from models.chapter import Chapter
     from pydantic_ai.messages import ToolReturnPart, RetryPromptPart
 
-    conversation, request, _ = await session_fixture()
+    conversation, request, _ = await session_fixture(write_scope='read_only')
     await Chapter.filter(id=request.chapter_id).update(content='甲' * 15000 + '她的左手受伤，仍穿灰色风衣。' + '乙' * 15000)
     task = await agent_sessions.submit(conversation, request, AuthContext())
     task.request_params['agent_configuration']['max_context_characters'] = 28000
@@ -417,7 +383,7 @@ def test_chapter_excerpt_does_not_accept_reading_without_a_selected_chapter():
 async def test_disabling_model_during_request_prevents_the_returned_tool_from_writing(monkeypatch, disabled_field):
     from models.config import AiModelConfig
     from services.creation_agent.tools import prompt_version
-    conversation, request, config = await session_fixture()
+    conversation, request, config = await session_fixture(write_scope='chapter')
     task = await agent_sessions.submit(conversation, request, AuthContext())
     scene = await Scene.get(id=request.targets[0].id)
     calls = 0

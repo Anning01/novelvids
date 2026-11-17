@@ -1,21 +1,15 @@
 """Generate a single director's screenplay from its preserved source."""
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
 
 from models.ai_task import AiTask
 from models.chapter import Chapter
 from services.ai_task_executor import BaseTaskHandler, ai_task_executor
 from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.plan_sources import fingerprint
-from services.creation_agent.skill_execution import current_execution
-from services.creation_agent.strict_text import prepare_text_workflow
+from services.creation_agent.strict_text import prepare_text_workflow, require_text_execution
 from services.creation_objects import ACTIVE_TASK_STATUSES, project_write
 from utils.enums import AiTaskTypeEnum
 from utils.messages import localized_message
-
-
-class EpisodeScript(BaseModel):
-    screenplay: str = Field(min_length=1, description="可直接交给演员和制作团队的完整分场导演剧本")
 
 
 async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = None, *, assistant_model_config_id: int | None = None, skill_id: int | None = None):
@@ -48,7 +42,7 @@ async def submit_screenplay(chapter_id, ctx, expected_screenplay: str | None = N
 
 class ScreenplayHandler(BaseTaskHandler):
     async def execute(self, params):
-        execution = current_execution.get()
+        execution = require_text_execution(params)
         chapter = await Chapter.get(id=params["chapter_id"], novel_id=params["novel_id"])
 
         def verify_source():
@@ -66,11 +60,7 @@ class ScreenplayHandler(BaseTaskHandler):
         facts = {"episode_number": chapter.number,
             "episode_name": chapter.name, "source_text": chapter.content,
             "episode_pacing": params.get("episode_pacing") or {"preset": "smart"}}
-        if params.get('output_contract'):
-            screenplay = (await execution.generate_strict(facts))['screenplay']
-        else:
-            # Already queued historical tasks retain their original contract.
-            screenplay = (await execution.generate('screenplay', facts, EpisodeScript)).screenplay
+        screenplay = (await execution.generate_strict(facts))['screenplay']
 
         async def save():
             async with project_write(chapter.novel_id) as db:

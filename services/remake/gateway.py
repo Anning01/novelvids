@@ -16,7 +16,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from services.llm.json_output import completion_usage
+from services.llm.usage import completion_usage
 
 MAX_MODEL_VIDEO_BYTES = 35_000_000
 VIDEO_INPUT_FPS = 1.0

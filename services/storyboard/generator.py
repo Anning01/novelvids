@@ -1,76 +1,13 @@
-"""Generate the complete episode together; split only at actual context/output limits."""
-
-from utils.messages import localized_message
-
-import json
-from typing import Any
-
-from openai import AsyncOpenAI
-
-from prompts.storyboard import build_storyboard_messages, visible_storyboard_assets
-from prompts.asset_introductions import asset_introduction_requirement
-from schemas.scene import SceneEntity, Storyboard
-from services.llm.json_output import (
-    JsonCompletionTruncatedError,
-    create_json_completion,
-    completion_usage,
-)
-from services.storyboard.chunking import NarrativeChunker, screenplay_sections
+"""Generate one complete episode through the platform output contract."""
+from schemas.scene import SceneEntity
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.storyboard.validation import validate_storyboard_duration
-
-
-def _message_characters(messages: list[dict[str, str]]) -> int:
-    schema_characters = len(
-        json.dumps(Storyboard.model_json_schema(), ensure_ascii=False)
-    )
-    return sum(len(message["content"]) for message in messages) + schema_characters
-
-
-def _usage_values(completion: Any) -> dict[str, int]:
-    return completion_usage(completion)
-
-
-def _aggregate_metadata(completions: list[Any]) -> dict[str, Any]:
-    last_completion = completions[-1]
-    usage_totals: dict[str, int] = {}
-    response_ids: list[str] = []
-    refusal: str | None = None
-    for completion in completions:
-        response_id = getattr(completion, "id", None)
-        if response_id:
-            response_ids.append(response_id)
-        for key, value in _usage_values(completion).items():
-            usage_totals[key] = usage_totals.get(key, 0) + value
-        choices = getattr(completion, "choices", [])
-        if choices:
-            refusal = getattr(choices[0].message, "refusal", None) or refusal
-
-    metadata: dict[str, Any] = {
-        "model": getattr(last_completion, "model", None),
-        "response_id": getattr(last_completion, "id", None),
-        "response_ids": response_ids,
-        "created": getattr(last_completion, "created", None),
-        "system_fingerprint": getattr(last_completion, "system_fingerprint", None),
-        "batch_count": len(completions),
-    }
-    if usage_totals:
-        metadata["usage"] = usage_totals
-    if refusal:
-        metadata["refusal"] = refusal
-    return metadata
+from services.creation_agent.strict_text import require_text_execution
 
 
 async def generate_storyboard(
-    client: AsyncOpenAI | None,
     long_text: str,
     entities: list[SceneEntity],
-    model: str,
-    supports_json_output: bool = False,
     prompt_language: str = "zh",
-    max_context_characters: int | None = None,
-    thinking: str | None = None,
-    max_tokens: int | None = None,
     storyboard_strategy: str | None = None,
     creative_constraints: list[dict] | None = None,
     previously_seen_assets: list[str] | None = None,
@@ -79,166 +16,33 @@ async def generate_storyboard(
     shot_duration_range: list[int] | None = None,
     episode_pacing: dict | None = None,
     episode_max_seconds: int | None = None,
-    reasoning_effort: str | None = None,
-) -> tuple[Storyboard, dict[str, Any]]:
-    """Keep the full episode in one request whenever the configured context permits."""
+):
     from services.creation_agent.skill_execution import current_execution
     execution = current_execution.get()
+    execution = require_text_execution(execution.params if execution else {})
     seen_assets = list(dict.fromkeys(previously_seen_assets or []))
-    if execution and execution.params.get('output_contract'):
-        from services.creation_agent.strict_text import verify_chapter_input
-        from services.creation_agent.step_context import step_context
-        from services.storyboard.strict_result import storyboard_result
-        await verify_chapter_input(execution.params)
-        context = await step_context(execution.params)
-        context_data = context.model_dump(mode='json') if context else None
-        if context_data:
-            asset_ids = {entity.asset_id for entity in entities}
-            variant_ids = {entity.variant_id for entity in entities if entity.variant_id is not None}
-            context_data['assets'] = [
-                {**asset, 'variants': [variant for variant in asset.get('variants', []) if variant['id'] in variant_ids]}
-                for asset in context_data['assets'] if asset['id'] in asset_ids]
-            context_data['step']['asset_ids'] = [identifier for identifier in context_data['step']['asset_ids'] if identifier in asset_ids]
-            context_data['step']['variant_ids'] = [identifier for identifier in context_data['step']['variant_ids'] if identifier in variant_ids]
-        payload = await execution.generate_strict({'chapter': long_text,
-            'entities': [entity.model_dump() for entity in entities],
-            'constraints': creative_constraints or [], 'scene_layouts': scene_layouts or {},
-            'previously_seen_assets': seen_assets, 'introduction_descriptions': introduction_descriptions or {},
-            'episode_pacing': episode_pacing or {'preset': 'smart'}, 'episode_max_seconds': episode_max_seconds,
-            'shot_duration_range': execution.params.get('shot_duration_range', shot_duration_range),
-            'generate_blocking_maps': execution.params.get('generate_blocking_maps', False),
-            **({'step_context': context_data} if context_data else {})})
-        storyboard = storyboard_result(payload, prompt_language, entities, storyboard_strategy_factory.resolve(storyboard_strategy))
-        return storyboard, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
-                            'source_scene_numbers': [shot.source_scene_number for shot in storyboard.shots]}
-    if execution:
-        from schemas.agent_workflow import SkillStoryboard, StructuredSkillStoryboard
-        modern = "storyboard_contract" in execution.snapshot.contents
-        facts = {'chapter': long_text,
-            'entities': [entity.model_dump() for entity in entities], 'strategy': storyboard_strategy,
-            'constraints': creative_constraints or []}
-        if scene_layouts:
-            facts["scene_layouts"] = scene_layouts
-        facts["episode_pacing"] = episode_pacing or {"preset": "smart"}
-        if episode_max_seconds is not None:
-            facts["episode_max_seconds"] = episode_max_seconds
-        if duration_range := execution.params.get("shot_duration_range", shot_duration_range):
-            facts["shot_duration_range"] = duration_range
-        sections = dict(screenplay_sections(long_text))
-        numbers = [number for number in sections if number is not None]
-        facts['source_scene_numbers'] = numbers
-        facts['segment'] = 'episode'
-        shots = []
-        scene_numbers = []
-        layouts = dict(scene_layouts or {})
-        generate_blocking_maps = execution.params.get('generate_blocking_maps', True)
-        if not generate_blocking_maps:
-            facts['generate_blocking_maps'] = False
-        plan_continuations = generate_blocking_maps and modern and "blocking_guide" in execution.snapshot.contents
-        from prompts.storyboard import episode_storyboard_instruction, scene_continuity_instruction
-        requirement = "\n".join(filter(None, (
-            episode_storyboard_instruction(prompt_language),
-            asset_introduction_requirement(entities, seen_assets, prompt_language, introduction_descriptions),
-            scene_continuity_instruction(prompt_language) if plan_continuations and numbers else None,
-        )))
-        batch = await execution.generate('storyboard', facts, StructuredSkillStoryboard if modern else SkillStoryboard,
-            additional_instructions=requirement, activity_label=localized_message('生成整集分镜'))
-        previous, previous_number, part = None, None, 0
-        for index, shot in enumerate(batch.shots, 1):
-            scene_number = shot.source_scene_number
-            part = part + 1 if index > 1 and scene_number == previous_number else 1
-            if plan_continuations:
-                from services.storyboard.blocking_plans import ending_state, place_shot
-                continuation = part > 1 and (scene_number is not None or shot.duration_split_part is not None)
-                if continuation:
-                    shot = shot.model_copy(update={"duration_split_part": part})
-                    shot = await place_shot(execution, shot, entities, layouts, previous,
-                        sections.get(scene_number, long_text), f'blocking:episode:{index}')
-                else:
-                    shot = shot.model_copy(update={"blocking_map": None, "duration_split_part": None})
-                previous = ending_state(shot)
-            elif not generate_blocking_maps:
-                shot = shot.model_copy(update={'blocking_map': None, 'duration_split_part': None})
-            previous_number = scene_number
-            shots.append(shot.model_copy(update={"sequence": index}))
-            scene_numbers.append(scene_number)
-        result = SkillStoryboard(shots=shots) if not modern else StructuredSkillStoryboard(shots=shots)
-        if modern:
-            from services.storyboard.validation import prepare_skill_storyboard
-            result = prepare_skill_storyboard(result, execution.snapshot, prompt_language, entities,
-                                               storyboard_strategy or "cinematic", scene_layouts=scene_layouts)
-        return result, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
-                        'source_scene_numbers': scene_numbers}
-    strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
-    fixed_messages = build_storyboard_messages(
-        "",
-        entities,
-        prompt_language,
-        strategy=strategy,
-        creative_constraints=creative_constraints or [],
-        previously_seen_assets=seen_assets,
-        introduction_descriptions=introduction_descriptions,
-        shot_duration_range=shot_duration_range,
-    )
-    chunker = NarrativeChunker.for_context_limit(
-        max_context_characters,
-        _message_characters(fixed_messages),
-    )
-    chunks = [(None, chunk) for chunk in chunker.split(long_text)] if max_context_characters is not None else [(None, long_text)]
-    scene_numbers = []
-    shots = []
-    completions: list[Any] = []
-    batch_index = 0
-
-    while batch_index < len(chunks):
-        number, content = chunks[batch_index]
-        previous_shot = shots[-1] if shots else None
-        messages = build_storyboard_messages(
-            content,
-            entities,
-            prompt_language,
-            batch_index=batch_index,
-            batch_count=len(chunks),
-            next_sequence=len(shots) + 1,
-            previous_shot=previous_shot,
-            strategy=strategy,
-            creative_constraints=creative_constraints or [],
-            previously_seen_assets=seen_assets,
-            introduction_descriptions=introduction_descriptions,
-            shot_duration_range=shot_duration_range,
-        )
-        try:
-            batch_storyboard, completion = await create_json_completion(
-                client,
-                model=model,
-                messages=messages,
-                response_model=Storyboard,
-                prompt_language=prompt_language,
-                supports_json_output=supports_json_output,
-                timeout=600,
-                thinking=thinking,
-                reasoning_effort=reasoning_effort,
-                max_tokens=max_tokens,
-            )
-        except JsonCompletionTruncatedError:
-            retry_chunks = chunker.split_for_retry(content)
-            if len(retry_chunks) <= 1:
-                raise
-            chunks[batch_index : batch_index + 1] = [(number, piece) for piece in retry_chunks]
-            continue
-
-        if number is not None and not batch_storyboard.shots:
-            raise ValueError(localized_message('分镜模型未返回任何批次结果'))
-        for shot in batch_storyboard.shots:
-            scene_numbers.append(shot.source_scene_number or number)
-            validate_storyboard_duration(shot, shot_duration_range)
-            shots.append(shot.model_copy(update={"sequence": len(shots) + 1}))
-            for name in visible_storyboard_assets(shot, entities):
-                if name not in seen_assets:
-                    seen_assets.append(name)
-        completions.append(completion)
-        batch_index += 1
-
-    if not completions:
-        raise ValueError(localized_message('分镜模型未返回任何批次结果'))
-    return Storyboard(shots=shots), {**_aggregate_metadata(completions), "source_scene_numbers": scene_numbers}
+    from services.creation_agent.strict_text import verify_chapter_input
+    from services.creation_agent.step_context import step_context
+    from services.storyboard.strict_result import storyboard_result
+    await verify_chapter_input(execution.params)
+    context = await step_context(execution.params)
+    context_data = context.model_dump(mode='json') if context else None
+    if context_data:
+        asset_ids = {entity.asset_id for entity in entities}
+        variant_ids = {entity.variant_id for entity in entities if entity.variant_id is not None}
+        context_data['assets'] = [
+            {**asset, 'variants': [variant for variant in asset.get('variants', []) if variant['id'] in variant_ids]}
+            for asset in context_data['assets'] if asset['id'] in asset_ids]
+        context_data['step']['asset_ids'] = [identifier for identifier in context_data['step']['asset_ids'] if identifier in asset_ids]
+        context_data['step']['variant_ids'] = [identifier for identifier in context_data['step']['variant_ids'] if identifier in variant_ids]
+    payload = await execution.generate_strict({'chapter': long_text,
+        'entities': [entity.model_dump() for entity in entities],
+        'constraints': creative_constraints or [], 'scene_layouts': scene_layouts or {},
+        'previously_seen_assets': seen_assets, 'introduction_descriptions': introduction_descriptions or {},
+        'episode_pacing': episode_pacing or {'preset': 'smart'}, 'episode_max_seconds': episode_max_seconds,
+        'shot_duration_range': execution.params.get('shot_duration_range', shot_duration_range),
+        'generate_blocking_maps': execution.params.get('generate_blocking_maps', False),
+        **({'step_context': context_data} if context_data else {})})
+    storyboard = storyboard_result(payload, prompt_language, entities, storyboard_strategy_factory.resolve(storyboard_strategy))
+    return storyboard, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
+                        'source_scene_numbers': [shot.source_scene_number for shot in storyboard.shots]}

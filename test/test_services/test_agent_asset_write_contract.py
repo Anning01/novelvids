@@ -1,4 +1,4 @@
-"""Every agent asset writer must honor the run's frozen output contract."""
+"""Asset writes preserve supplied designs, reject blank input and remain atomic."""
 from test.agent_stream_fixtures import streaming_model
 import json
 from contextlib import contextmanager
@@ -33,7 +33,7 @@ def workflow(snapshot=None, language='zh'):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('asset_type,kind,layout', KINDS)
-async def test_agent_create_rejects_summary_and_saves_complete_design(asset_type, kind, layout):
+async def test_agent_create_rejects_blank_and_preserves_freeform_design(asset_type, kind, layout):
     service, _, _, _, _ = await crud()
     def batch(prompt):
         return CreationChangeSet.model_validate({'operations': [{
@@ -42,11 +42,11 @@ async def test_agent_create_rejects_summary_and_saves_complete_design(asset_type
             'description': 'Story identity', 'prompt': prompt,
         }]})
     with workflow():
-        with pytest.raises(ValueError, match='template|heading'):
-            await service.apply(batch('A young man or a quiet street, rendered realistically.'), tool_call_id='invalid')
+        with pytest.raises(ValueError):
+            await service.apply(batch('   '), tool_call_id='invalid')
         assert not await Asset.filter(canonical_name='New design').exists()
         assert await PromptChange.all().count() == 0
-        complete = fixed_asset_prompt(kind=kind)
+        complete = 'A specific visual design without mandatory template headings.'
         result = await service.apply(batch(complete), tool_call_id='valid')
     assert (await Asset.get(id=result.changes[0]['target_id'])).base_traits == complete
 
@@ -54,7 +54,7 @@ async def test_agent_create_rejects_summary_and_saves_complete_design(asset_type
 @pytest.mark.asyncio
 @pytest.mark.parametrize('kind_of_target', ['asset', 'variant'])
 @pytest.mark.parametrize('asset_type,kind,layout', KINDS)
-async def test_agent_update_and_fragment_patch_preserve_contract(kind_of_target, asset_type, kind, layout):
+async def test_agent_update_and_fragment_patch_preserve_literal_content(kind_of_target, asset_type, kind, layout):
     service, _, asset, variant, _ = await crud()
     asset.asset_type = asset_type
     asset.metadata = {'reference_layout': layout}
@@ -70,30 +70,27 @@ async def test_agent_update_and_fragment_patch_preserve_contract(kind_of_target,
             'operation': 'update_setting', 'target': ref.model_dump(), 'fields': fields,
         }]})
     with workflow():
-        with pytest.raises(ValueError, match='template|heading'):
-            await service.apply(batch({'prompt': 'Only a short appearance summary.'}), tool_call_id='summary')
-        heading = json.loads(synthetic_snapshot().read('asset_contract'))['zh'][kind]['heading']
-        with pytest.raises(ValueError, match='template|heading'):
-            await service.apply(batch({'prompt_replacements': [{'old': heading, 'new': 'Changed heading'}]}), tool_call_id='strip-heading')
+        with pytest.raises(ValueError):
+            await service.apply(batch({'prompt': '   '}), tool_call_id='blank')
         await target.refresh_from_db()
         assert target.base_traits == original
         assert await PromptChange.all().count() == 0
-        replacement = ('Navy cotton school jacket', 'Distinctive tailored navy jacket') if kind == 'person' else (
-            ('Navy cotton school uniforms', 'Distinctive tailored navy uniforms') if kind == 'group' else
-            ('concrete, stable visual design', 'detailed, distinctive visual design'))
-        saved = await service.apply(batch({'prompt_replacements': [{'old': replacement[0], 'new': replacement[1]}]}), tool_call_id='valid-patch')
-    assert saved.changes[0]['after']['base_traits'] == original.replace(*replacement)
+        heading = json.loads(synthetic_snapshot().read('asset_contract'))['zh'][kind]['heading']
+        saved = await service.apply(batch({'prompt_replacements': [{'old': heading, 'new': 'My visual design'}]}), tool_call_id='valid-patch')
+    assert saved.changes[0]['after']['base_traits'] == original.replace(heading, 'My visual design')
+
 
 
 @pytest.mark.asyncio
-async def test_legacy_prompt_writer_uses_same_contract_and_rolls_back_mixed_batch():
+async def test_prompt_writer_rolls_back_mixed_batch_with_a_concurrent_edit():
     from test.test_services.test_creation_agent_tools import setup_service
     service, _, asset, variant, _ = await setup_service()
     before = asset.base_traits
     edits = [ImagePromptEdit(target_kind=kind, target_id=target.id, expected_version=prompt_version(target), prompt=prompt)
-             for kind, target, prompt in [('asset', asset, fixed_asset_prompt()), ('variant', variant, 'A short summary')]]
+             for kind, target, prompt in [('asset', asset, fixed_asset_prompt()), ('variant', variant, 'Updated variant design')]]
+    edits[1].expected_version = 'stale-version'
     with workflow():
-        with pytest.raises(ValueError, match='template'):
+        with pytest.raises(ValueError, match='已被修改'):
             await service.update_image_prompt(edits, tool_call_id='mixed')
     await asset.refresh_from_db()
     assert asset.base_traits == before
@@ -115,10 +112,9 @@ async def test_agent_rules_expose_exact_frozen_template(language, asset_type, ki
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('asset_type,kind,layout', KINDS)
-async def test_empty_image_prompt_is_repaired_to_contract_before_save(asset_type, kind, layout):
+async def test_empty_image_prompt_is_generated_once_without_template_rewriting(asset_type, kind, layout):
     from unittest.mock import patch
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
-    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelResponse, TextPart
     from models.ai_task import AiTask
     from services.creation_agent.media_execution import prepare_image_prompt
     from services.creation_agent.production import conversation_for_task
@@ -134,14 +130,12 @@ async def test_empty_image_prompt_is_repaired_to_contract_before_save(asset_type
     message = await conversation_for_task(task)
     execution = SkillExecution({**params, 'task_id': str(task.id)}, message, AsyncMock())
     calls = 0
-    complete = fixed_asset_prompt(kind=kind)
+    complete = f'Specific {kind} design with its own visual wording.'
 
     def respond(messages, info):
         nonlocal calls
         calls += 1
-        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
-            'prompt': 'Just a short unstructured summary.' if calls == 1 else complete,
-        })])
+        return ModelResponse(parts=[TextPart(json.dumps({'prompt': complete}))])
 
     model = streaming_model(respond)
     model.client = AsyncMock()
@@ -153,7 +147,7 @@ async def test_empty_image_prompt_is_repaired_to_contract_before_save(asset_type
         current_execution.reset(token)
     await asset.refresh_from_db()
     assert asset.base_traits == complete
-    assert calls == 2
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -177,8 +171,7 @@ async def test_frozen_legacy_or_open_source_contract_keeps_existing_writes(contr
 @pytest.mark.asyncio
 async def test_project_cover_does_not_receive_an_asset_template():
     from unittest.mock import patch
-    from pydantic_ai.messages import ModelResponse, ToolCallPart
-    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelResponse, TextPart
     from models.ai_task import AiTask
     from schemas.agent_workflow import CompletePrompt
     from services.creation_agent.production import conversation_for_task
@@ -192,7 +185,7 @@ async def test_project_cover_does_not_receive_an_asset_template():
     message = await conversation_for_task(task)
     execution = SkillExecution({**params, 'task_id': str(task.id)}, message, AsyncMock())
     prompt = 'Cinematic cover with a single composition and no asset reference sheet.'
-    model = streaming_model(lambda messages, info: ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {'prompt': prompt})]))
+    model = streaming_model(lambda messages, info: ModelResponse(parts=[TextPart(json.dumps({'prompt': prompt}))]))
     model.client = AsyncMock()
     with patch('services.creation_agent.handler.configured_model', return_value=model):
         result = await execution.generate('image', {'cover': 'A story cover'}, CompletePrompt)

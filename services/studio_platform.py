@@ -110,6 +110,16 @@ async def platform_image_tariff(config_id: int) -> dict:
     raise HTTPException(409, "平台尚未提供该渠道的图片价格")
 
 
+async def validate_model_activation(row: AiModelConfig) -> None:
+    """A local switch cannot restore a withdrawn or incompatible remote model."""
+    _, _, _, catalog = await _read_platform_catalog()
+    entry = next((entry for entry in catalog.data if entry.id == row.model), None)
+    if (entry is None or not entry.is_active or
+            entry.image_model_type != row.image_model_type or entry.video_model_type != row.video_model_type or
+            not set(entry.task_types).intersection(SYNC_TASK_TYPES)):
+        raise HTTPException(409, localized_message("该平台模型当前不可用，请同步模型目录后再试"))
+
+
 async def sync_platform_models(replacement: str | None = None) -> dict:
     connection, base_url, key, catalog = await _read_platform_catalog(replacement)
     async with in_transaction() as db:
@@ -141,7 +151,7 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                     processing_options = options.model_dump(mode="json", include=PUBLIC_PROCESSING_FIELDS)
                 except ValidationError:
                     raise HTTPException(502, localized_message("平台画质增强能力配置无效")) from None
-            row = await synced.filter(model=entry.id).first()
+            row = await synced.filter(model=entry.id).select_for_update().first()
             name = entry.name
             conflicts = AiModelConfig.filter(task_type=capabilities[0]).using_db(db)
             if row:
@@ -152,7 +162,7 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                 name = entry.name[:100 - len(suffix)] + suffix
                 serial += 1
             values = dict(name=name, task_type=capabilities[0], task_types=capabilities,
-                          base_url=base_url, api_key=key, api_protocol="novelvids", is_active=True, concurrency=entry.concurrency,
+                          base_url=base_url, api_key=key, api_protocol="novelvids", is_active=row.local_enabled if row else True, concurrency=entry.concurrency,
                           image_model_type=entry.image_model_type, video_model_type=entry.video_model_type,
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
                           supports_strict_output=entry.strict_output, text_api=entry.text_api,

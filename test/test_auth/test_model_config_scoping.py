@@ -89,6 +89,91 @@ async def test_team_admin_creates_team_config(client, config_world):
 
 
 @pytest.mark.asyncio
+async def test_enabling_team_model_makes_it_available_to_text_creation(client, config_world):
+    team = config_world['team_a']
+    other_team = config_world['team_b']
+    headers = _auth(config_world['tokens']['admin_a'])
+    created = (await client.post('/api/config', headers=headers, json={
+        **TEXT_CONFIG, 'name': 'team-creation-model', 'task_type': 7, 'task_types': [7],
+        'supports_strict_output': True,
+    })).json()
+    assert created['code'] == 0, created
+    config_id = created['data']['id']
+    assert (await client.get('/api/skills/models', headers=headers)).json()['data'] == []
+    enabled = (await client.post(f'/api/config/{config_id}/activate', headers=headers)).json()
+    assert enabled['code'] == 0, enabled
+    await team.refresh_from_db()
+    await other_team.refresh_from_db()
+    assert team.model_config_source == 'custom'
+    assert other_team.model_config_source == 'official'
+    models = (await client.get('/api/skills/models', headers=headers)).json()['data']
+    assert [model['id'] for model in models] == [config_id]
+    from services.creation_agent.skill_execution import require_agent
+    selected, _ = await require_agent(team.id, config_id, strict_output=True)
+    assert selected.id == config_id
+    await client.put('/api/config/team/model-source', headers=headers, json={'source': 'official'})
+    assert (await client.get('/api/skills/models', headers=headers)).json()['data'] == []
+
+
+@pytest.mark.asyncio
+async def test_enabling_official_model_keeps_team_source_unchanged(client, config_world):
+    model = await AiModelConfig.create(name='official-activation', task_type=7, task_types=[7],
+        model='test', base_url='https://example.invalid', api_key='test-only')
+    reply = await client.post(f'/api/config/{model.id}/activate', headers=_auth(config_world['tokens']['boss']))
+    assert reply.json()['code'] == 0
+    assert await Team.filter(model_config_source='custom').count() == 0
+
+
+@pytest.mark.asyncio
+async def test_team_activation_preserves_capability_filter_and_official_fallback(client, config_world):
+    headers = _auth(config_world['tokens']['admin_a'])
+    official = await AiModelConfig.create(name='official-strict', task_type=7, task_types=[7],
+        model='test', base_url='https://example.invalid', api_key='test-only',
+        is_active=True, supports_strict_output=True)
+    team_model = await AiModelConfig.create(name='team-without-strict', task_type=7, task_types=[7],
+        model='test', base_url='https://example.invalid', api_key='test-only',
+        team_id=config_world['team_a'].id, scope='team', supports_strict_output=False)
+    await client.post(f'/api/config/{team_model.id}/activate', headers=headers)
+    await team_model.refresh_from_db()
+    assert team_model.supports_strict_output is False
+    available = (await client.get('/api/skills/models', headers=headers)).json()['data']
+    assert [model['id'] for model in available] == [official.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['POST', 'PATCH', 'PUT'])
+async def test_enabling_team_model_through_save_selects_custom_source(client, config_world, method):
+    headers = _auth(config_world['tokens']['admin_a'])
+    body = {**TEXT_CONFIG, 'name': f'enabled-{method}', 'task_type': 7, 'task_types': [7],
+            'is_active': True, 'supports_strict_output': True}
+    path = '/api/config'
+    if method != 'POST':
+        model = await AiModelConfig.create(name=body['name'], task_type=7, task_types=[7],
+            model='test-model', base_url='https://example.invalid', api_key='test-only',
+            team_id=config_world['team_a'].id, scope='team')
+        path += f'/{model.id}'
+    response = await client.request(method, path, headers=headers, json=body)
+    assert response.json()['code'] == 0, response.json()
+    await config_world['team_a'].refresh_from_db()
+    assert config_world['team_a'].model_config_source == 'custom'
+
+
+@pytest.mark.asyncio
+async def test_source_failure_rolls_back_model_activation(client, config_world, monkeypatch):
+    from unittest.mock import AsyncMock
+    model = await AiModelConfig.create(name='atomic-activation', task_type=7, task_types=[7],
+        model='test-model', base_url='https://example.invalid', api_key='test-only',
+        team_id=config_world['team_a'].id, scope='team')
+    monkeypatch.setattr(ai_model_config_controller, 'set_model_config_source', AsyncMock(side_effect=RuntimeError('test failure')))
+    with pytest.raises(RuntimeError, match='test failure'):
+        await ai_model_config_controller.activate(model.id)
+    await model.refresh_from_db()
+    assert not model.is_active
+    await config_world['team_a'].refresh_from_db()
+    assert config_world['team_a'].model_config_source == 'official'
+
+
+@pytest.mark.asyncio
 async def test_team_admin_sees_only_own_team_configs(client, config_world):
     """平台级配置对团队不可见：团队管理员只看到本团队自定义配置。"""
     # 官方配置（超管创建）

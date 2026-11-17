@@ -217,7 +217,7 @@ async def test_story_analysis_finishes_before_its_cover_calls_the_provider(monke
     await Novel.filter(id=novel.id).update(content='A story')
     image = await AiModelConfig.create(name='cover', task_type=2, model='image', image_model_type='gpt_image_2',
         base_url='https://example.invalid', api_key='synthetic', is_active=True)
-    monkeypatch.setattr(SkillExecution, 'generate', AsyncMock(return_value=BookAnalysis(book_types=['Drama'], story_outline='A story', key_characters=[])))
+    monkeypatch.setattr(SkillExecution, 'generate_strict', AsyncMock(return_value={'book_types': ['Drama'], 'story_outline': 'A story', 'key_characters': []}))
     provider = AsyncMock()
     monkeypatch.setattr('services.project_analysis.handler.generate_images', provider)
     monkeypatch.setattr('services.ai_task_executor.record_ai_task_usage', AsyncMock())

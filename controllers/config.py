@@ -2,6 +2,7 @@
 from utils.messages import localized_message
 import math
 from fastapi import HTTPException
+from tortoise.transactions import in_transaction
 
 from models.config import AiModelConfig, GeneralConfig
 from schemas.config import AiModelConfigCreate, AiModelConfigUpdate, GeneralConfigUpdate
@@ -13,6 +14,7 @@ from services.image_generation.capabilities import (
     validate_protocol as validate_image_protocol,
 )
 from services.model_resolution import resolve_scope_configs
+from services.studio_platform import SYNC_SCOPE
 from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
     protocol_options as video_protocol_options,
@@ -231,7 +233,11 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     async def create(self, obj_in: AiModelConfigCreate, **kwargs) -> AiModelConfig:
         data = self._normalize_payload(obj_in)
         self._validate_generation_payload(data)
-        return await super().create(data, **kwargs)
+        async with in_transaction():
+            instance = await super().create(data, **kwargs)
+            if instance.is_active:
+                await self._use_team_source(instance)
+            return instance
 
     async def update(self, config_id: int, obj_in: AiModelConfigUpdate) -> AiModelConfig:
         instance = await self.get(config_id)
@@ -241,7 +247,11 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         if old_route and "processing_options" in data:
             data["processing_options"] = {**(data["processing_options"] or {}), LEGACY_ROUTE: old_route}
         self._validate_generation_payload(data, instance)
-        return await super().update(instance, data)
+        async with in_transaction():
+            instance = await super().update(instance, data)
+            if data.get('is_active') is True:
+                await self._use_team_source(instance)
+            return instance
 
     async def patch(self, config_id: int, obj_in) -> AiModelConfig:
         instance = await self.get(config_id)
@@ -251,7 +261,15 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         if old_route and "processing_options" in data:
             data["processing_options"] = {**(data["processing_options"] or {}), LEGACY_ROUTE: old_route}
         self._validate_generation_payload(data, instance)
-        return await super().patch(instance, data)
+        async with in_transaction():
+            instance = await super().patch(instance, data)
+            if data.get('is_active') is True:
+                await self._use_team_source(instance)
+            return instance
+
+    async def _use_team_source(self, instance: AiModelConfig) -> None:
+        if instance.team_id is not None:
+            await self.set_model_config_source(instance.team_id, 'custom')
 
     async def remove(self, config_id: int) -> None:
         instance = await self.get(config_id)
@@ -261,8 +279,18 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         """独立启用当前渠道配置，同类型的其他渠道可同时运行。"""
         instance = await self.get(config_id)
         self._validate_generation_payload({'is_active': True} if instance.task_type == 8 else {}, instance)
-        instance.is_active = True
-        await instance.save(update_fields=["is_active", "updated_at"])
+        return await self._save_activation(instance, True)
+
+    async def _save_activation(self, instance: AiModelConfig, active: bool) -> AiModelConfig:
+        instance.is_active = active
+        fields = ["is_active", "updated_at"]
+        if instance.scope == SYNC_SCOPE:
+            instance.local_enabled = active
+            fields.append('local_enabled')
+        async with in_transaction():
+            await instance.save(update_fields=fields)
+            if active:
+                await self._use_team_source(instance)
         return instance
 
     async def list_active_image_models(self, team_id: int | None = None) -> list[dict]:
@@ -346,9 +374,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     async def deactivate(self, config_id: int) -> AiModelConfig:
         """停用指定配置，不影响同用途下的其他运行配置。"""
         instance = await self.get(config_id)
-        instance.is_active = False
-        await instance.save(update_fields=["is_active", "updated_at"])
-        return instance
+        return await self._save_activation(instance, False)
 
     async def get_active(
         self,

@@ -15,6 +15,8 @@ from utils.messages import localized_message
 
 
 def supports_production_resume(task):
+    if task.task_type in {1, 3, 5, 10} and not task.request_params.get('output_contract'):
+        return False
     return (task.request_params.get('execution_mode') != 'media' and task.task_type in {1, 2, 3, 5}
             and task.request_params.get('workflow_version') == 'agent-skills-v1'
             and not task.request_params.get('parent_task_id')

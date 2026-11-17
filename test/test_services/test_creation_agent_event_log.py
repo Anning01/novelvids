@@ -18,24 +18,13 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 @pytest.mark.asyncio
 async def test_handler_appends_events_and_never_rewrites_the_message_event_array(monkeypatch):
-    conversation, request, _ = await session_fixture()
+    from test.test_services.test_strict_text_tasks import mock_model
+    conversation, request, config = await session_fixture()
+    config.supports_strict_output = True
+    await config.save()
     task = await agent_sessions.submit(conversation, request, AuthContext())
-    calls = 0
-
-    async def model(messages, info):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            yield 'Internal planning: inspect scene_id and tool parameters.'
-            yield {0: DeltaToolCall(name='get_creation_context', json_args='{}', tool_call_id='read')}
-        elif calls == 2:
-            yield {0: DeltaToolCall(name='update_storyboard_prompt', tool_call_id='write', json_args=json.dumps({'edits': [{
-                'scene_id': request.targets[0].id, 'legacy_prompt': '暖光洒在空站台上。',
-            }]}, ensure_ascii=False))}
-        else:
-            yield '已把灯光调暖。'
-
-    monkeypatch.setattr('services.creation_agent.handler.configured_model', lambda *args: FunctionModel(stream_function=model))
+    mock_model(monkeypatch, {'prompts': {str(request.targets[0].id): '暖光洒在空站台上。'},
+        'reply': '已把灯光调暖。'})
     executor = AiTaskExecutor()
     executor.register(AiTaskTypeEnum.creation_agent, CreationAgentTaskHandler())
     async with count_queries() as statements:

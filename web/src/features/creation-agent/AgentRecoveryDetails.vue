@@ -7,7 +7,7 @@ import type { AgentRecovery } from './types'
 const props = defineProps<{ recovery: AgentRecovery; failed: boolean; disabled: boolean }>()
 defineEmits<{ resume: [] }>()
 const step = computed(() => ({ planning_request: '理解要求', source_reading: '阅读原文', creation_planning: '制定方案',
-  assets: '资产提取', storyboard: '分镜生成', structured: '内容生成', creative_check: '内容检查', conversation: '处理修改',
+  story: '项目分析', screenplay: '剧本改编', assets: '资产提取', storyboard: '分镜生成', structured: '内容生成', creative_check: '内容检查', conversation: '处理修改',
 } as Record<string, string>)[props.recovery.failure_step || ''])
 </script>
 

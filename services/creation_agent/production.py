@@ -192,7 +192,7 @@ async def run_production(task, handler):
     mode_token = skill_workflow.set(True)
     token = current_execution.set(execution)
     try:
-        if not params.get('output_contract') and task.task_type in {1, 2, 3, 4} and params.get('operation') in {None, 'assets', 'storyboard', 'image', 'video'} and not params.get('creation_plan_id') and 'creation_planning' in execution.snapshot.contents:
+        if task.task_type in {2, 4} and params.get('operation') in {None, 'image', 'video'} and not params.get('creation_plan_id') and 'creation_planning' in execution.snapshot.contents:
             from services.creation_agent.direct_plan import prepare_direct_plan
             await prepare_direct_plan(task, execution)
             params.update({key: execution.params[key] for key in ('creation_plan_id', 'creation_step_id', 'creation_run_id')})

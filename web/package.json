@@ -23,6 +23,7 @@
     "lucide-vue-next": "^1.0.0",
     "pinia": "^3.0.4",
     "qrcode": "1.5.4",
+    "vditor": "4.0.1",
     "vue": "^3.5.32",
     "vue-element-plus-x": "2.0.3",
     "vue-i18n": "11.4.12",

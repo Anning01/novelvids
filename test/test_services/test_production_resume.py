@@ -24,7 +24,7 @@ def no_auth(monkeypatch):
 
 async def failed_run():
     conversation, _, model = await session_fixture()
-    task = await AiTask.create(task_type=3, status=4, request_params={
+    task = await AiTask.create(task_type=3, status=4, request_params={'output_contract': {'name': 'storyboard', 'version': 1},
         'workflow_version': 'agent-skills-v1', 'novel_id': conversation.novel_id,
         'assistant_model_config_id': model.id, 'prompt_language': 'zh'})
     message = await AgentMessage.create(task=task, conversation=conversation, role='assistant',

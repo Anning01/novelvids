@@ -40,8 +40,23 @@ async def _revise_object(service, execution, target, instructions, tool_call_id)
     await service.authorize()
     obj = await service.creative_target(target.kind, target.id)
     await service.scope.target(target.kind, obj)
+    if target.kind == 'scene':
+        from dataclasses import replace
+        from prompts.text_tasks import scene_prompt_edit_method
+        from schemas.text_task_contracts import scene_prompt_edit_contract
+        from services.user_skills import snapshot_method
+        current = (await service.read([target], full_prompt=True))[0]
+        method = await snapshot_method(execution.params.get('user_id') or 0, 'storyboard')
+        method = scene_prompt_edit_method(method)
+        contract = scene_prompt_edit_contract()
+        # Distinct revisions in one chat must not share the same model receipt.
+        contract['name'] += '_' + fingerprint(tool_call_id)[:16]
+        editor = replace(execution, params={**execution.params,
+            'output_contract': contract, 'creative_method': method})
+        output = await editor.generate_strict({'target': current, 'instructions': instructions, 'user_request': service.request.message})
+        return await service.save_scene_prompts({target.id: output['prompt']}, tool_call_id)
     current = (await service.read([target], use_cache=True))[0]
-    kind, layout = ('storyboard', 'character_turnaround') if target.kind == 'scene' else await service.prompt_standards.asset_kind(obj)
+    kind, layout = await service.prompt_standards.asset_kind(obj)
     contract = await service.prompt_standards.contract(kind, layout)
     facts = {'target': current, 'instructions': instructions, 'contract': contract}
     facts['segment'] = 'object:' + fingerprint(facts)
@@ -50,37 +65,21 @@ async def _revise_object(service, execution, target, instructions, tool_call_id)
     if saved:
         changes = CreationChangeSet.model_validate(saved.result['changes'])
     else:
-        if target.kind == 'scene':
-            from schemas.agent_workflow import StructuredSkillStoryboard
-            from services.creation_agent.tools import PromptEditService
-            from services.storyboard.validation import prepare_skill_storyboard, validate_storyboard_duration
-            entities = await PromptEditService._entities(obj)
-            strategy = (await service.prompt_standards.context())['strategy'].key
-            facts.update(entities=[entity.model_dump() for entity in entities], shot_count=1,
-                         shot_duration_range=[obj.duration, obj.duration], strategy=strategy)
-            output = await execution.generate('storyboard', facts, StructuredSkillStoryboard)
-            if len(output.shots) != 1:
-                raise ValueError('单个分镜修改只能返回一个镜头')
-            validate_storyboard_duration(output.shots[0], [obj.duration, obj.duration])
-            output = prepare_skill_storyboard(output, execution.snapshot, execution.language, entities, strategy)
-            fields = {'prompt': output.shots[0].prompt}
-            operation = {'operation': 'update_scene', 'scene_id': target.id, 'fields': fields}
-        else:
-            from prompts.creation_standards import render_asset_design
-            render_kind = 'group' if kind == 'person' and layout == 'group_portrait' else kind
+        from prompts.creation_standards import render_asset_design
+        render_kind = 'group' if kind == 'person' and layout == 'group_portrait' else kind
 
-            def render(output):
-                return render_asset_design(output.design or output.description, output.visual_fields,
-                    render_kind, execution.snapshot, execution.language, contract['aspect_ratio'])
+        def render(output):
+            return render_asset_design(output.design or output.description, output.visual_fields,
+                render_kind, execution.snapshot, execution.language, contract['aspect_ratio'])
 
-            async def validate(output):
-                await service.prompt_standards.prepare_asset(render(output), asset_type={
-                    'person': 1, 'scene': 2, 'item': 3}[kind], layout=layout)
+        async def validate(output):
+            await service.prompt_standards.prepare_asset(render(output), asset_type={
+                'person': 1, 'scene': 2, 'item': 3}[kind], layout=layout)
 
-            output = await execution.generate('structured', facts, AssetDesignDraft, output_validator=validate,
-                activity_label=localized_message('修订资产设定'))
-            operation = {'operation': 'update_setting', 'target': target.model_dump(),
-                         'fields': {'description': output.description, 'prompt': render(output)}}
+        output = await execution.generate('structured', facts, AssetDesignDraft, output_validator=validate,
+            activity_label=localized_message('修订资产设定'))
+        operation = {'operation': 'update_setting', 'target': target.model_dump(),
+                     'fields': {'description': output.description, 'prompt': render(output)}}
         changes = CreationChangeSet.model_validate({'operations': [operation]})
         await AgentOperation.create(task_id=service.task_id, key=draft_key, state='completed',
             result={'changes': changes.model_dump(mode='json'), 'target': target.model_dump(),
