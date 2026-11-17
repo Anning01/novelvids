@@ -117,6 +117,25 @@ async def test_blocking_review_rejection_and_candidate_edit_invalidate_approval(
 
 
 @pytest.mark.asyncio
+async def test_rereview_blocks_unresolved_conflicts_and_revokes_prior_approval_package(project):
+    payload = candidate()
+    payload['facts'][0]['nature'] = 'inference'
+    payload['unresolved'] = ['前后章首次停电的时序互斥，尚未修正剧本。']
+    row = await reviewed(project, payload=payload)
+    previously_ready_hash = row.package_hash
+    row = await save_review(project.id, row.id, row.revision, fingerprint(row.candidate), {
+        'issues': [{'severity': 'blocking', 'fact_index': 0, 'reason': '标注待确认不能解除未解决的时序矛盾。'}],
+        'summary': '须修正剧本或候选并重新审核。'})
+    assert row.status == 'needs_review'
+    with pytest.raises(HTTPException, match='变化'):
+        await decide(project.id, row.id, StoryDecision(expected_package_hash=previously_ready_hash,
+            decision='accept'), 17)
+    with pytest.raises(HTTPException, match='阻断'):
+        await accept(project, row)
+    assert not await StoryFact.all().exists() and not await StorySnapshot.all().exists()
+
+
+@pytest.mark.asyncio
 async def test_changed_source_rejects_approval_and_retains_snapshot(project):
     row = await reviewed(project)
     project.project_setting = '未来世界，有电力。'
@@ -266,6 +285,33 @@ async def test_review_failure_keeps_editable_candidate_and_never_publishes(proje
     row = await StoryCommit.get(task=task)
     assert task.status == 4 and row.status == 'draft'
     assert row.candidate['facts'] and not await StoryFact.all().exists()
+
+
+@pytest.mark.asyncio
+async def test_reanalysis_excludes_host_review_receipts_from_model_context(project, monkeypatch):
+    from models.config import AiModelConfig
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.skill_execution import SkillExecution
+    previous = await reviewed(project)
+    previous = await save_review(project.id, previous.id, previous.revision, fingerprint(previous.candidate),
+        {'issues': [], 'summary': '已核对'}, task_id=uuid4())
+    previous = await accept(project, previous)
+    subject = await StorySubject.get(novel=project)
+    await AiModelConfig.create(name='strict', model='strict', task_type=7,
+        base_url='https://model.invalid', api_key='test', supports_strict_output=True, is_active=True)
+    contexts = []
+    async def generate(self, context):
+        contexts.append(context)
+        return (candidate(existing_id=subject.id) if self.params['operation'] == 'story_memory_analyze'
+            and self.params['output_contract']['name'].endswith('extract') else {'issues': [], 'summary': '已核对'})
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    task = await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4()), AuthContext())
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(contexts) == 2
+    assert all(context['previous_commit']['review'] == {'issues': [], 'summary': '已核对'} for context in contexts)
+    assert (await StoryCommit.get(id=previous.id)).review['task_id'] == previous.review['task_id']
 
 
 def test_prompt_language_and_strict_contracts():

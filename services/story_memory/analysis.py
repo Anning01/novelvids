@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from models.story_memory import StoryFact, StorySubject
+from schemas.story_memory import StoryReview
 from prompts.story_memory import contract, method
 from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.plan_sources import fingerprint
@@ -40,7 +41,8 @@ async def analyze(params):
     if commit.replaces_id:
         previous = await get_commit(commit.novel_id, commit.replaces_id)
         context['previous_commit'] = {'id': previous.id, 'source_snapshot': previous.source_snapshot,
-            'candidate': previous.candidate, 'review': previous.review}
+            'candidate': previous.candidate, 'review': {
+                key: value for key, value in previous.review.items() if key in StoryReview.model_fields}}
     if params['operation'] == 'story_memory_analyze':
         result = anchor_evidence(await execution.generate_strict(context), commit.source_snapshot)
         async def persist():
