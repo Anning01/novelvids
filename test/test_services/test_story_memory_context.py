@@ -303,3 +303,4 @@ def test_story_memory_rules_and_skill_mount_are_available_in_both_languages():
         instructions, _ = render_text_task(language=language, skill={'instructions': '分析方法', 'references': []},
             context={'input': {'story_memory': {'enabled': True}}})
         assert f'language={language}' in instructions and '计划、证言、推测不当作已发生事实' in instructions
+        assert '已换下、脱去、交出或损毁的服装与道具不得从基础资产重新叠加' in instructions

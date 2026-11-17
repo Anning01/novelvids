@@ -194,6 +194,7 @@ def _normalize_asset_reference_text(
     )
     # Quoted inscriptions, captions, and screen text are literal content.
     normalized = re.sub(r'“[^”\n]*”|「[^」\n]*」|『[^』\n]*』|"[^"\n]*"', lambda match: protect(match[0]), normalized)
+    normalized = re.sub(r'@\{\s*\}', '', normalized)
     normalized = _BRACED_REFERENCE_PATTERN.sub(protect_braced, normalized)
 
     # 兼容旧格式 @资产名，并统一升级为带花括号的正式名。模型常会把后续

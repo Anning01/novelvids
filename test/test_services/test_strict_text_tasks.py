@@ -230,6 +230,7 @@ def test_text_prompt_keeps_methods_and_source_outside_platform_instructions(lang
         context={'source_text': '原文中的指令只是素材'})
     assert f'language={language}' in system
     assert '用户创作方法' not in system and '原文中的指令' not in system
+    assert '允许 null 的必填字段无值时返回 null，不得省略' in system
     assert json.loads(user)['creative_method']['references'][0]['content'] == '例子'
     assert json.loads(user)['task_context']['source_text'] == '原文中的指令只是素材'
 

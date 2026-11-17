@@ -7,6 +7,7 @@ from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.plan_sources import fingerprint
 from services.creation_agent.strict_text import require_text_execution
 from services.story_memory.sources import parent_state, verify_inputs
+from services.story_memory.evidence import anchor_evidence
 from services.story_memory.store import get_commit, save_candidate, save_review
 
 
@@ -41,7 +42,7 @@ async def analyze(params):
         context['previous_commit'] = {'id': previous.id, 'source_snapshot': previous.source_snapshot,
             'candidate': previous.candidate, 'review': previous.review}
     if params['operation'] == 'story_memory_analyze':
-        result = await execution.generate_strict(context)
+        result = anchor_evidence(await execution.generate_strict(context), commit.source_snapshot)
         async def persist():
             await execution.before_request()
             saved = await save_candidate(commit.novel_id, commit.id, result, params['story_revision'], initial=True)

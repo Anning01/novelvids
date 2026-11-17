@@ -219,7 +219,11 @@ async def test_analysis_task_is_idempotent_and_review_is_a_separate_call(project
     seen = []
     async def generate(self, facts):
         seen.append((self.params['output_contract']['name'], facts))
-        return candidate() if len(seen) == 1 else {'issues': [], 'summary': '原文依据核对通过'}
+        if len(seen) == 1:
+            payload = candidate()
+            payload['facts'][0]['evidence'][0]['end'] -= 1
+            return payload
+        return {'issues': [], 'summary': '原文依据核对通过'}
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     request = StoryAnalysisRequest(request_id=uuid4())
     task = await submit_analysis(project.id, request, AuthContext())
@@ -235,6 +239,7 @@ async def test_analysis_task_is_idempotent_and_review_is_a_separate_call(project
     assert row.review['task_id'] == str(task.id)
     assert [name for name, _ in seen] == ['story_memory_extract', 'story_memory_review']
     assert 'candidate' in seen[1][1] and seen[0][1]['source_snapshot']['project']['setting'] == project.project_setting
+    assert seen[1][1]['candidate']['facts'][0]['evidence'][0]['end'] == len(project.project_setting)
     updated = await save_candidate(project.id, row.id, candidate(), row.revision)
     review_task = await submit_review(project.id, row.id, StoryReviewRequest(expected_revision=updated.revision), AuthContext())
     assert (await submit_review(project.id, row.id, StoryReviewRequest(expected_revision=updated.revision), AuthContext())).id == review_task.id
@@ -272,6 +277,12 @@ def test_prompt_language_and_strict_contracts():
                 skill=method({'instructions': '自定义方法', 'references': []}, stage, language), context={})
             assert f'language={language}' in system + content
             assert ('不能登记为已发生事件' if stage == 'extract' else '不代用户批准') in content
+            if stage == 'extract':
+                assert 'facts.subject_ref 或 scope.world_ref 实际引用的对象' in content
+                assert '各场景的事实填写对应 scope.world_ref' in content
+                assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content
+            else:
+                assert '场景世界范围或混淆回忆与当前世界时，标为 blocking' in content
             schema = contract(stage)
             assert schema['name'] == f'story_memory_{stage}'
             def check(value):
@@ -287,7 +298,7 @@ def test_prompt_language_and_strict_contracts():
             check(schema['schema'])
 
 
-@pytest.mark.parametrize('mutation', ['unknown', 'duplicate', 'replacement', 'range'])
+@pytest.mark.parametrize('mutation', ['unknown', 'duplicate', 'replacement', 'range', 'unused_subject'])
 def test_candidate_contract_rejects_ambiguous_changes(mutation):
     payload = deepcopy(candidate())
     if mutation == 'unknown':
@@ -296,6 +307,8 @@ def test_candidate_contract_rejects_ambiguous_changes(mutation):
         payload['subjects'].append(deepcopy(payload['subjects'][0]))
     elif mutation == 'replacement':
         payload['facts'][0]['operation'] = 'replace'
+    elif mutation == 'unused_subject':
+        payload['subjects'].append({'ref': 'city', 'kind': 'location', 'name': '故城'})
     else:
         payload['facts'][0]['scope'].update(from_chapter=3, until_chapter=1)
     with pytest.raises(ValidationError):
@@ -310,6 +323,39 @@ async def test_exact_evidence_keeps_whitespace_and_unicode(project):
     row = await accept(project, row)
     fact = await StoryFact.get(commit=row)
     assert fact.evidence[0]['quote'] == project.project_setting
+
+
+@pytest.mark.asyncio
+async def test_model_evidence_anchors_unique_quotes_without_weakening_store_validation(project):
+    from services.story_memory.evidence import anchor_evidence
+    project.project_setting = '前文🏯。周砚停在门前，没有穿过去。\n后文。'
+    await project.save(update_fields=['project_setting'])
+    row = await pending(project)
+    quote = '周砚停在门前，没有穿过去。'
+    payload = candidate(quote)
+    payload['facts'][0]['evidence'][0].update(start=4, end=16)
+    anchored = anchor_evidence(payload, row.source_snapshot)
+    assert anchored['facts'][0]['evidence'][0] == {'source': 'project.setting',
+        'quote': quote, 'start': 4, 'end': 4 + len(quote)}
+    assert payload['facts'][0]['evidence'][0]['end'] == 16
+    with pytest.raises(HTTPException, match='逐字匹配'):
+        await save_candidate(project.id, row.id, payload, 1, initial=True)
+    await save_candidate(project.id, row.id, anchored, 1, initial=True)
+
+
+@pytest.mark.parametrize('text,quote,start,end,expected', [
+    ('古城。古城。', '古城', 1, 3, (1, 3)),
+    ('古城。古城。', '古城', 3, 5, (3, 5)),
+    ('古城。', '未来城', 0, 3, (0, 3)),
+    ('\n  古城🏯。\n', '  古城🏯。', 0, 5, (1, 7)),
+])
+def test_evidence_anchor_preserves_ambiguous_missing_and_exact_quotes(text, quote, start, end, expected):
+    from services.story_memory.evidence import anchor_evidence
+    payload = candidate(quote)
+    payload['facts'][0]['evidence'][0].update(start=start, end=end)
+    result = anchor_evidence(payload, {'project': {'setting': text}})
+    evidence = result['facts'][0]['evidence'][0]
+    assert (evidence['start'], evidence['end']) == expected and evidence['quote'] == quote
 
 
 @pytest.mark.asyncio

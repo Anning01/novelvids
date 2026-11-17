@@ -28,12 +28,13 @@ def asset_contract(specifications):
     def asset(kind, labels=None):
         return _object({'name': {'type': 'string', 'pattern': r'^[\s\S]{1,100}$'},
             'aliases': _STRINGS, 'description': _STRING, **design(kind),
-            **({'label': {'type': 'string', 'enum': labels}} if labels else {}),
-            'variant': _nullable(_object({
+            **({'label': {'type': 'string', 'enum': labels,
+                'description': '必填，按实体填写人物、动物或群像，不能省略。'}} if labels else {}),
+            'variant': {**_nullable(_object({
                 'existing_variant_id': {'type': ['integer', 'null']},
                 'name': {'type': 'string', 'pattern': r'^[\s\S]{1,100}$'},
                 'description': _STRING, 'change_reason': _STRING, **design(kind),
-            }))})
+            })), 'description': '必填；没有本次形态变化时明确返回 null，不能省略。重大造型变化或复用形态时填写完整对象。'}})
     return _object({'persons': _array({'anyOf': [asset('person', ['人物', '动物']), asset('group', ['群像'])]}),
                     'scenes': _array(asset('scene')), 'items': _array(asset('item'))})
 
