@@ -821,7 +821,7 @@ onBeforeUnmount(() => {
         <div class="analysis-hero-actions">
           <div v-if="canEdit && hasAnalysisContent" class="story-generation-controls">
             <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('故事分析模型')"
-              :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON 输出模型') }, ...analysisModels]"
+              :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON Schema 输出模型') }, ...analysisModels]"
               :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
             <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
             <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
@@ -967,7 +967,7 @@ onBeforeUnmount(() => {
               :disabled="editing || adapting" />
             <div v-if="canEdit" class="episode-adaptation-controls">
               <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
-                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON 输出模型') }, ...analysisModels]"
+                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON Schema 输出模型') }, ...analysisModels]"
                 :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
               <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
               <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>

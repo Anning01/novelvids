@@ -79,8 +79,8 @@ async def test_model_list_uses_strict_capability_and_hides_secrets():
     app.include_router(router, prefix='/skills')
     app.dependency_overrides[get_auth_context] = lambda: AuthContext(is_super_admin=True)
     shared = dict(task_type=7, model='test', base_url='https://private.invalid', api_key='private-key', is_active=True)
-    strict = await AiModelConfig.create(name='严格', supports_json_output=True, **shared)
-    await AiModelConfig.create(name='普通JSON', supports_json_output=False, supports_tool_calls=True, **shared)
+    strict = await AiModelConfig.create(name='严格', supports_strict_output=True, **shared)
+    await AiModelConfig.create(name='普通JSON', supports_json_output=True, supports_tool_calls=True, **shared)
     await AiModelConfig.create(name='其他团队', supports_json_output=True, team_id=5, **shared)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         response = await client.get('/skills/models')
@@ -121,7 +121,7 @@ asyncio.run(run())
 '''
     subprocess.run([sys.executable, '-c', script], check=True, env={**os.environ, 'DATABASE_URL': f'sqlite://{path}'})
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT id,name,supports_strict_output FROM ai_model_configs').fetchall() == [(1, 'existing', 0)]
+        assert db.execute('SELECT id,name,supports_strict_output,text_api FROM ai_model_configs').fetchall() == [(1, 'existing', 0, 'chat_completions')]
         assert db.execute('SELECT COUNT(*) FROM user_skills').fetchone() == (0,)
         assert db.execute('SELECT COUNT(*) FROM task_skill_preferences').fetchone() == (0,)
 

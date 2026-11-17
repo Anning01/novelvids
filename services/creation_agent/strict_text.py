@@ -79,6 +79,13 @@ async def generate(execution, facts: dict) -> dict:
     limits = AgentConfiguration.model_validate(params['agent_configuration'])
     contract = params['output_contract']
     operation = contract['name']
+    if operation == 'storyboard':
+        from schemas.text_task_contracts import bind_storyboard_candidates
+        contract = bind_storyboard_candidates(contract, facts['entities'])
+        task = await AiTask.get(id=params['task_id'])
+        task.request_params = {**task.request_params, 'output_contract': contract}
+        await task.save(update_fields=['request_params'])
+        params = {**params, 'output_contract': contract}
     key = f'model:strict:{operation}'
     child, _ = await AiTask.get_or_create(id=uuid5(UUID(params['task_id']), key), defaults={
         'task_type': 7, 'status': 2, 'request_params': {**params, 'parent_task_id': params['task_id'], 'model_config_id': chosen.id}})
@@ -86,7 +93,7 @@ async def generate(execution, facts: dict) -> dict:
         'conversation_id': execution.message.conversation_id, 'request_id': child.id,
         'request_hash': str(child.id), 'run_input': {'internal_production_step': True},
         'model_snapshot': {'id': chosen.id, 'name': chosen.name, 'model': chosen.model, 'scope': chosen.scope, 'pricing': chosen.pricing}})
-    model = configured_model(chosen, limits)
+    model = configured_model(chosen, limits, output_contract=contract)
     model.strict_streaming = True
     activity = SkillRunActivity(message, params['task_id'])
 
@@ -119,7 +126,7 @@ async def generate(execution, facts: dict) -> dict:
         instructions, content = render_text_task(language=execution.language,
             skill=params['creative_method'], context={
                 'input': facts, 'user_request': await user_instruction(params),
-                'project': project_facts}, output_schema=contract['schema'])
+                'project': project_facts})
         messages = [ModelRequest(parts=[SystemPromptPart(instructions), UserPromptPart(content)])]
         request = ModelRequestParameters()
         try:

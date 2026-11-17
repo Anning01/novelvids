@@ -279,7 +279,7 @@ it('keeps the drawer header compact', () => {
   expect(styles).toContain('width: 36px; height: 36px')
 })
 
-it('notifies the outer card of a new asset generation before closing the drawer', async () => {
+it.each(['character', 'scene', 'prop'] as const)('binds a new %s to the current chapter and notifies generation before closing', async kind => {
   vi.clearAllMocks()
   const created = { ...editedAsset, id: 21, asset_type: AssetTypeEnum.SCENE, canonical_name: '办公室' }
   vi.mocked(api.assetLibrary).mockResolvedValue({ code: 0, message: '', data: { items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 } } })
@@ -288,14 +288,19 @@ it('notifies the outer card of a new asset generation before closing the drawer'
   vi.mocked(api.generateAsset).mockResolvedValue({ code: 0, message: '', data: {
     id: 'new-image', task_type: 2, status: TaskStatusEnum.PENDING, created_at: '',
   } })
-  const wrapper = mount(AssetCreateDialog, { props: { open: true, kind: 'scene', novelId: 9 },
+  const wrapper = mount(AssetCreateDialog, { props: { open: true, kind, novelId: 9, chapterId: 77, chapterNumber: 2 },
     global: { components: { AppButton }, stubs: { Teleport: true } } })
   await flushPromises()
   await wrapper.get('input[placeholder="请输入"]').setValue('办公室')
+  if (kind === 'character') {
+    wrapper.findAllComponents(AppSelect).find(select => select.props('ariaLabel') === '选择性别')!.vm.$emit('update:modelValue', '男')
+    wrapper.findAllComponents(AppSelect).find(select => select.props('ariaLabel') === '选择年龄阶段')!.vm.$emit('update:modelValue', '青年')
+  }
   wrapper.getComponent(MaterialMentionInput).vm.$emit('update:modelValue', '保存的完整场景提示词')
   await flushPromises()
   await wrapper.get('form').trigger('submit')
   await flushPromises()
+  expect(api.createAsset).toHaveBeenCalledWith(expect.objectContaining({ novel_id: 9, chapter_id: 77, is_global: false }))
   expect(api.generateAsset).toHaveBeenCalledOnce()
   expect(wrapper.emitted('created')).toEqual([[created]])
   expect(wrapper.emitted('generation-started')).toEqual([[{ asset_id: 21, task_id: 'new-image', status: TaskStatusEnum.PENDING }]])

@@ -91,6 +91,15 @@ async def generate_storyboard(
         from services.storyboard.strict_result import storyboard_result
         await verify_chapter_input(execution.params)
         context = await step_context(execution.params)
+        context_data = context.model_dump(mode='json') if context else None
+        if context_data:
+            asset_ids = {entity.asset_id for entity in entities}
+            variant_ids = {entity.variant_id for entity in entities if entity.variant_id is not None}
+            context_data['assets'] = [
+                {**asset, 'variants': [variant for variant in asset.get('variants', []) if variant['id'] in variant_ids]}
+                for asset in context_data['assets'] if asset['id'] in asset_ids]
+            context_data['step']['asset_ids'] = [identifier for identifier in context_data['step']['asset_ids'] if identifier in asset_ids]
+            context_data['step']['variant_ids'] = [identifier for identifier in context_data['step']['variant_ids'] if identifier in variant_ids]
         payload = await execution.generate_strict({'chapter': long_text,
             'entities': [entity.model_dump() for entity in entities],
             'constraints': creative_constraints or [], 'scene_layouts': scene_layouts or {},
@@ -98,7 +107,7 @@ async def generate_storyboard(
             'episode_pacing': episode_pacing or {'preset': 'smart'}, 'episode_max_seconds': episode_max_seconds,
             'shot_duration_range': execution.params.get('shot_duration_range', shot_duration_range),
             'generate_blocking_maps': execution.params.get('generate_blocking_maps', False),
-            **({'step_context': context.model_dump(mode='json')} if context else {})})
+            **({'step_context': context_data} if context_data else {})})
         storyboard = storyboard_result(payload, prompt_language, entities, storyboard_strategy_factory.resolve(storyboard_strategy))
         return storyboard, {'model': execution.params['assistant_model_config_id'], 'batch_count': 1, 'usage': {},
                             'source_scene_numbers': [shot.source_scene_number for shot in storyboard.shots]}

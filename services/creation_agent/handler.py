@@ -52,23 +52,34 @@ async def authorize_run(params: dict) -> AuthContext:
     return ctx
 
 
-def configured_model(config, limits: AgentConfiguration, *, structured_output=True):
+def configured_model(config, limits: AgentConfiguration, *, structured_output=True, output_contract=None):
     from services.billing.platform import is_platform_model, platform_text_client
     client_options = {"http_client": platform_text_client(config)} if is_platform_model(config) else {}
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
                          max_retries=0, timeout=None, **client_options)
+    text_api = getattr(config, "text_api", "chat_completions")
     extra_body = {}
-    if structured_output and getattr(config, 'supports_json_output', False):
+    if structured_output and output_contract:
+        extra_body['response_format'] = {'type': 'json_schema', 'json_schema': {
+            'name': output_contract['name'], 'schema': output_contract['schema'], 'strict': True}}
+    elif structured_output and getattr(config, 'supports_json_output', False):
         extra_body['response_format'] = {'type': 'json_object'}
+    if text_api == "responses" and 'response_format' in extra_body:
+        output_format = extra_body.pop('response_format')
+        if output_format['type'] == 'json_schema':
+            output_format = {'type': 'json_schema', **output_format['json_schema']}
+        extra_body['text'] = {'format': output_format}
     from utils.model_reasoning import reasoning_parameters
-    extra_body.update(reasoning_parameters(getattr(config, 'thinking', None), getattr(config, 'reasoning_effort', None)))
+    extra_body.update(reasoning_parameters(getattr(config, 'thinking', None), getattr(config, 'reasoning_effort', None), text_api=text_api))
     from pydantic_ai.profiles.openai import OpenAIModelProfile
     provider = OpenAIProvider(openai_client=client)
     # Reasoning endpoints can reject tool_choice=required; output validation stays in the Agent.
     profile = OpenAIModelProfile.from_profile(provider.model_profile(config.model)).update(
         OpenAIModelProfile(openai_supports_tool_choice_required=False)
     )
-    return UsagePreservingChatModel(config.model, provider=provider, profile=profile,
+    from services.creation_agent.model_usage import UsagePreservingResponsesModel
+    model_type = UsagePreservingResponsesModel if text_api == "responses" else UsagePreservingChatModel
+    return model_type(config.model, provider=provider, profile=profile,
                                    settings={**limits.output_model_settings(getattr(config, 'max_tokens', None)),
                                              'extra_body': extra_body})
 

@@ -59,6 +59,7 @@ const character: Asset = {
   novel_id: 8,
   asset_type: AssetTypeEnum.PERSON,
   canonical_name: '总工程师',
+  source_chapters: [1],
   main_image: '/media/assets/chief.png',
   main_image_thumbnail: '/media/assets/derivatives/chief-thumbnail.webp',
   main_image_preview: '/media/assets/derivatives/chief-preview.webp',
@@ -149,6 +150,30 @@ function openVoicePicker(wrapper: Awaited<ReturnType<typeof mountPage>>) {
 }
 
 describe('分镜角色音色选择', () => {
+  it.each([AssetTypeEnum.PERSON, AssetTypeEnum.SCENE, AssetTypeEnum.ITEM])('limits add/replace picker to chapter candidates while keeping saved bindings (%s)', async assetType => {
+    const response = bootstrap(null)
+    const current = { ...character, asset_type: assetType, variants: [variant,
+      { ...variant, id: 102, name: '第二章形态', chapter_numbers: [2] },
+      { ...variant, id: 103, name: '未关联形态', chapter_numbers: [] }] }
+    const historical = { ...character, id: 11, asset_type: assetType, canonical_name: '旧镜头资产', source_chapters: [2], is_global: true,
+      variants: [{ ...variant, id: 201, asset_id: 11, name: '旧形态', chapter_numbers: [2] }] }
+    response.data.assets = [current, historical, { ...historical, id: 12, source_chapters: [], canonical_name: '未关联资产' }]
+    response.data.scenes[0]!.asset_ids = [historical.id]
+    response.data.scenes[0]!.metadata.asset_variant_ids = { [historical.id]: 201 }
+    response.data.scenes[0]!.prompt = '@{旧镜头资产}'
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(response as never)
+    const wrapper = await mountPage()
+    await flushPromises()
+    const pickers = wrapper.findAllComponents(SceneAssetVariantPicker)
+    const picker = pickers.find(item => item.props('assets').some(asset => asset.id === current.id))!
+    expect(picker.props('assets').map(asset => asset.id)).toEqual([current.id])
+    expect(picker.props('assets')[0]!.variants?.map(form => form.id)).toEqual([variant.id])
+    expect(picker.props('selectedAssetIds')).toEqual([historical.id])
+    expect(wrapper.findAll('.asset-name-button').map(item => item.text())).toEqual(['旧镜头资产 · 旧形态'])
+    expect(response.data.assets[0]!.variants).toHaveLength(3)
+    wrapper.unmount()
+  })
+
   it('renders and preserves a qualified form reference restored from MCP metadata', async () => {
     const response = bootstrap(variant.id)
     response.data.assets = [{ ...character, variants: [{ ...variant, images: ['/media/imported-form.png'] }] }]

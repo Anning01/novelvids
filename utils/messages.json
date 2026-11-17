@@ -1,4 +1,7 @@
 {
+  "请选择已启用且支持 JSON Schema 严格输出的模型": "Select an active model that supports strict JSON Schema output",
+  "资产结果转换失败：模型返回缺少字段 {p0}。": "Asset result conversion failed: the model response is missing field {p0}.",
+  "资产结果转换失败：{p0} 缺少字段 {p1}，尚未保存本次提取结果。": "Asset result conversion failed: {p0} is missing field {p1}. This extraction has not been saved.",
   "模型未完成本次请求，请调整内容后重试": "The model could not complete this request. Adjust the content and try again.",
   "技能不存在或不适用于当前任务": "The skill does not exist or does not support this task",
   "技能已被修改，请重新读取后保存": "The skill has changed. Reload it before saving.",

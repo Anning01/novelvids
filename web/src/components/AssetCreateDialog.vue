@@ -79,7 +79,7 @@ type AssetEditorFormSnapshot = {
 
 const VARIANT_EDITOR_FORM_KEY = 'editor_form'
 
-const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode; initialVariantId?: number; previewAssets?: Asset[] }>(), {
+const props = withDefaults(defineProps<{ open: boolean; kind: AssetKind; novelId: number; asset?: Asset | null; chapterId?: number; chapterNumber?: number; episodeNumbers?: number[]; initialMode?: CreateMode; initialVariantId?: number; previewAssets?: Asset[] }>(), {
   episodeNumbers: () => [],
   initialMode: 'ai',
   previewAssets: () => [],
@@ -1335,7 +1335,7 @@ async function submit(regenerate = false) {
     }
     const response = props.asset
       ? await api.updateAsset(props.asset.id, payload, (promptSourceAsset.value || props.asset).base_traits ?? null)
-      : await api.createAsset({ ...payload, novel_id: props.novelId } as Partial<Asset> & { novel_id: number; asset_type: number; canonical_name: string })
+      : await api.createAsset({ ...payload, novel_id: props.novelId, ...(props.chapterId ? { chapter_id: props.chapterId } : {}) } as Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string })
 
     if (props.asset) {
       promptSourceAsset.value = response.data

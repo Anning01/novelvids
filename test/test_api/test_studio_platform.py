@@ -11,12 +11,14 @@ from services.model_resolution import resolve_scope_configs
 
 
 @pytest.mark.parametrize(("configured", "expected"), [
-    ("", "https://shortdramas.xiazq.com/v1"),
+    ("", None),
     (" https://platform.example/ ", "https://platform.example/v1"),
 ])
 def test_studio_platform_default_and_deployment_override(configured, expected):
     subprocess.run([sys.executable, "-c",
-        "import sys; from services.studio_platform import platform_base_url; assert platform_base_url() == sys.argv[1]", expected],
+        "import sys; from config import settings; from services.studio_platform import platform_base_url; "
+        "url = platform_base_url(); assert url == (sys.argv[1] or settings.STUDIO_PLATFORM_BASE_URL); "
+        "assert url.startswith('https://') and url.endswith('/v1')", expected or ""],
         env={**os.environ, "STUDIO_PLATFORM_BASE_URL": configured}, check=True)
 
 
@@ -51,7 +53,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "")
     await StudioPlatformConnection.all().delete()
     models = [
-        {"id": "nv-1", "name": "文本", "task_types": [1, 7], "concurrency": 5, "tool_calls": True, "json_output": True, "strict_output": True},
+        {"id": "nv-1", "name": "文本", "task_types": [1, 7], "concurrency": 5, "tool_calls": True, "json_output": True, "strict_output": True, "text_api": "responses"},
         {"id": "nv-2", "name": "视频", "task_types": [4], "video_model_type": "seedance_2"},
     ]
     calls = []
@@ -86,6 +88,7 @@ async def test_studio_sync_rotates_key_and_keeps_model_identity(client, monkeypa
     assert model.pricing == {"type": "text", "currency": "CNY", "input_price_per_1m": 2, "output_price_per_1m": 4}
     assert model.base_url == "https://platform.example/v1" and model.supports_tool_calls
     assert model.supports_strict_output is True
+    assert model.text_api == "responses"
     for route in (path, "/api/config", f"/api/config/{model.id}"):
         response = await client.get(route)
         assert all(secret not in response.text for secret in ("provider-secret", "nv_original", "supplier.example"))

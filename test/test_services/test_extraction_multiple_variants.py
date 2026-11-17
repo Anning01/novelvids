@@ -130,3 +130,27 @@ def test_malformed_variant_is_not_discarded_as_a_duplicate_base(variant):
     result = validator.merge(draft(validator, [entries()[0], {'name': '主角', 'variant': variant}]))
     assert len(result.persons) == 1
     assert len(validator.issues) == 1
+
+
+@pytest.mark.asyncio
+async def test_reused_asset_and_second_episode_form_keep_one_parent_and_separate_chapters():
+    novel = await Novel.create(name='跨章复用')
+    asset = await Asset.create(novel=novel, asset_type=1, canonical_name='主角', source_chapters=[1],
+        base_traits='已确认设计', main_image='/media/base.png', is_global=False)
+    result = AssetExtractionResult.model_validate({'persons': [{
+        'name': '主角', 'base_traits': '新生成的基础描述',
+        'variant': {'name': '雨衣', 'base_traits': '蓝色雨衣', 'change_reason': '第二集下雨'},
+    }], 'scenes': [], 'items': []})
+    service = AssetUpsertService()
+    for _ in range(2):
+        await service.save_result(novel_id=novel.id, chapter_number=2, result=result, preserve_existing=True)
+    await asset.refresh_from_db()
+    assert await Asset.filter(novel=novel).count() == 1
+    assert asset.source_chapters == [1, 2]
+    assert asset.base_traits == '已确认设计' and asset.main_image == '/media/base.png'
+    form = await AssetVariant.get(asset=asset)
+    assert form.name == '雨衣' and form.chapter_numbers == [2]
+    from services.storyboard.entities import entities_for_assets
+    await asset.fetch_related('variants')
+    assert entities_for_assets([asset], 1, {})[0].variant_id is None
+    assert entities_for_assets([asset], 2, {asset.id: form.id})[0].variant_id == form.id
