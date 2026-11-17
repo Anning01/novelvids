@@ -12,6 +12,7 @@ class UserSkill(AbstractBaseModel):
     description = fields.CharField(max_length=1000, default='')
     instructions = fields.TextField()
     references = fields.JSONField(default=list)
+    files = fields.JSONField(default=list, description='Skill folder files; legacy prompt fields remain readable')
     version = fields.IntField(default=1)
     is_active = fields.BooleanField(default=True)
 

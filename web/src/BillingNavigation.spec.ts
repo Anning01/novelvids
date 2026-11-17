@@ -64,5 +64,15 @@ it('keeps billing hidden and blocks direct navigation for a viewer', async () =>
   expect(router.currentRoute.value.path).toBe('/')
   expect(wrapper.find('.billing-page').exists()).toBe(false)
   expect(api.billingSummary).not.toHaveBeenCalled()
+  expect(wrapper.find('a[aria-label="技能管理"]').exists()).toBe(false)
+  await router.push('/skills')
+  expect(router.currentRoute.value.path).toBe('/')
+  wrapper.unmount()
+})
+
+it('shows the skills entry for creators with the existing editor role guard', async () => {
+  const wrapper = await render('creator')
+  expect(wrapper.get('a[aria-label="技能管理"]').attributes('href')).toBe('#/skills')
+  expect(router.resolve('/skills').meta.roles).toEqual(['admin', 'creator'])
   wrapper.unmount()
 })
