@@ -285,7 +285,6 @@ async function qilingAuthenticated(session: LoginResult) {
   -webkit-backdrop-filter: blur(18px) saturate(120%);
   backdrop-filter: blur(18px) saturate(120%);
 }
-.cinematic-login__glass.is-password { padding: 30px 24px; }
 .cinematic-login__glass h2 { margin: 0; font-size: 23px; font-weight: 640; }
 .cinematic-login__glass > p { margin: 8px 0 18px; color: var(--app-text-secondary); font-size: 13px; }
 .cinematic-login__glass > [role='alert'] { color: var(--app-danger); }
@@ -323,13 +322,15 @@ async function qilingAuthenticated(session: LoginResult) {
 .cinematic-login__glass :deep(.qiling-login a:focus-visible) { outline: 2px solid #d5c5ff; outline-offset: 3px; }
 
 .has-password-auth {
-  --login-panel: var(--app-surface);
-  --login-text: var(--app-text);
-  --login-muted: var(--app-text-secondary);
-  --login-line: var(--app-border);
-  --login-field: var(--app-surface-muted);
-  --login-accent: var(--app-accent);
-  --login-danger: var(--creation-danger);
+  --login-panel: rgb(238 233 255 / 14%);
+  --login-text: #fffaf4;
+  --login-muted: #f5f0e8;
+  --login-line: rgb(236 230 255 / 26%);
+  --login-line-hover: rgb(236 230 255 / 55%);
+  --login-field: rgb(18 25 36 / 45%);
+  --login-field-hover: rgb(238 233 255 / 12%);
+  --login-accent: #e5d8ff;
+  --login-danger: #ffd0d2;
 }
 .has-password-auth .cinematic-login__layout { grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); gap: clamp(36px, 7vw, 112px); }
 .cinematic-login__glass.is-password {
@@ -339,15 +340,10 @@ async function qilingAuthenticated(session: LoginResult) {
   align-content: start;
   justify-items: stretch;
   padding: 32px;
-  border: 1px solid var(--login-line);
-  border-radius: 16px;
   color: var(--login-text);
-  background: var(--login-panel);
+  background: linear-gradient(145deg, rgb(20 28 43 / 64%), rgb(20 28 43 / 74%));
+  background: linear-gradient(145deg in oklab, rgb(20 28 43 / 64%), rgb(20 28 43 / 74%));
   text-align: left;
-  text-shadow: none;
-  box-shadow: none;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 .is-password h2 { margin-block-start: 24px; font-size: 28px; font-weight: 680; letter-spacing: -.025em; }
 .is-password > p { margin-block: 8px 26px; line-height: 1.6; }
@@ -363,13 +359,13 @@ async function qilingAuthenticated(session: LoginResult) {
 .is-password .cinematic-login__password label { color: var(--login-text); font-size: 13px; font-weight: 550; }
 .is-password .cinematic-login__password input { inline-size: 100%; min-block-size: 46px; padding-inline: 13px; border: 1px solid var(--login-line); border-radius: 10px; color: var(--login-text); background: var(--login-field); font: inherit; font-size: 14px; caret-color: var(--login-accent); }
 .is-password .cinematic-login__password input::placeholder { color: var(--login-muted); opacity: 1; font-size: 13px; font-weight: 400; }
-.is-password .cinematic-login__password input:hover:not(:disabled) { border-color: var(--app-border-strong); }
+.is-password .cinematic-login__password input:hover:not(:disabled) { border-color: var(--login-line-hover); }
 .is-password .cinematic-login__password input:disabled { opacity: .65; }
 .cinematic-login__password-field { display: grid; gap: 7px; }
 .cinematic-login__password-input { position: relative; }
 .is-password .cinematic-login__password-input input { padding-inline-end: 46px; }
 .cinematic-login__password-input button { position: absolute; inset-inline-end: 4px; inset-block: 4px; display: grid; place-items: center; inline-size: 38px; padding: 0; border: 0; border-radius: 7px; color: var(--login-muted); background: transparent; cursor: pointer; }
-.cinematic-login__password-input button:hover:not(:disabled) { color: var(--login-text); background: var(--app-surface-hover); }
+.cinematic-login__password-input button:hover:not(:disabled) { color: var(--login-text); background: var(--login-field-hover); }
 .cinematic-login__password-field small { color: var(--login-muted); font-size: 11px; line-height: 1.6; font-weight: 400; }
 .is-password .cinematic-login__password :deep(.app-button--primary) { justify-content: space-between; min-block-size: 46px; margin-block-start: 4px; padding-inline: 17px; background: #6251cf; box-shadow: none; font-size: 14px; }
 .is-password .cinematic-login__password :deep(.app-button--primary:hover:not(:disabled)) { background: #5342ba; }
@@ -379,7 +375,7 @@ async function qilingAuthenticated(session: LoginResult) {
 .is-password .cinematic-login__legal input { accent-color: var(--login-accent); }
 .is-password :is(input, button, a):focus-visible { outline: 2px solid var(--login-accent); outline-offset: 3px; }
 .is-password > [role='alert'] { margin-block: 14px 0; color: var(--login-danger); font-size: 13px; }
-.is-password ::selection { color: var(--login-text); background: var(--app-accent-soft); }
+.is-password ::selection { color: var(--login-text); background: rgb(203 186 255 / 30%); }
 .cinematic-login__motion { position: absolute; inset-block-end: 20px; inset-inline-start: 5vw; display: inline-flex; align-items: center; gap: 7px; min-block-size: 36px; padding: 8px 11px; border: 1px solid rgb(255 255 255 / 25%); border-radius: 8px; color: #f6f1ff; background: rgb(14 17 27 / 82%); font: inherit; font-size: 11px; cursor: pointer; }
 .cinematic-login__motion:hover { background: #202032; }
 .cinematic-login__motion:focus-visible { outline: 2px solid #d5c5ff; outline-offset: 3px; }

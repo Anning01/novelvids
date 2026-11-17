@@ -157,8 +157,21 @@ it.each(['light', 'dark'])('switches the editable prompt and binds a generated s
     expect(wrapper.get('output').text()).toBe('模型稿')
     await toggle.trigger('click'); await flushPromises()
     expect(wrapper.get('output').text()).toBe('通用稿')
-    await toggle.trigger('click'); await flushPromises()
+    expect(toggle.text()).toBe('使用优化稿')
+    let finishSave!: () => Promise<void>
+    persist.mockImplementationOnce((_, patch) => new Promise<void>(resolve => {
+      finishSave = async () => {
+        saved = {...saved, ...patch}
+        await wrapper.setProps({data:{...data,scene:saved}} as never)
+        resolve()
+      }
+    }))
+    await toggle.trigger('click')
+    expect(toggle.text()).toBe('切换中')
+    expect(toggle.attributes('aria-busy')).toBe('true')
+    await finishSave(); await flushPromises()
     expect(optimize).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('output').text()).toBe('模型稿')
     const sheet = {...saved, metadata:{...saved.metadata, storyboard_sheet:{image_url:'/media/board.png'}},
       storyboard_binding_rules:{general:{line:'{image} 分镜构图',headings:[]}}}
     wrapper.getComponent({name:'StoryboardSheetCard'}).vm.$emit('updated', sheet)

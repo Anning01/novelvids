@@ -1188,6 +1188,8 @@
     "优化中": "Optimizing",
     "模型 Skills 优化": "Optimize for model",
     "使用通用 Prompt": "Use general prompt",
+    "使用优化稿": "Use optimized prompt",
+    "切换中": "Switching",
     "提示词优化失败": "Prompt optimization failed",
     "模型未返回本镜头的提示词": "No matching prompt was returned for this shot",
     "分镜内容已修改，请按当前内容重新优化": "The shot has changed. Optimize again with the current settings.",

@@ -42,7 +42,7 @@ import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
 import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
-import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt } from '@/shared/sceneModelPrompt'
+import { boundPrompt, cachedModelPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt } from '@/shared/sceneModelPrompt'
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
@@ -1980,15 +1980,23 @@ async function toggleModelPrompt(scene: Scene) {
   await optimizeModelPrompt(scene, model)
 }
 
+function reusableModelPrompt(scene: Scene) {
+  const model = selectedVideoModelConfig.value
+  const draft = draftFor(scene)
+  if (!model || draft.promptModel) return undefined
+  return cachedModelPrompt(scene, model, optimizationInput(scene, model), draft.modelVersions)
+}
+
 async function optimizeModelPrompt(scene: Scene, model: VideoGenerationModel, reportError = true): Promise<boolean> {
   const draft = draftFor(scene)
   if (!draft.prompt.trim() || promptOptimizations.value.has(scene.id)) return false
   const facts = optimizationInput(scene, model)
   const input = JSON.stringify(facts)
+  const cached = cachedModelPrompt(scene, model, facts, draft.modelVersions)
   const controller = new AbortController()
-  promptOptimizations.value.set(scene.id, controller)
+  if (!cached) promptOptimizations.value.set(scene.id, controller)
   try {
-    const optimized = await resolveModelPrompt(scene, model, facts, draft.modelVersions, controller.signal)
+    const optimized = cached ?? await resolveModelPrompt(scene, model, facts, draft.modelVersions, controller.signal)
     if (controller.signal.aborted || selectedVideoModelConfig.value?.config_id !== model.config_id) return false
     if (JSON.stringify(optimizationInput(scene, model)) !== input) {
       if (reportError) notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
@@ -2823,7 +2831,7 @@ onBeforeUnmount(() => {
                       :disabled="draftFor(scene).promptModel ? !draftFor(scene).generic : !selectedVideoModelConfig || !draftFor(scene).prompt.trim()"
                       @click="toggleModelPrompt(scene)">
                       <WandSparkles v-if="!promptOptimizations.has(scene.id)" :size="15" aria-hidden="true" />
-                      {{ promptOptimizations.has(scene.id) ? tr('优化中') : draftFor(scene).promptModel ? tr('使用通用 Prompt') : tr('模型 Skills 优化') }}
+                      {{ promptOptimizations.has(scene.id) ? tr('优化中') : draftFor(scene).promptModel ? tr('使用通用 Prompt') : reusableModelPrompt(scene) ? tr('使用优化稿') : tr('模型 Skills 优化') }}
                     </AppButton>
                     <AppButton variant="primary" size="md" :aria-label="tr('生成视频')" :disabled="promptOptimizations.has(scene.id) || !canGenerateSceneVideo(scene)" :loading="generatingVideoSceneIds.has(scene.id)" @click="generateVideo(scene)"><Sparkles v-if="!generatingVideoSceneIds.has(scene.id)" :size="14" />{{ generatingVideoSceneIds.has(scene.id) ? tr('生成中') : tr('生成') }}<BillingPriceTag v-if="!generatingVideoSceneIds.has(scene.id)" :cost="sceneVideoEstimate(scene)" :pricing="selectedVideoModelConfig?.pricing" /></AppButton>
                   </div>
