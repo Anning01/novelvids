@@ -62,7 +62,8 @@ async def test_character_prose_is_saved_without_fixed_row_validation(bad):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('asset_type,text', [(1, person_traits()), (2, '庭院中央是石井，东侧木门，青砖围墙，阴天柔光。'),
-                                          (3, '圆形铜表，白色表盘，黑色指针，表壳边缘磨损。')])
+                                          (3, '圆形铜表，白色表盘，黑色指针，表壳边缘磨损。'),
+                                          (3, '生成四宫格画面，展示同一个场景：青砖庭院')])
 async def test_creation_preserves_complete_asset_prompt_verbatim(asset_type, text):
     service, _, _, _, _ = await crud()
     await GeneralConfig.create(id=1, prompt_language='zh')
@@ -71,11 +72,13 @@ async def test_creation_preserves_complete_asset_prompt_verbatim(asset_type, tex
     target = await Asset.get(id=saved.changes[0]['target_id'])
     expected = text
     assert target.base_traits == expected
+    assert target.asset_type == asset_type
     await service.read([AgentTarget(kind='asset', id=target.id)])
     await service.apply(CreationChangeSet.model_validate({'operations': [{'operation': 'update_setting',
         'target': {'kind': 'asset', 'id': target.id}, 'fields': {'prompt': expected}}]}), tool_call_id='same')
     await target.refresh_from_db()
     assert target.base_traits == expected
+    assert target.asset_type == asset_type
 
 
 @pytest.mark.asyncio
@@ -184,15 +187,6 @@ async def test_rules_tool_uses_actual_type_and_project_language_and_rejects_othe
     foreign = await Asset.create(novel=other, canonical_name='外部人物', asset_type=1, base_traits='不应读取的内容')
     with pytest.raises(ModelRetry, match='不存在'):
         await get_creation_prompt_rules(ctx, 'person', target=AgentTarget(kind='asset', id=foreign.id))
-
-
-@pytest.mark.asyncio
-async def test_reference_template_cannot_be_applied_to_wrong_type():
-    service, _, _, _, _ = await crud()
-    wrong = '生成四宫格画面，展示同一个场景：青砖庭院'
-    with pytest.raises(ValueError, match='类型不符'):
-        await service.apply(create_setting(wrong, asset_type=3), tool_call_id='wrong-kind')
-    assert not await Asset.filter(canonical_name='胖子').exists()
 
 
 @pytest.mark.asyncio

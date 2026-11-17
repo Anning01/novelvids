@@ -40,3 +40,22 @@ def render_timed_action(value: dict) -> str:
 def render_timed_speech(value: dict, language: str) -> str:
     delivery = (f'（{value["delivery"]}）' if language == 'zh' else f' ({value["delivery"]})') if value['delivery'] else ''
     return f'{value["start"]:g}s-{value["end"]:g}s: {value["speaker"]}{delivery}: {value["text"]}'
+
+
+def scene_prompt_edit_method(method: dict) -> dict:
+    return {**method, 'instructions': (
+        '根据 instructions 修改 target.prompt，返回修改后的完整提示词。'
+        '只调整用户要求的内容，保留其余画面、声音、时长与已有资产引用；重复文字按语义一起修改。'
+        '这是已有分镜的文本修改，不重新生成分镜结构，不新增资产，不返回替换片段。\n'
+        + method['instructions'])}
+
+
+def scene_prompt_batch_method(method: dict) -> dict:
+    return {**method, 'instructions': (
+        '根据本轮用户要求修改 targets 中选中分镜的完整 prompt。一次返回全部结果。'
+        '只改用户要求的内容，保留其余画面、声音、时长和已有资产引用，不新增资产。'
+        'prompts 的键由平台指定；未要求修改的分镜返回 null。'
+        '用户仅提问时所有 prompt 返回 null，并在 reply 中回答；不要把问题当成修改授权。'
+        'reply 用一两句纯文本说明，不使用 Markdown，不声称已保存，不建议额外任务。'
+        '返回完整提示词，不返回替换片段，不重新生成分镜结构。\n'
+        + method['instructions'])}

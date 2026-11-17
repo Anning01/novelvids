@@ -86,6 +86,8 @@ def configured_model(config, limits: AgentConfiguration, *, structured_output=Tr
 
 def public_run_error(message: str, calls: list[dict], *, turn_limited: bool = False) -> str:
     """Return actionable fixed copy without disclosing a provider's error payload."""
+    if message.startswith("分镜提示词修改失败："):
+        return message
     if any(call.get("platform_balance_insufficient") for call in calls):
         return localized_message("API 平台账户可用额度不足，请前往 API 平台检查余额和限额")
     if turn_limited and ('Unknown tool name' in message or 'Exceeded maximum retries' in message):
@@ -132,6 +134,9 @@ class CreationAgentTaskHandler(BaseTaskHandler):
             return chosen
 
         chosen = await before_request()
+        from services.creation_agent.scene_prompt_run import is_scene_prompt_run, run_scene_prompt_edit
+        if is_scene_prompt_run(request):
+            return await run_scene_prompt_edit(request_params, request, assistant, conversation, before_request)
         service = PromptEditService(novel_id=conversation.novel_id, task_id=assistant.task_id,
             allowed_targets={(target.kind, target.id) for target in request.targets},
             max_batch_size=limits.max_targets, authorization_check=before_request)

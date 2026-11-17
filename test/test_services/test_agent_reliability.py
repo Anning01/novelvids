@@ -319,7 +319,7 @@ async def test_initial_model_request_contains_observed_targets_and_rules_before_
     from utils.enums import AiTaskTypeEnum
     from test.test_services.test_creation_agent_sessions import session_fixture
     conversation, request, _ = await session_fixture()
-    request = request.model_copy(update={'write_scope': 'selected'})
+    request = request.model_copy(update={'write_scope': 'chapter'})
     task = await agent_sessions.submit(conversation, request, AuthContext())
     source = await AgentMessage.get(task=task, role='user')
     await CreationConstraint.create(novel_id=conversation.novel_id, source_message=source, fingerprint='warm',
@@ -412,32 +412,66 @@ async def test_restart_keeps_paid_chat_transcript_and_never_reauthors_saved_writ
 
 
 @pytest.mark.asyncio
-async def test_storyboard_draft_renders_canonical_sections_with_default_strategy(monkeypatch):
+async def test_storyboard_edit_uses_complete_prompt_once_and_supports_undo(monkeypatch):
     from schemas.creation_agent import AgentTarget
-    from schemas.agent_workflow import StructuredSkillStoryboard
     from services.creation_agent.object_drafts import revise_object
-    from services.creation_agent.skill_execution import SkillExecution, current_execution
-    from test.test_services.test_asset_design_instructions import synthetic_snapshot
-    from test.test_services.test_prompt_language import _shot
+    from services.creation_agent.skill_execution import SkillExecution
+    from models.scene import Scene
     service, scene, _, _, task = await crud()
-    execution = SkillExecution({'task_id': str(task.id), 'prompt_language': 'zh',
-        'skill_snapshot': synthetic_snapshot().model_dump()}, None, AsyncMock())
+    original = '冷色调，老人行走。\n冷色调，老人停步。'
+    revised = original.replace('冷色调', '暖色调')
+    await Scene.filter(id=scene.id).update(prompt=original, prompt_params={'grade_and_palette': '冷色调'})
+    execution = SkillExecution({'task_id': str(task.id), 'prompt_language': 'zh'}, None, AsyncMock())
+    calls = []
 
-    async def generate(skill, facts, output_type, **kwargs):
-        assert skill == 'storyboard' and facts['shot_duration_range'] == [6, 6]
-        shot = _shot().model_dump()
-        shot.update(duration='6s', visual_prose='老人在晨雾中漫步。', actions=['0s-6s: 老人沿小路缓步前行。'])
-        return StructuredSkillStoryboard.model_validate({'shots': [shot]})
+    async def generate(editor, facts):
+        calls.append(facts)
+        assert facts['target']['prompt'] == original
+        assert facts['instructions'] == '改为暖色调'
+        schema = editor.params['output_contract']['schema']
+        assert schema['required'] == ['prompt'] and schema['additionalProperties'] is False
+        assert '完整提示词' in editor.params['creative_method']['instructions']
+        return {'prompt': revised}
 
-    monkeypatch.setattr(execution, 'generate', AsyncMock(side_effect=generate))
-    token = current_execution.set(execution)
-    try:
-        await revise_object(service, execution, AgentTarget(kind='scene', id=scene.id), '老人慢慢行走，保留时长', 'full-scene')
-    finally:
-        current_execution.reset(token)
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    monkeypatch.setattr(SkillExecution, 'generate', AsyncMock(side_effect=AssertionError('no legacy generation')))
+    target = AgentTarget(kind='scene', id=scene.id)
+    change = await revise_object(service, execution, target, '改为暖色调', 'simple-edit')
+    replay = await revise_object(service, execution, target, '改为暖色调', 'simple-edit')
     await scene.refresh_from_db()
-    assert '【禁止项】' in scene.prompt and '【全局前置条件】' in scene.prompt
-    assert '镜头时长:6s' in scene.prompt and '老人在晨雾中漫步' in scene.prompt
+    assert scene.prompt == revised and 'grade_and_palette' not in scene.prompt_params
+    assert len(calls) == 1 and replay.id == change.id
+    await service.undo(change.id)
+    await scene.refresh_from_db()
+    assert scene.prompt == original and scene.prompt_params['grade_and_palette'] == '冷色调'
+
+
+@pytest.mark.asyncio
+async def test_storyboard_edit_does_not_overwrite_concurrent_change_or_retry(monkeypatch):
+    from schemas.creation_agent import AgentTarget
+    from services.creation_agent.object_drafts import revise_object
+    from services.creation_agent.skill_execution import SkillExecution
+    from models.scene import Scene
+    service, scene, _, _, task = await crud()
+    execution = SkillExecution({'task_id': str(task.id), 'prompt_language': 'zh'}, None, AsyncMock())
+    calls = []
+
+    async def generate(editor, facts):
+        calls.append(facts)
+        await Scene.filter(id=scene.id).update(prompt='用户手工修改')
+        return {'prompt': '模型修改'}
+
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    with pytest.raises(ValueError, match='修改|变化'):
+        await revise_object(service, execution, AgentTarget(kind='scene', id=scene.id), '暖色调', 'conflict')
+    await scene.refresh_from_db()
+    assert scene.prompt == '用户手工修改' and len(calls) == 1
+
+
+def test_scene_prompt_error_displays_reason():
+    from services.creation_agent.handler import public_run_error
+    reason = '分镜提示词修改失败：该对象已有新修改，请重新读取'
+    assert public_run_error(reason, []) == reason
 
 
 @pytest.mark.asyncio
@@ -469,3 +503,31 @@ async def test_remake_repairs_two_validation_failures_independently():
     await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)
     with pytest.raises(RepairExhausted):
         await claim_repair(task.id, [{'code': 'tool_validation'}], attempts=2)
+
+
+@pytest.mark.asyncio
+async def test_scene_edit_tool_failure_stops_instead_of_model_retry(monkeypatch):
+    from types import SimpleNamespace
+    from schemas.creation_agent import AgentTarget
+    from services.creation_agent.runtime import revise_creation_object
+    from services.creation_agent.skill_execution import current_execution
+    failure = AsyncMock(side_effect=ValueError('当前对象已修改'))
+    monkeypatch.setattr('services.creation_agent.object_drafts.revise_object', failure)
+    ctx = SimpleNamespace(deps=SimpleNamespace(changes=object()), tool_call_id='edit')
+    token = current_execution.set(object())
+    try:
+        with pytest.raises(RuntimeError, match='分镜提示词修改失败：当前对象已修改'):
+            await revise_creation_object(ctx, AgentTarget(kind='scene', id=1), '暖色调')
+    finally:
+        current_execution.reset(token)
+    assert failure.await_count == 1
+
+
+def test_scene_edit_instructions_use_direct_revision():
+    from prompts.skill_pack import read_skill
+    from prompts.text_tasks import scene_prompt_edit_method, render_text_task
+    method = scene_prompt_edit_method({'instructions': '用户自定义方法', 'references': []})
+    system, content = render_text_task(language='zh', skill=method, context={'instructions': '暖色调'})
+    assert 'zh 使用简体中文' in system and '用户自定义方法' in content
+    assert '返回修改后的完整提示词' in content
+    assert '分镜提示词修改统一调用 revise_creation_object' in read_skill('editing')

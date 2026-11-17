@@ -1,4 +1,6 @@
 {
+  "分镜提示词已修改并保存。": "Storyboard prompts updated and saved.",
+  "修改分镜提示词": "Edit storyboard prompts",
   "旧版文本任务已停用，请重新发起生成；历史结果和用量记录仍保留。": "This legacy text task has been retired. Start a new generation; previous results and usage records are retained.",
   "请选择已启用且支持 JSON Schema 严格输出的模型": "Select an active model that supports strict JSON Schema output",
   "资产结果转换失败：模型返回缺少字段 {p0}。": "Asset result conversion failed: the model response is missing field {p0}.",
