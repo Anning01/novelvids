@@ -154,6 +154,9 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
     """完成分章与书稿理解；人物仅保留为分析参考，封面按请求生成。"""
 
     async def execute(self, request_params: dict) -> dict:
+        if request_params.get('operation') == 'story_memory_recheck':
+            from services.story_memory.recheck import run_recheck
+            return await run_recheck(request_params)
         if request_params.get('operation') in {'story_memory_analyze', 'story_memory_review'}:
             from services.story_memory.analysis import analyze
             return await analyze(request_params)

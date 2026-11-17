@@ -5,13 +5,27 @@ from auth.deps import AuthContext, require_team_access, require_roles
 from controllers.story_memory import submit_analysis, submit_review
 from models.story_memory import StoryCommit, StoryFact, StorySubject
 from schemas.ai_task import AiTaskOut
-from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryReviewRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryReviewRequest, StoryRecheckRequest
 from services.ai_task_executor import ai_task_executor
 from services.story_memory.store import commit_data, decide, get_commit, save_candidate
 from utils.response_format import ResponseSchema
 
 router = APIRouter(prefix='/novel/{novel_id}/story-memory', dependencies=[Depends(require_team_access)])
 _EDITOR = Depends(require_roles('admin', 'creator'))
+
+
+@router.get('/status', response_model=ResponseSchema)
+async def status(novel_id: int):
+    from services.story_memory.status import memory_status
+    return ResponseSchema(data=await memory_status(novel_id))
+
+
+@router.post('/recheck', response_model=ResponseSchema[AiTaskOut])
+async def recheck(novel_id: int, body: StoryRecheckRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
+    from services.story_memory.recheck import submit_recheck
+    task = await submit_recheck(novel_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
 
 
 @router.post('/analyze', response_model=ResponseSchema[AiTaskOut])
@@ -49,8 +63,12 @@ async def review(novel_id: int, commit_id: int, body: StoryReviewRequest, bg: Ba
 
 
 @router.post('/commits/{commit_id}/decision', response_model=ResponseSchema)
-async def decision(novel_id: int, commit_id: int, body: StoryDecision, ctx: AuthContext = _EDITOR):
+async def decision(novel_id: int, commit_id: int, body: StoryDecision, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
     commit = await decide(novel_id, commit_id, body, ctx.user.id if ctx.user else None)
+    from services.story_memory.recheck import resume_recheck
+    continuation = await resume_recheck(commit)
+    if continuation:
+        bg.add_task(ai_task_executor.run, continuation)
     return ResponseSchema(data=await commit_data(commit))
 
 

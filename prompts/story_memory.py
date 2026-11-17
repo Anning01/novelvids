@@ -7,7 +7,10 @@ EXTRACT = '''分析源文本，提取故事记忆候选，供独立审核和用�
 沿用提供的故事对象 existing_id；同名不证明同一身份，疑似同名不同人列入 unresolved。
 每项事实提供 source、start、end、quote；位置按源字符串 Unicode 字符从零计数，end 不包含。
 只引用 source_snapshot 内的 project.setting、project.outline、project.description 或 chapter.text。
-前章事实供衔接和查重，不伪造为本章证据；没有变化的旧事实不重复新增。
+前章事实供衔接和查重，不伪造为本章证据；没有变化的前章事实不重复新增。
+重新分析时，对照 previous_commit 的旧稿和候选，提取当前版本的完整本章变化包。
+本章旧提交会整体被新提交替代，不遗漏仍成立的本章事实；不能引用旧本章事实作为 replaces_id。
+replaces_id 只用于替代 prior_facts 中的前置有效事实。前章变化后重新核对本章因果与世界状态。
 基础底稿只依据已有项目材料，缺少正文不能猜年代、科技、身份或世界规则，未知写入 unresolved。
 当前章材料优先使用提供的剧本；参考原著与改编设定要保留区别。
 亲见事实、人物证言、推测、计划、创作决定分别使用对应 nature。计划不能登记为已发生事件。

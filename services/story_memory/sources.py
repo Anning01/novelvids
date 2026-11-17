@@ -11,21 +11,26 @@ def conflict(message):
     raise HTTPException(409, message)
 
 
+def snapshot_data(project, chapter=None):
+    return {'project': {'name': project.name, 'setting': project.project_setting or '',
+        'outline': project.story_outline or '', 'description': project.description or ''},
+        'chapter': {'id': chapter.id, 'number': chapter.number, 'name': chapter.name,
+            'kind': 'screenplay' if chapter.screenplay else 'source', 'text': chapter.production_text}
+        if chapter else None}
+
+
 async def source_snapshot(novel_id, chapter_id=None):
     project = await Novel.get_or_none(id=novel_id)
     if project is None:
         raise HTTPException(404, '作品不存在')
-    source = {'project': {'name': project.name, 'setting': project.project_setting or '',
-        'outline': project.story_outline or '', 'description': project.description or ''}, 'chapter': None}
+    chapter = None
     if chapter_id is not None:
         chapter = await Chapter.get_or_none(id=chapter_id, novel_id=novel_id)
         if chapter is None:
             raise HTTPException(404, '章节不属于当前作品')
         if not chapter.production_text.strip():
             raise HTTPException(422, '本章没有可分析的剧本或原文')
-        source['chapter'] = {'id': chapter.id, 'number': chapter.number, 'name': chapter.name,
-            'kind': 'screenplay' if chapter.screenplay else 'source', 'text': chapter.production_text}
-    return source
+    return snapshot_data(project, chapter)
 
 
 async def latest_commit(novel_id, chapter_id):
@@ -35,19 +40,19 @@ async def latest_commit(novel_id, chapter_id):
 async def predecessor(novel_id, chapter_id):
     if chapter_id is None:
         return None
-    chapter = await Chapter.get(id=chapter_id, novel_id=novel_id)
-    parent = await latest_commit(novel_id, None)
-    if parent is None:
-        conflict('请先分析并确认全局故事底稿')
-    if fingerprint(await source_snapshot(novel_id)) != parent.source_hash:
-        conflict('全局故事底稿已过期，请重新分析并确认')
-    for previous in await Chapter.filter(novel_id=novel_id, number__lt=chapter.number).order_by('number', 'id'):
-        commit = await latest_commit(novel_id, previous.id)
-        if (commit is None or commit.parent_id != parent.id
-                or fingerprint(await source_snapshot(novel_id, previous.id)) != commit.source_hash):
-            conflict(f'第 {previous.number} 章的正式记忆缺失或过期，请先完成前章提交')
-        parent = commit
-    return parent.id
+    from services.story_memory.status import memory_status
+    state = await memory_status(novel_id)
+    if not any(item['chapter_id'] == chapter_id for item in state['chapters']):
+        raise HTTPException(404, '章节不属于当前作品')
+    parent = state['baseline']
+    if parent['state'] != 'current':
+        conflict('全局故事底稿缺失或已失效，请先分析并确认')
+    for previous in state['chapters']:
+        if previous['chapter_id'] == chapter_id:
+            return parent['commit_id']
+        if previous['state'] != 'current':
+            conflict(f'第 {previous["number"]} 章的正式记忆缺失或过期，请先完成前章提交')
+        parent = previous
 
 
 async def verify_inputs(commit, *, check_target=True):
@@ -55,6 +60,12 @@ async def verify_inputs(commit, *, check_target=True):
         conflict('剧本或项目设定已变化，请重新分析；原提交仍保留')
     if await predecessor(commit.novel_id, commit.chapter_id) != commit.parent_id:
         conflict('前置故事记忆已变化，请重新分析')
+    if commit.status == 'stale':
+        conflict('候选因来源或前情变化已失效，请重新分析')
+    if commit.status == 'accepted':
+        snapshot = await StorySnapshot.get_or_none(commit_id=commit.id)
+        if snapshot and snapshot.data.get('invalidation'):
+            conflict('本次正式记忆已失效，请重新分析并复核后续章节')
     if check_target:
         previous = await latest_commit(commit.novel_id, commit.chapter_id)
         if (previous.id if previous else None) != commit.replaces_id:

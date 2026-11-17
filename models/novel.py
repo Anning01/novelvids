@@ -131,7 +131,15 @@ class Novel(AbstractBaseModel):
             ]
             if 'deleted_at' in names:
                 raise ValueError('删除状态只能通过作品删除服务修改')
+            before = await Novel.get(id=self.id).using_db(connection)
             await super().save(using_db=connection, update_fields=names, force_update=force_update)
+            watched = {'name', 'project_setting', 'story_outline', 'description'}
+            if watched.intersection(names):
+                after = await Novel.get(id=self.id).using_db(connection)
+                from services.story_memory.sources import snapshot_data
+                if snapshot_data(before) != snapshot_data(after):
+                    from services.story_memory.invalidation import invalidate
+                    await invalidate(self.id, reason='project_changed')
 
     def __str__(self):
         return self.name

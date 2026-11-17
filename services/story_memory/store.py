@@ -97,11 +97,19 @@ async def decide(novel_id, commit_id, body, actor_id):
                 conflict('此提交已经结束，不能更改裁决')
             return commit
         if body.decision == 'accept':
+            if commit.status == 'stale':
+                await verify_inputs(commit)
             if commit.status != 'ready' or not commit.review:
                 conflict('候选须先完成审核，并处理阻断问题')
             await verify_inputs(commit)
             candidate = await validate_candidate(commit, commit.candidate)
             await publish(commit, candidate)
+            if commit.replaces_id:
+                from services.story_memory.invalidation import invalidate
+                chapter = commit.source_snapshot.get('chapter')
+                await invalidate(novel_id, chapter_id=commit.chapter_id,
+                    from_number=chapter['number'] + 1 if chapter else None,
+                    reason='upstream_commit_changed', exclude_commit_id=commit.id)
         elif commit.status not in {'draft', 'ready', 'needs_review'}:
             conflict('候选尚未生成，不能裁决')
         commit.status = desired
@@ -143,6 +151,7 @@ async def publish(commit, candidate):
 
 
 async def commit_data(commit, *, detail=True):
+    reason = None
     try:
         await verify_inputs(commit, check_target=commit.status != 'accepted')
         current = True
@@ -150,14 +159,17 @@ async def commit_data(commit, *, detail=True):
             from services.story_memory.sources import latest_commit
             latest = await latest_commit(commit.novel_id, commit.chapter_id)
             current = latest.id == commit.id
+            if not current:
+                reason = '已有更新的正式提交'
     except HTTPException as error:
         if error.status_code not in {404, 409, 422}:
             raise
         current = False
+        reason = str(error.detail)
     fields = ('id', 'novel_id', 'chapter_id', 'parent_id', 'replaces_id', 'status', 'revision',
         'source_hash', 'package_hash', 'created_by', 'decided_by', 'decision', 'created_at', 'decided_at')
     data = {key: getattr(commit, key) for key in fields}
-    data.update(current=current, request_id=str(commit.request_id), task_id=str(commit.task_id) if commit.task_id else None)
+    data.update(current=current, stale_reason=reason, request_id=str(commit.request_id), task_id=str(commit.task_id) if commit.task_id else None)
     if detail:
         snapshot = await StorySnapshot.get_or_none(commit_id=commit.id)
         data.update(candidate=commit.candidate, review=commit.review, source_snapshot=commit.source_snapshot,

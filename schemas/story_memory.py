@@ -124,3 +124,10 @@ class StoryDecision(StoryModel):
     expected_package_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
     decision: Literal['accept', 'reject']
     note: str = Field(default='', max_length=4000)
+
+
+class StoryRecheckRequest(StoryModel):
+    request_id: UUID
+    from_chapter_id: int | None = Field(default=None, gt=0)
+    assistant_model_config_id: int | None = Field(default=None, gt=0)
+    skill_id: int | None = Field(default=None, ge=0)

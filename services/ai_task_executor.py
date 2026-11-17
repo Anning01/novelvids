@@ -11,6 +11,7 @@ from models.ai_task import AiTask
 from services.billing.recorder import record_ai_task_usage
 from services.creation_agent.waiting import WaitingForMedia
 from services.creation_agent.waiting import WaitingForDependencies
+from services.creation_agent.waiting import WaitingForStoryConfirmation
 from services.task_signals import task_signals
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
@@ -254,6 +255,10 @@ class AiTaskExecutor:
             await self._complete(task, result)
         except WaitingForMedia as waiting:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_media', response_data=waiting.result)
+        except WaitingForStoryConfirmation as waiting:
+            await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(
+                stage='needs_review', response_data=waiting.result)
+            await task_signals.publish(str(task.id))
         except WaitingForDependencies:
             await AiTask.filter(id=task.id, status=TaskStatusEnum.running.value).update(stage='waiting_dependencies')
             await task_signals.publish(str(task.id))

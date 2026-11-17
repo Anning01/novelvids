@@ -36,6 +36,10 @@ async def analyze(params):
     subjects = await StorySubject.filter(novel_id=commit.novel_id).order_by('id').values('id', 'kind', 'name', 'aliases')
     context = {'source_snapshot': commit.source_snapshot, 'prior_state': state,
         'prior_facts': facts, 'subjects': subjects}
+    if commit.replaces_id:
+        previous = await get_commit(commit.novel_id, commit.replaces_id)
+        context['previous_commit'] = {'id': previous.id, 'source_snapshot': previous.source_snapshot,
+            'candidate': previous.candidate, 'review': previous.review}
     if params['operation'] == 'story_memory_analyze':
         result = await execution.generate_strict(context)
         async def persist():

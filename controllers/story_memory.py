@@ -17,7 +17,7 @@ async def workflow(novel_id, ctx, model_id, skill_id=None):
         'user_id': ctx.user.id if ctx.user else None, 'assistant_model_config_id': model_id}, 'story', skill_id)
 
 
-async def submit_analysis(novel_id, body, ctx):
+async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
     spec = body.model_dump(mode='json')
     existing = await StoryCommit.get_or_none(novel_id=novel_id, request_id=body.request_id)
     if existing:
@@ -27,6 +27,8 @@ async def submit_analysis(novel_id, body, ctx):
     params = await workflow(novel_id, ctx, body.assistant_model_config_id, body.skill_id)
     params.update(operation='story_memory_analyze', output_contract=contract('extract'),
         creative_method=method(params['creative_method'], 'extract', params['prompt_language']))
+    if recheck_id is not None:
+        params['story_recheck_id'] = str(recheck_id)
     async with project_write(novel_id):
         existing = await StoryCommit.get_or_none(novel_id=novel_id, request_id=body.request_id)
         if existing:
