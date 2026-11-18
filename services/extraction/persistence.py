@@ -3,10 +3,11 @@
 import re
 
 from tortoise.backends.base.client import BaseDBAsyncClient
-from tortoise.transactions import in_transaction
+from tortoise.expressions import Q
 
 from models.asset import Asset
 from models.asset_variant import AssetVariant
+from services.creation_objects import project_write
 from services.extraction.context import normalize_source_chapters
 from services.extraction.extractor import (
     AssetExtractionResult,
@@ -15,6 +16,7 @@ from services.extraction.extractor import (
     Scene,
 )
 from utils.enums import AssetTypeEnum
+from utils.messages import localized_message
 
 
 RESULT_ASSET_MAP = [
@@ -62,8 +64,6 @@ def _match_identity(item: ExtractedAsset, assets: list[Asset], batch_names: set[
             or _identity_key(asset.canonical_name) in aliases
         ]
     if len(candidates) > 1:
-        from utils.messages import localized_message
-
         raise ValueError(localized_message("资产名称匹配到多个对象，请修改别名后重试"))
     if not exact and candidates and _identity_key(candidates[0].canonical_name) in batch_names:
         return None
@@ -165,7 +165,20 @@ class AssetUpsertService:
         repair_variant_ids: frozenset[int] = frozenset(),
     ) -> dict[str, list[dict[str, str | int]]]:
         summary: dict[str, list[dict[str, str | int]]] = {}
-        async with in_transaction() as connection:
+        async with project_write(novel_id) as connection:
+            # Removed assets still reserve their canonical names within each type.
+            names_by_type = Q(*(
+                Q(asset_type=kind.value, canonical_name__in={item.name for item in getattr(result, key)})
+                for kind, key in RESULT_ASSET_MAP
+            ), join_type=Q.OR)
+            removed_names = await Asset.with_deleted().filter(
+                names_by_type, novel_id=novel_id, deleted_at__not_isnull=True,
+            ).using_db(connection).order_by("id").values_list("canonical_name", flat=True)
+            if removed_names:
+                raise ValueError(localized_message(
+                    "本章提取到已移除的同名设定（{p0}）。请恢复这些设定后重新提取。",
+                    p0="、".join(dict.fromkeys(removed_names)),
+                ))
             for asset_type, result_key in RESULT_ASSET_MAP:
                 summary[result_key] = await self._save_assets(
                     connection=connection,
@@ -295,7 +308,6 @@ class AssetUpsertService:
         if item.variant is None:
             return None
         from services.creation_objects import CreationObjects
-        from utils.messages import localized_message
 
         incoming = item.variant
         variants = AssetVariant.filter(asset_id=asset.id).using_db(connection)

@@ -139,6 +139,54 @@ async def test_asset_design_fields_are_rendered_once_and_variants_are_reused(pro
 
 
 @pytest.mark.asyncio
+async def test_extraction_reports_removed_settings_together_and_reuses_them_after_restore(project, monkeypatch):
+    from services.creation_objects import CreationObjects, project_write
+
+    novel, chapter, _ = project
+    objects = CreationObjects(novel.id)
+    archived = [
+        await Asset.create(novel=novel, canonical_name=name, asset_type=1,
+            base_traits='人工定稿', main_image='/media/approved.png', source_chapters=[2])
+        for name in ('阿岚', '老周')
+    ]
+    other_novel = await Novel.create(name='另一作品')
+    foreign = await Asset.create(novel=other_novel, canonical_name='路人', asset_type=1)
+    other_type = await Asset.create(novel=novel, canonical_name='路人', asset_type=2)
+    async with project_write(novel.id):
+        for asset in [*archived, other_type]:
+            await objects.archive('asset', asset.id)
+    async with project_write(other_novel.id):
+        await CreationObjects(other_novel.id).archive('asset', foreign.id)
+
+    payload = asset_payload()
+    person = payload['persons'][0]
+    payload['persons'] = [{**person, 'name': name} for name in ('路人', '阿岚', '老周')]
+    mock_model(monkeypatch, payload)
+    failed = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(failed)
+    await failed.refresh_from_db()
+
+    assert failed.status == 4
+    assert failed.error_message == '本章提取到已移除的同名设定（阿岚、老周）。请恢复这些设定后重新提取。'
+    assert not await Asset.filter(novel=novel).exists()
+
+    async with project_write(novel.id):
+        for asset in archived:
+            await objects.restore('asset', asset.id)
+    retried = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(retried)
+    await retried.refresh_from_db()
+
+    assert retried.status == 3, retried.error_message
+    assert await Asset.filter(novel=novel, asset_type=1).count() == 3
+    for asset in archived:
+        restored = await Asset.get(id=asset.id)
+        assert restored.source_chapters == [1, 2]
+        assert restored.base_traits == '人工定稿'
+        assert restored.main_image == '/media/approved.png'
+
+
+@pytest.mark.asyncio
 async def test_foreign_variant_rolls_back_the_whole_asset_write(project, monkeypatch):
     from models.asset_variant import AssetVariant
     novel, chapter, _ = project
