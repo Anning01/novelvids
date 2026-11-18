@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from api.story_memory import router
 from auth.deps import AuthContext
 from controllers.chapter import chapter_controller
-from controllers.story_memory import submit_analysis
+from controllers.story_memory import submit_analysis, submit_repair
 from models.ai_task import AiTask
 from models.asset import Asset
 from models.chapter import Chapter
@@ -18,7 +18,7 @@ from models.novel import Novel
 from models.scene import Scene
 from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
 from schemas.chapter import ChapterPatch, EpisodePacing
-from schemas.story_memory import StoryAnalysisRequest, StoryDecision, StoryRecheckRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryDecision, StoryRecheckRequest, StoryRepairRequest
 from services.ai_task_executor import ai_task_executor
 from services.creation_agent.object_state import write_fields
 from services.creation_agent.skill_execution import SkillExecution
@@ -190,6 +190,77 @@ async def test_recheck_advances_in_order_and_pauses_for_each_human_decision(monk
     assert len(calls) == 4  # Resuming never repeats accepted model work.
     assert all(item['state'] == 'current' for item in (await memory_status(project.id))['chapters'])
     assert (await StoryCommit.get(id=commits[3].id)).status == 'accepted'
+
+
+@pytest.mark.asyncio
+async def test_repair_uses_review_findings_and_resumes_the_same_batch_only_after_confirmation(monkeypatch):
+    project, chapters, _ = await chain(count=1)
+    model = await strict_model()
+    source = '古城重新供水。水由新建水井供应。'
+    await chapter_controller.patch(chapters[0].id, ChapterPatch(screenplay=source))
+    subject = await StorySubject.get(novel=project)
+    incomplete = candidate(source, source='chapter.text', existing_id=subject.id, content='古城重新供水。')
+    finding = {'severity': 'blocking', 'fact_index': None, 'reason': '遗漏供水来源'}
+    review_failure = True
+    calls = []
+
+    async def generate(execution, context):
+        stage = execution.params['output_contract']['name']
+        calls.append(stage)
+        if stage == 'story_memory_extract':
+            return incomplete
+        if stage == 'story_memory_repair':
+            assert '原文支持' in execution.params['creative_method']['instructions']
+            assert context['source_snapshot']['chapter']['text'] == source
+            assert context['review_findings'] == [finding] and context['original_candidate'] == incomplete
+            replacement = deepcopy(incomplete)
+            replacement['facts'].append({**replacement['facts'][0], 'content': '水由新建水井供应。'})
+            return replacement
+        assert stage == 'story_memory_review'
+        if len(context['candidate']['facts']) == 1:
+            return {'summary': '发现遗漏', 'issues': [finding]}
+        return {'summary': '补全后已独立核对', 'issues': [{'severity': 'warning', 'fact_index': 99, 'reason': '索引非法'}] if review_failure else []}
+
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    batch = await submit_recheck(project.id, StoryRecheckRequest(request_id=uuid4(), from_chapter_id=chapters[0].id), AuthContext())
+    await ai_task_executor.run(batch)
+    await batch.refresh_from_db()
+    waiting = await StoryCommit.get(id=batch.response_data['waiting_commit_id'])
+    old_hash, old_revision = waiting.package_hash, waiting.revision
+    body = StoryRepairRequest(expected_revision=old_revision, expected_package_hash=old_hash)
+    with pytest.raises(HTTPException, match='候选或审核已变化'):
+        await submit_repair(project.id, waiting.id, body.model_copy(update={'expected_package_hash': '0' * 64}), AuthContext())
+
+    task = await submit_repair(project.id, waiting.id, body, AuthContext())
+    assert task.request_params['assistant_model_config_id'] == model.id
+    assert (await submit_repair(project.id, waiting.id, body, AuthContext())).id == task.id
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    await waiting.refresh_from_db()
+    assert task.status == 4 and waiting.status == 'needs_review'
+    assert waiting.package_hash == old_hash and waiting.candidate == incomplete
+    assert not await StorySnapshot.filter(commit_id=waiting.id).exists()
+
+    review_failure = False
+    app = FastAPI()
+    app.include_router(router)
+    url = f'/novel/{project.id}/story-memory/commits/{waiting.id}'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        response = await client.post(url + '/repair', json=body.model_dump(mode='json'))
+        assert response.status_code == 200, response.text
+        await waiting.refresh_from_db()
+        await batch.refresh_from_db()
+        assert waiting.status == 'ready' and waiting.revision == old_revision + 1
+        assert waiting.review['summary'] == '补全后已独立核对'
+        assert batch.stage == 'needs_review' and batch.response_data['waiting_commit_id'] == waiting.id
+        assert not await StorySnapshot.filter(commit_id=waiting.id).exists()
+        assert (await client.post(url + '/decision', json={'decision': 'accept', 'expected_package_hash': old_hash})).status_code == 409
+        response = await client.post(url + '/decision', json={'decision': 'accept', 'expected_package_hash': waiting.package_hash})
+        assert response.status_code == 200, response.text
+    assert calls == ['story_memory_extract', 'story_memory_review', 'story_memory_repair', 'story_memory_review', 'story_memory_repair', 'story_memory_review']
+    await batch.refresh_from_db()
+    assert batch.status == 3
+    assert await StoryFact.filter(commit_id=waiting.id).count() == 2
 
 
 @pytest.mark.asyncio

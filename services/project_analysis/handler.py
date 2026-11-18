@@ -157,7 +157,7 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         if request_params.get('operation') == 'story_memory_recheck':
             from services.story_memory.recheck import run_recheck
             return await run_recheck(request_params)
-        if request_params.get('operation') in {'story_memory_analyze', 'story_memory_review'}:
+        if request_params.get('operation') in {'story_memory_analyze', 'story_memory_repair', 'story_memory_review'}:
             from services.story_memory.analysis import analyze
             return await analyze(request_params)
         novel_id = int(request_params["novel_id"])

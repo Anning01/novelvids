@@ -90,6 +90,15 @@ async def save_review(novel_id, commit_id, revision, candidate_hash, review, *, 
         return commit
 
 
+async def save_repaired_candidate(novel_id, commit_id, expected_hash, candidate, review, *, task_id):
+    async with project_write(novel_id):
+        current = await get_commit(novel_id, commit_id)
+        if current.status != 'needs_review' or current.package_hash != expected_hash:
+            conflict('候选或审核已变化，补全结果不能使用')
+        revised = await save_candidate(novel_id, commit_id, candidate, current.revision)
+        return await save_review(novel_id, commit_id, revised.revision, fingerprint(revised.candidate), review, task_id=task_id)
+
+
 async def decide(novel_id, commit_id, body, actor_id):
     async with project_write(novel_id):
         commit = await get_commit(novel_id, commit_id)

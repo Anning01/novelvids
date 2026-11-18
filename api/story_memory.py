@@ -2,11 +2,11 @@
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from auth.deps import AuthContext, require_team_access, require_roles
-from controllers.story_memory import submit_analysis, submit_review
+from controllers.story_memory import submit_analysis, submit_repair, submit_review
 from models.story_memory import StoryCommit, StoryFact, StorySubject
 from models.ai_task import AiTask
 from schemas.ai_task import AiTaskOut
-from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryReviewRequest, StoryRecheckRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryRepairRequest, StoryReviewRequest, StoryRecheckRequest
 from services.ai_task_executor import ai_task_executor
 from services.story_memory.store import commit_data, decide, get_commit, save_candidate
 from utils.response_format import ResponseSchema
@@ -31,7 +31,7 @@ async def context(novel_id: int, chapter_id: int | None = Query(None, gt=0)):
 async def activity(novel_id: int):
     active = await AiTask.filter(task_type=5, status__in=[1, 2, 6]).order_by('-created_at')
     task = next((task for task in active if task.request_params.get('novel_id') == novel_id
-        and task.request_params.get('operation') in {'story_memory_recheck', 'story_memory_analyze', 'story_memory_review'}), None)
+        and task.request_params.get('operation') in {'story_memory_recheck', 'story_memory_analyze', 'story_memory_repair', 'story_memory_review'}), None)
     if task is None:
         commit = await StoryCommit.filter(novel_id=novel_id).order_by('-id').first()
         identifier = (commit.review.get('task_id') or commit.task_id) if commit else None
@@ -80,6 +80,13 @@ async def edit(novel_id: int, commit_id: int, body: StoryCandidateUpdate, _: Aut
 @router.post('/commits/{commit_id}/review', response_model=ResponseSchema[AiTaskOut])
 async def review(novel_id: int, commit_id: int, body: StoryReviewRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
     task = await submit_review(novel_id, commit_id, body, ctx)
+    bg.add_task(ai_task_executor.run, task)
+    return ResponseSchema(data=task)
+
+
+@router.post('/commits/{commit_id}/repair', response_model=ResponseSchema[AiTaskOut])
+async def repair(novel_id: int, commit_id: int, body: StoryRepairRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
+    task = await submit_repair(novel_id, commit_id, body, ctx)
     bg.add_task(ai_task_executor.run, task)
     return ResponseSchema(data=task)
 

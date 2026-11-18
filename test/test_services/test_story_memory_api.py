@@ -40,7 +40,8 @@ async def test_api_history_edit_and_decision_enforce_project_and_role(monkeypatc
         assert (await client.post(url + f'/commits/{row.id}/decision', json=decision)).status_code == 403
         assert (await client.put(url + f'/commits/{row.id}/candidate', json={'expected_revision': 1, 'candidate': candidate()})).status_code == 403
         for path, body in [('/analyze', {'request_id': str(uuid4())}),
-                           (f'/commits/{row.id}/review', {'expected_revision': 1})]:
+                           (f'/commits/{row.id}/review', {'expected_revision': 1}),
+                           (f'/commits/{row.id}/repair', {'expected_revision': 1, 'expected_package_hash': row.package_hash})]:
             assert (await client.post(url + path, json=body)).status_code == 403
         ctx.membership.role = 'creator'
         assert (await client.post(url + f'/commits/{row.id}/decision', json={**decision, 'decided_by': 999})).status_code == 422

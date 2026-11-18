@@ -51,17 +51,38 @@ async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
 
 
 async def submit_review(novel_id, commit_id, body, ctx):
-    params = await workflow(novel_id, ctx, body.assistant_model_config_id)
+    return await submit_candidate_task(novel_id, commit_id, body, ctx, repair=False)
+
+
+async def submit_repair(novel_id, commit_id, body, ctx):
+    return await submit_candidate_task(novel_id, commit_id, body, ctx, repair=True)
+
+
+async def submit_candidate_task(novel_id, commit_id, body, ctx, *, repair):
+    operation = 'story_memory_repair' if repair else 'story_memory_review'
     async with project_write(novel_id):
         commit = await get_commit(novel_id, commit_id)
-        if commit.status not in {'draft', 'needs_review', 'ready'} or commit.revision != body.expected_revision:
+        allowed = {'needs_review'} if repair else {'draft', 'needs_review', 'ready'}
+        if commit.status not in allowed or commit.revision != body.expected_revision:
             conflict('候选已变化或已结束，请重新读取')
+        if repair and commit.package_hash != body.expected_package_hash:
+            conflict('确认对应的候选或审核已变化，请重新核对')
         await verify_inputs(commit)
         for task in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis, status__in=ACTIVE_TASK_STATUSES):
             p = task.request_params
             if p.get('story_commit_id') == commit.id and p.get('story_revision') == commit.revision:
-                return task
+                if p.get('operation') == operation:
+                    return task
+                conflict('已有任务正在处理此候选，请等待完成')
+        model_id = body.assistant_model_config_id
+        if repair and model_id is None:
+            original = await AiTask.get_or_none(id=commit.task_id)
+            model_id = original.request_params.get('assistant_model_config_id') if original else None
+        params = await workflow(novel_id, ctx, model_id)
+        if repair:
+            params.update(story_package_hash=commit.package_hash,
+                creative_method=method(params['creative_method'], 'repair', params['prompt_language']))
         return await ai_task_executor.submit(AiTaskTypeEnum.project_analysis, {**params,
             **({'chapter_id': commit.chapter_id} if commit.chapter_id else {}),
-            'operation': 'story_memory_review', 'story_commit_id': commit.id,
-            'story_revision': commit.revision, 'output_contract': contract('review')})
+            'operation': operation, 'story_commit_id': commit.id,
+            'story_revision': commit.revision, 'output_contract': contract('repair' if repair else 'review')})

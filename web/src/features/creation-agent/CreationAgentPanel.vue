@@ -96,7 +96,7 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const productionLabel = (operation: string) => tr(({ story: '项目分析', screenplay: '剧本改编', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p', story_memory_analyze: '分析故事记忆候选', story_memory_review: '审核故事记忆候选', story_memory_recheck: '顺序复核故事记忆' } as Record<string, string>)[operation] || operation)
+const productionLabel = (operation: string) => tr(({ story: '项目分析', screenplay: '剧本改编', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p', story_memory_analyze: '分析故事记忆候选', story_memory_review: '审核故事记忆候选', story_memory_repair: '按审核意见补全', story_memory_recheck: '顺序复核故事记忆' } as Record<string, string>)[operation] || operation)
 function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
   const receipt = message.production?.length === 1 ? message.production[0] : undefined
   return message.role === 'assistant' && ['', '已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined

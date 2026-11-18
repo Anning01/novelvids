@@ -120,6 +120,10 @@ class StoryReviewRequest(StoryModel):
     assistant_model_config_id: int | None = Field(default=None, gt=0)
 
 
+class StoryRepairRequest(StoryReviewRequest):
+    expected_package_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
 class StoryDecision(StoryModel):
     expected_package_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
     decision: Literal['accept', 'reject']

@@ -234,6 +234,19 @@ async function review() {
     await track(response.data.id)
   })
 }
+async function repair() {
+  const commit = detail.value
+  if (!commit?.current || commit.status !== 'needs_review') return
+  const current = epoch
+  await action(async () => {
+    const response = await storyMemoryApi.repair(props.projectId, commit.id, commit.revision, commit.package_hash,
+      modelId.value ? Number(modelId.value) : undefined)
+    if (current !== epoch) return
+    job.value = response.data
+    showRun()
+    await track(response.data.id)
+  })
+}
 async function editCandidate() {
   if (candidate.value) draft.value = structuredClone(toRaw(candidate.value))
   await nextTick()
@@ -364,15 +377,22 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
           <p class="memory-prose">{{ candidate.summary }}</p><p v-if="candidate.ending_state" class="memory-hint">{{ tr('章末状态') }}：{{ candidate.ending_state }}</p>
           <ul class="memory-facts" role="list"><li v-for="(fact, index) in candidate.facts" :key="index"><div class="fact-heading"><strong>{{ candidate.subjects.find(subject => subject.ref === fact.subject_ref)?.name }}</strong><span>{{ tr(labels[fact.category] || fact.category) }} · {{ tr(natures[fact.nature]) }}</span></div><p>{{ fact.content }}</p><p v-if="scopeText(fact.scope)" class="memory-hint">{{ scopeText(fact.scope) }}</p><p v-if="fact.replaces_id" class="memory-hint">{{ tr(fact.operation === 'retract' ? '将撤回' : '将替代') }}：{{ detail.replaced_facts?.[fact.replaces_id] || tr('原有同类事实') }}</p><details><summary>{{ tr('原文依据') }}</summary><blockquote v-for="(evidence, item) in fact.evidence" :key="item">{{ evidence.quote }}</blockquote></details></li></ul>
           <p v-if="candidate.unresolved.length" class="memory-hint">{{ tr('尚未明确') }}：{{ candidate.unresolved.join('；') }}</p>
-          <template v-if="emptyBaseline">
+          <template v-if="editable && detail.status === 'needs_review'">
+            <p class="memory-hint">{{ tr('助手会按审核意见和原文补全候选，并重新审核。退回则结束本轮。') }}</p>
+            <div class="memory-actions">
+              <AppButton size="sm" variant="primary" :disabled="locked" @click="repair">{{ tr('按审核意见补全') }}</AppButton>
+              <AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
+              <AppButton v-if="detail.review.issues?.length" size="xs" variant="ghost" @click="focusReviewIssues">{{ tr('查看审核意见') }}</AppButton>
+            </div>
+          </template>
+          <template v-else-if="emptyBaseline">
             <p v-if="detail.status === 'ready'" class="memory-hint">{{ tr('全局故事底稿没有可确认事实，请补充故事材料后重新分析') }}</p>
             <AppButton v-if="editable" size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
           </template>
           <template v-else-if="editable">
             <div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div>
             <div v-if="detail.status !== 'ready'" class="memory-actions">
-              <p :id="`${id}-confirm-hint`" class="memory-hint">{{ tr(detail.status === 'needs_review' ? '请先处理审核意见，再重新审核。' : '候选尚未审核，请先重新审核。') }}</p>
-              <AppButton v-if="detail.review.issues?.length" size="xs" variant="ghost" @click="focusReviewIssues">{{ tr('查看审核意见') }}</AppButton>
+              <p :id="`${id}-confirm-hint`" class="memory-hint">{{ tr('候选尚未审核，请先重新审核。') }}</p>
             </div>
             <div class="memory-actions">
               <AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton>

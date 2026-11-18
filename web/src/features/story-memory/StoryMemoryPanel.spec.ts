@@ -8,7 +8,7 @@ import { notice } from '@/shared/notice'
 import type { AiTask } from '@/types'
 import type { MemoryCandidate, MemoryDetail, MemoryStatus } from './types'
 
-vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), decide: vi.fn() } }))
+vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), repair: vi.fn(), decide: vi.fn() } }))
 vi.mock('@/api', async original => ({ ...await original<typeof import('@/api')>(), api: { task: vi.fn() } }))
 vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
 const response = <T,>(data: T) => ({ code: 0, message: '', data })
@@ -151,15 +151,15 @@ it('edits a candidate without altering the evidence and invalidates its prior re
   expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
 })
 
-it('prevents approving blocking reviews or stale editions', async () => {
+it('offers repair or rejection while blocked and prevents editing stale editions', async () => {
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'needs_review',
     review: { summary: '发现问题', issues: [{ severity: 'blocking', fact_index: 0, reason: '年代与正文冲突' }] } }))
   const wrapper = render()
   await flushPromises()
   expect(review.text()).toContain('年代与正文冲突')
-  const confirm = review.findAll('button').find(button => button.text() === '确认并入库')!
-  expect(confirm.attributes('disabled')).toBeDefined()
-  expect(document.getElementById(confirm.attributes('aria-describedby') ?? '')?.textContent).toBe('请先处理审核意见，再重新审核。')
+  expect(review.text()).not.toContain('确认并入库')
+  expect(review.text()).toContain('按审核意见补全')
+  expect(review.text()).toContain('退回候选')
   await review.findAll('button').find(button => button.text() === '查看审核意见')!.trigger('click')
   expect(document.activeElement).toBe(review.get('[aria-label="审核意见"]').element)
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'stale', current: false, stale_reason: '剧本已变化' }))
@@ -167,6 +167,25 @@ it('prevents approving blocking reviews or stale editions', async () => {
   await flushPromises()
   expect(review.text()).toContain('剧本已变化')
   expect(review.findAll('button').some(button => button.text() === '确认并入库')).toBe(false)
+  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
+})
+
+it('requests a repair for the reviewed version and presents the new result for human confirmation', async () => {
+  const blocked = { ...structuredClone(ready), status: 'needs_review' as const }
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(blocked))
+  const wrapper = render()
+  await flushPromises()
+  vi.mocked(storyMemoryApi.repair).mockResolvedValue(response(task(3)))
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({
+    ...ready, revision: 2, package_hash: 'b'.repeat(64),
+    candidate: { ...candidate, summary: '根据原文补齐了遗漏的事实。' },
+  }))
+  await review.findAll('button').find(button => button.text() === '按审核意见补全')!.trigger('click')
+  await flushPromises()
+  expect(storyMemoryApi.repair).toHaveBeenCalledWith(9, 10, 1, 'a'.repeat(64), 5)
+  expect(wrapper.emitted('showRun')).toBeDefined()
+  expect(review.text()).toContain('根据原文补齐了遗漏的事实。')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
   expect(storyMemoryApi.decide).not.toHaveBeenCalled()
 })
 
