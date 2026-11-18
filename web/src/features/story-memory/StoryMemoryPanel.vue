@@ -157,6 +157,9 @@ function openReview() {
   focusReview.value = true
   emit('showRun')
 }
+function focusReviewIssues() {
+  document.getElementById(`${id}-review-issues`)?.focus()
+}
 watch([focusReview, () => props.reviewTarget, hasCandidate], ([focus, target, available]) => {
   if (!focus || !target || !available) return
   target.querySelector<HTMLElement>(`[id="${id}-candidate"]`)?.focus()
@@ -333,7 +336,7 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
         <p v-if="detail.source_snapshot?.opening_chapter" class="memory-hint">{{ tr('开篇依据：第 {p0} 集 · {p1}', { p0: detail.source_snapshot.opening_chapter.number, p1: detail.source_snapshot.opening_chapter.name }) }}</p>
         <p v-if="!detail.current" class="memory-hint">{{ detail.stale_reason }}</p>
         <p v-if="detail.review.summary" class="memory-prose">{{ detail.review.summary }}</p>
-        <ul v-if="detail.review.issues?.length" class="review-issues"><li v-for="(issue, index) in detail.review.issues" :key="index"><strong>{{ tr(issue.severity === 'blocking' ? '需处理' : '请留意') }}</strong> · {{ issue.reason }}</li></ul>
+        <ul v-if="detail.review.issues?.length" :id="`${id}-review-issues`" tabindex="-1" :aria-label="tr('审核意见')" class="review-issues"><li v-for="(issue, index) in detail.review.issues" :key="index"><strong>{{ tr(issue.severity === 'blocking' ? '需处理' : '请留意') }}</strong> · {{ issue.reason }}</li></ul>
         <form v-if="draft" class="memory-editor" :aria-labelledby="`${id}-edit-heading`" @submit.prevent="saveDraft">
           <h4 :id="`${id}-edit-heading`">{{ tr('修改候选记忆') }}</h4>
           <div class="memory-field"><label :for="`${id}-summary`">{{ tr('故事摘要') }}</label><textarea :id="`${id}-summary`" v-model="draft.summary" name="summary" required maxlength="8000" rows="3" :disabled="locked"></textarea></div>
@@ -365,7 +368,21 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
             <p v-if="detail.status === 'ready'" class="memory-hint">{{ tr('全局故事底稿没有可确认事实，请补充故事材料后重新分析') }}</p>
             <AppButton v-if="editable" size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
           </template>
-          <template v-else-if="editable"><div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div><div class="memory-actions"><AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton><AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton><AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'" @click="decide('accept')">{{ tr('确认并入库') }}</AppButton></div></template>
+          <template v-else-if="editable">
+            <div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div>
+            <div v-if="detail.status !== 'ready'" class="memory-actions">
+              <p :id="`${id}-confirm-hint`" class="memory-hint">{{ tr(detail.status === 'needs_review' ? '请先处理审核意见，再重新审核。' : '候选尚未审核，请先重新审核。') }}</p>
+              <AppButton v-if="detail.review.issues?.length" size="xs" variant="ghost" @click="focusReviewIssues">{{ tr('查看审核意见') }}</AppButton>
+            </div>
+            <div class="memory-actions">
+              <AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton>
+              <AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton>
+              <AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
+              <AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'"
+                :aria-describedby="detail.status !== 'ready' ? `${id}-confirm-hint` : undefined"
+                @click="decide('accept')">{{ tr('确认并入库') }}</AppButton>
+            </div>
+          </template>
         </template>
       </section>
   </Teleport>
@@ -409,6 +426,7 @@ summary:hover { color: var(--app-accent); }
 blockquote { margin: 8px 0; padding: 12px 16px; border-inline-start: 1px solid var(--app-border); background: var(--app-surface-muted); color: var(--app-text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-block-start: 1px solid var(--app-border); }
 .review-issues { padding-inline-start: 20px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.8; }
+.review-issues:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
 .memory-skeleton { display: grid; gap: 10px; padding-block: 24px; }
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }

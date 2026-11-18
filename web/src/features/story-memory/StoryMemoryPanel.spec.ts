@@ -147,6 +147,7 @@ it('edits a candidate without altering the evidence and invalidates its prior re
     scope: expect.objectContaining({ scene: '灾变前的回忆', from_chapter: 2, until_chapter: 3 }),
   })] }), 1)
   expect(notice.success).toHaveBeenCalledWith('候选已保存，请重新审核后再确认')
+  expect(review.text()).toContain('候选尚未审核，请先重新审核。')
   expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
 })
 
@@ -156,7 +157,11 @@ it('prevents approving blocking reviews or stale editions', async () => {
   const wrapper = render()
   await flushPromises()
   expect(review.text()).toContain('年代与正文冲突')
-  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
+  const confirm = review.findAll('button').find(button => button.text() === '确认并入库')!
+  expect(confirm.attributes('disabled')).toBeDefined()
+  expect(document.getElementById(confirm.attributes('aria-describedby') ?? '')?.textContent).toBe('请先处理审核意见，再重新审核。')
+  await review.findAll('button').find(button => button.text() === '查看审核意见')!.trigger('click')
+  expect(document.activeElement).toBe(review.get('[aria-label="审核意见"]').element)
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'stale', current: false, stale_reason: '剧本已变化' }))
   await wrapper.setProps({ projectId: 10 })
   await flushPromises()
