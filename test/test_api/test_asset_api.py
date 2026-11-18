@@ -613,6 +613,40 @@ async def test_api_get_asset_list_with_invalid_chapter_filter(client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_api_get_asset_list_filters_any_selected_source_chapter_before_pagination(client: AsyncClient):
+    novel = await Novel.create(name="Source Chapter Filter", author="Author")
+    other = await Novel.create(name="Other Chapter Filter", author="Author")
+    for name, chapters, project in [
+        ("01 山门", [2], novel),
+        ("02 山门", [1], novel),
+        ("03 山门", [3], novel),
+        ("04 山门", [1, 3], novel),
+        ("05 市集", [1], novel),
+        ("00 山门", [3], other),
+    ]:
+        await Asset.create(novel=project, asset_type=AssetTypeEnum.scene.value, canonical_name=name, source_chapters=chapters)
+
+    filters = [
+        ("novel_id", str(novel.id)),
+        ("source_chapter_number", "1"),
+        ("source_chapter_number", "3"),
+        ("sort", "canonical_name"),
+        ("search", "山门"),
+        ("page_size", "2"),
+    ]
+    first_response = await client.get("/api/asset", params=filters)
+    second_response = await client.get("/api/asset", params=[*filters, ("page", "2")])
+    first = first_response.json()["data"]
+    second = second_response.json()["data"]
+    assert first["pagination"]["total"] == 3
+    assert [item["canonical_name"] for item in first["items"]] == ["02 山门", "03 山门"]
+    assert [item["canonical_name"] for item in second["items"]] == ["04 山门"]
+
+    invalid = await client.get("/api/asset", params=[("source_chapter_number", "0")])
+    assert invalid.json()["code"] == 422
+
+
+@pytest.mark.asyncio
 async def test_api_delete_asset(client: AsyncClient):
     """删除资产。"""
     novel = await Novel.create(name="Delete Asset Novel", author="Author")

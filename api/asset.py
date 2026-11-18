@@ -2,6 +2,8 @@ from api._production_request import production_request
 
 from utils.messages import localized_message
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
+from pydantic import Field
+from typing import Annotated
 from uuid import UUID
 
 from auth.deps import (
@@ -117,11 +119,17 @@ async def patch_asset(
 async def get_asset_list(
     params: QueryParams = Depends(get_list_params),
     ctx: AuthContext = Depends(get_auth_context),
+    source_chapter_number: list[Annotated[int, Field(gt=0)]] | None = Query(
+        None, description="可重复传入章节序号，返回出现在任意所选章节的资产",
+    ),
 ):
     base_query = None
     if ctx.team_id is not None:
         base_query = Asset.filter(novel__team_id=ctx.team_id)
-    assets = await asset_controller.list(params, AssetBriefOut, base_query=base_query)
+    params.filters.pop("source_chapter_number", None)
+    assets = await asset_controller.list(
+        params, AssetBriefOut, base_query=base_query, source_chapter_numbers=source_chapter_number,
+    )
     return ResponseSchema(data=assets)
 
 

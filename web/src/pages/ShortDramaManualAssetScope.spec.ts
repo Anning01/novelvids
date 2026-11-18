@@ -29,6 +29,8 @@ vi.mock('@/api', () => ({
     chaptersPage: vi.fn(),
     assets: vi.fn(),
     asset: vi.fn(),
+    projectAssetLibrary: vi.fn(),
+    reuseAsset: vi.fn(),
     chapter: vi.fn(),
     latestExtraction: vi.fn(),
     extract: vi.fn(),
@@ -189,6 +191,126 @@ async function mountInCurrentChapterScope() {
   await flushPromises()
   return wrapper
 }
+
+it('adds an existing asset to the selected chapter and shows it in the chapter setting list', async () => {
+  const projectAssets = await api.assets(9, 1, 100)
+  const people = projectAssets.data.items.filter(asset => asset.asset_type === AssetTypeEnum.PERSON)
+  const reused = { ...people[1], source_chapters: [1, 2] } as Asset
+  vi.mocked(api.projectAssetLibrary).mockResolvedValueOnce({
+    ...projectAssets, data: { ...projectAssets.data, items: people },
+  })
+  vi.mocked(api.reuseAsset)
+    .mockRejectedValueOnce(new Error('Temporary failure'))
+    .mockResolvedValueOnce({ code: 0, message: '', data: reused })
+  const wrapper = await mountInCurrentChapterScope()
+  try {
+    expect(wrapper.findAll('.asset-card')).toHaveLength(1)
+    await wrapper.get('button[aria-haspopup="dialog"]').trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get<HTMLDialogElement>('dialog[open]')
+    expect(api.projectAssetLibrary).toHaveBeenCalledWith(9, 1, '', 24, AssetTypeEnum.PERSON, [])
+    expect(dialog.text()).toContain('已在本章')
+    expect(dialog.text()).toContain('出现于第 2 章')
+    expect(dialog.findAll('input[type="radio"]')).toHaveLength(1)
+    await dialog.get('input[type="radio"]').setValue()
+    await dialog.get('.chapter-reuse__form').trigger('submit')
+    await flushPromises()
+    expect(dialog.get('[role="alert"]').text()).toContain('加入本章失败')
+    expect(dialog.get<HTMLInputElement>('input[type="radio"]').element.checked).toBe(true)
+    expect(wrapper.findAll('.asset-card')).toHaveLength(1)
+    await dialog.get('.chapter-reuse__form').trigger('submit')
+    await flushPromises()
+    expect(api.reuseAsset).toHaveBeenCalledWith(33, chapter.id)
+    expect(wrapper.find('dialog[open]').exists()).toBe(false)
+    expect(wrapper.findAll('.asset-card')).toHaveLength(2)
+    expect(wrapper.get('.asset-grid').text()).toContain('云薇子')
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('searches and pages through project assets of the active type', async () => {
+  const projectAssets = await api.assets(9, 1, 100)
+  const firstLocation = projectAssets.data.items.find(asset => asset.asset_type === AssetTypeEnum.SCENE)!
+  const nextLocation = { ...firstLocation, id: 37, canonical_name: '山门小道', source_chapters: [] }
+  vi.mocked(api.projectAssetLibrary)
+    .mockRejectedValueOnce(new Error('Temporary failure'))
+    .mockResolvedValueOnce({ ...projectAssets, data: {
+      items: [firstLocation], pagination: { total: 2, page: 1, page_size: 1, pages: 2 },
+    } })
+    .mockResolvedValueOnce({ ...projectAssets, data: {
+      items: [nextLocation], pagination: { total: 2, page: 2, page_size: 1, pages: 2 },
+    } })
+    .mockResolvedValueOnce({ ...projectAssets, data: {
+      items: [], pagination: { total: 0, page: 1, page_size: 24, pages: 0 },
+    } })
+  const wrapper = await mountInCurrentChapterScope()
+  try {
+    await wrapper.get('nav[aria-label="项目资产类型"]').findAll('button')[1]!.trigger('click')
+    await wrapper.get('button[aria-haspopup="dialog"]').trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get('dialog[open]')
+    expect(dialog.get('[role="alert"]').text()).toBe('项目资产加载失败')
+    await dialog.get('.chapter-reuse__state button').trigger('click')
+    await flushPromises()
+    await dialog.get('.chapter-reuse__more').trigger('click')
+    await flushPromises()
+    expect(api.projectAssetLibrary).toHaveBeenLastCalledWith(9, 2, '', 24, AssetTypeEnum.SCENE, [])
+    expect(dialog.text()).toContain('山门广场')
+    expect(dialog.text()).toContain('山门小道')
+    await dialog.get('input[type="search"]').setValue('  岔路  ')
+    await dialog.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    expect(api.projectAssetLibrary).toHaveBeenLastCalledWith(9, 1, '岔路', 24, AssetTypeEnum.SCENE, [])
+    expect(dialog.get('[role="status"]').text()).toBe('未找到匹配的场景')
+    expect(api.reuseAsset).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('combines multiple source chapters with name search and ignores stale filter results', async () => {
+  const list = await api.chapters(9)
+  vi.mocked(api.chapters).mockResolvedValueOnce({
+    ...list, data: { ...list.data, items: [chapter, { ...chapter, id: 2164, number: 3, name: '山门' }] },
+  })
+  const projectAssets = await api.assets(9, 1, 100)
+  const people = projectAssets.data.items.filter(asset => asset.asset_type === AssetTypeEnum.PERSON)
+  const result = (items: Asset[]) => ({
+    ...projectAssets, data: { items, pagination: { total: items.length, page: 1, page_size: 24, pages: 1 } },
+  })
+  let completeFirstFilter!: (data: ReturnType<typeof result>) => void
+  vi.mocked(api.projectAssetLibrary)
+    .mockResolvedValueOnce(result(people))
+    .mockImplementationOnce(() => new Promise(resolve => { completeFirstFilter = resolve }))
+    .mockResolvedValueOnce(result([people[1]!]))
+    .mockResolvedValueOnce(result([people[1]!]))
+    .mockResolvedValueOnce(result(people))
+  const wrapper = await mountInCurrentChapterScope()
+  try {
+    await wrapper.get('button[aria-haspopup="dialog"]').trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get('dialog[open]')
+    const options = dialog.findAll('input[type="checkbox"]')
+    await options[0]!.setValue(true)
+    await options[1]!.setValue(true)
+    await flushPromises()
+    expect(api.projectAssetLibrary).toHaveBeenLastCalledWith(9, 1, '', 24, AssetTypeEnum.PERSON, [1, 3])
+    completeFirstFilter(result([people[0]!]))
+    await flushPromises()
+    expect(dialog.findAll('.chapter-reuse__card')).toHaveLength(1)
+    expect(dialog.get('.chapter-reuse__card').text()).toContain('云薇子')
+    await dialog.get('form[role="search"] input').setValue('云')
+    await dialog.get('form[role="search"]').trigger('submit')
+    await flushPromises()
+    expect(api.projectAssetLibrary).toHaveBeenLastCalledWith(9, 1, '云', 24, AssetTypeEnum.PERSON, [1, 3])
+    await dialog.get('.chapter-reuse__filter-heading button').trigger('click')
+    await flushPromises()
+    expect(api.projectAssetLibrary).toHaveBeenLastCalledWith(9, 1, '云', 24, AssetTypeEnum.PERSON, [])
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 it('switches the settings cards and counts between all project assets and current chapter assets', async () => {
   const wrapper = mount(ShortDramaManualPage, {
