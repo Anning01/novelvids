@@ -4,7 +4,7 @@ from utils.messages import localized_message
 
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import MappingProxyType
 
 from models.asset import Asset
@@ -121,23 +121,7 @@ class ExtractionContextLoader:
             asset_type__in=EXTRACTABLE_ASSET_TYPE_VALUES,
         ).order_by("asset_type", "id").prefetch_related("variants")
 
-        from models.story_memory import StoryCommit
-        memory_enabled = await StoryCommit.filter(novel_id=novel_id, chapter_id=None, status='accepted').exists()
-        snapshots = []
-        for asset in assets:
-            snapshot = self._asset_snapshot(asset, asset.variants)
-            if memory_enabled:
-                future = bool(snapshot.source_chapters and min(snapshot.source_chapters) > chapter.number)
-                if future and snapshot.canonical_name not in chapter.production_text and not (
-                        asset.asset_type == AssetTypeEnum.person.value and any(alias in chapter.production_text for alias in snapshot.aliases if alias)):
-                    continue
-                snapshot = replace(snapshot,
-                    description=None if future else snapshot.description,
-                    base_traits=None if future else snapshot.base_traits,
-                    variants=tuple(replace(variant, description=None, base_traits=None)
-                        if variant.chapter_numbers and min(variant.chapter_numbers) > chapter.number else variant
-                        for variant in snapshot.variants))
-            snapshots.append(snapshot)
+        snapshots = [self._asset_snapshot(asset, asset.variants) for asset in assets]
 
         return ExtractionContext(
             novel=NovelExtractionMetadata(

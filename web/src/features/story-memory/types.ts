@@ -10,7 +10,7 @@ export interface MemoryChapter {
   can_analyze: boolean
   blocked_by: string | null
 }
-export interface MemoryStatus { baseline: MemoryChapter; chapters: MemoryChapter[] }
+export interface MemoryStatus { automatic?: boolean; baseline: MemoryChapter; chapters: MemoryChapter[] }
 export interface MemoryEvidence { source: string; start: number; end: number; quote: string }
 export interface MemorySubject { ref: string; existing_id: number | null; kind: string; name: string; aliases: string[] }
 export interface MemoryScope { world_ref: string | null; scene: string | null; from_chapter: number | null; until_chapter: number | null; story_time: string | null }

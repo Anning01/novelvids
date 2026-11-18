@@ -18,12 +18,12 @@ from models.chapter import Chapter
 from models.config import AiModelConfig
 from models.novel import Novel
 from models.scene import Scene
-from models.story_memory import StoryCommit, StorySnapshot, StorySubject
+from models.story_memory import StoryCommit, StoryMemoryProject, StorySnapshot, StorySubject
 from schemas.chapter import ChapterPatch
 from services.ai_task_executor import ai_task_executor
 from services.creation_agent.deep_tools import read_story_memory
 from services.creation_agent.skill_execution import SkillExecution
-from services.story_memory.context import story_context, capture_binding, verify_bindings
+from services.story_memory.context import binding, story_context, verify_bindings
 from test.test_services.test_story_memory import candidate, saved_candidate, accept
 from test.test_services.test_strict_text_tasks import mock_model
 
@@ -33,11 +33,12 @@ def local_workspace(monkeypatch):
     monkeypatch.setattr('config.settings.AUTH_ENABLED', False)
 
 
-@pytest.fixture
-async def story():
+async def make_story(automatic=False):
     project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。老周是一位守门人。', story_outline='邻居守护城门。')
     chapters = [await Chapter.create(novel=project, number=i, name=f'第{i}章', content=text, screenplay=text)
         for i, text in enumerate(['老周提油灯照亮木门。', '灾变后，老周带居民寻找水源。', '后来才揭晓老周别名周将军。'], 1)]
+    if automatic:
+        await StoryMemoryProject.create(novel=project)
     base = candidate(project.project_setting)
     base['subjects'].append({'ref': 'neighbor', 'existing_id': None, 'kind': 'character', 'name': '老周', 'aliases': []})
     identity = deepcopy(base['facts'][0])
@@ -58,6 +59,16 @@ async def story():
     return project, chapters, baseline, commits
 
 
+@pytest.fixture
+async def story():
+    return await make_story()
+
+
+@pytest.fixture
+async def automatic_story():
+    return await make_story(automatic=True)
+
+
 @pytest.mark.asyncio
 async def test_context_has_world_prior_state_and_current_changes_without_future_aliases(story):
     project, chapters, baseline, commits = story
@@ -75,11 +86,11 @@ async def test_context_has_world_prior_state_and_current_changes_without_future_
 
 
 @pytest.mark.asyncio
-async def test_extraction_catalog_hides_future_scene_details_but_keeps_explicit_identity(story):
+async def test_extraction_catalog_is_unchanged_when_memory_is_enabled(automatic_story):
     from models.asset_variant import AssetVariant
     from services.extraction.context import ExtractionContextLoader
     from services.extraction.messages import ExtractionMessageBuilder
-    project, chapters, _, _ = story
+    project, chapters, _, _ = automatic_story
     person = await Asset.create(novel=project, canonical_name='老周', asset_type=1,
         base_traits='稳定人物外观', source_chapters=[1])
     variant = await AssetVariant.create(asset=person, name='老周·后章外套',
@@ -92,9 +103,9 @@ async def test_extraction_catalog_hides_future_scene_details_but_keeps_explicit_
     context = await loader.load(novel_id=project.id, chapter_id=chapters[0].id)
     payload = ExtractionMessageBuilder().build(context)
     encoded = json.dumps(payload, ensure_ascii=False)
-    assert '第三章才断裂的水管' not in encoded and '后章隐藏信息' not in encoded and '后章损伤细节' not in encoded
-    assert future.id not in {asset.id for asset in context.assets}
-    assert next(asset for asset in context.assets if asset.id==named.id).base_traits is None
+    assert '第三章才断裂的水管' in encoded and '后章隐藏信息' in encoded and '后章损伤细节' in encoded
+    assert future.id in {asset.id for asset in context.assets}
+    assert next(asset for asset in context.assets if asset.id==named.id).base_traits == '后章隐藏信息'
     projection = next(asset for asset in context.assets if asset.id==person.id)
     assert projection.base_traits=='稳定人物外观' and projection.variants[0].id==variant.id
     await named.refresh_from_db()
@@ -146,21 +157,20 @@ async def test_episode_ranges_hide_future_worlds_and_expired_local_facts():
 
 
 @pytest.mark.asyncio
-async def test_admission_blocks_stale_memory_before_any_provider_request(story, monkeypatch):
+async def test_legacy_memory_does_not_block_asset_admission(story, monkeypatch):
     project, chapters, _, _ = story
     await chapter_controller.patch(chapters[0].id, ChapterPatch(screenplay='已修改的古代设定。'))
     generate = AsyncMock()
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
-    with pytest.raises(HTTPException) as error:
-        await chapter_controller.extract(chapters[0].id)
-    assert error.value.status_code == 409
+    task = await chapter_controller.extract(chapters[0].id)
+    assert 'story_memory_bindings' not in task.request_params
     generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_binding_detects_newly_enabled_memory_for_legacy_requests():
     project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。')
-    frozen = await capture_binding(project.id, None, 'assets')
+    frozen = {'assets:None': binding(await story_context(project.id, purpose='assets'))}
     assert not next(iter(frozen.values()))['enabled']
     await accept(project, await saved_candidate(project))
     with pytest.raises(HTTPException, match='生成期间'):
@@ -174,23 +184,21 @@ async def test_legacy_cached_output_is_not_relabelled_as_using_new_story_memory(
     from services.creation_agent.strict_text import prepare_text_workflow
     project, chapters, _, _ = story
     params = await prepare_text_workflow({'novel_id': project.id, 'chapter_id': chapters[0].id}, 'assets')
-    params.pop('story_memory_bindings')  # Simulate a task submitted before memory integration existed.
     task = await AiTask.create(task_type=1, status=2, request_params=params)
     conversation = await AgentConversation.create(novel=project)
     message = await AgentMessage.create(task=task, conversation=conversation, role='assistant', request_id=uuid4(), request_hash='legacy')
     previous = {'persons': [], 'scenes': [], 'items': []}
     await AgentOperation.create(task=task, key='model:strict:assets', state='completed', result=previous)
     execution = SkillExecution({**params, 'task_id': str(task.id)}, message, AsyncMock())
-    with pytest.raises(HTTPException, match='旧生成结果未绑定故事记忆'):
-        await execution.generate_strict({'chapter': chapters[0].screenplay})
+    assert await execution.generate_strict({'chapter': chapters[0].screenplay}) == previous
     await task.refresh_from_db()
     assert 'story_memory_bindings' not in task.request_params
     assert (await AgentOperation.get(task=task, key='model:strict:assets')).result == previous
 
 
 @pytest.mark.asyncio
-async def test_asset_model_request_gets_confirmed_context_and_saved_asset_provenance(story, monkeypatch):
-    project, chapters, _, commits = story
+async def test_asset_model_request_gets_confirmed_context_and_saved_asset_provenance(automatic_story, monkeypatch):
+    project, chapters, _, commits = automatic_story
     from prompts.skill_pack import read_skill
     from services.language import generation_language
     language = await generation_language()
@@ -210,10 +218,10 @@ async def test_asset_model_request_gets_confirmed_context_and_saved_asset_proven
 
 
 @pytest.mark.asyncio
-async def test_storyboard_request_and_saved_shots_share_the_memory_binding(story, monkeypatch):
+async def test_storyboard_request_and_saved_shots_share_the_memory_binding(automatic_story, monkeypatch):
     from controllers.scene import scene_controller
     from test.test_services.test_prompt_language import _shot
-    project, chapters, _, commits = story
+    project, chapters, _, commits = automatic_story
     shot = _shot().model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
     shot.update(duration=4, visible_asset_names=[], actions=[{'start': 0, 'end': 4, 'text': '油灯照亮古城木门。'}],
         visual_prose='古城木门与油灯。', dialogue=[], narration=[], blocking_map=None)
@@ -228,9 +236,9 @@ async def test_storyboard_request_and_saved_shots_share_the_memory_binding(story
 
 
 @pytest.mark.asyncio
-async def test_memory_change_after_model_output_prevents_persistence_and_keeps_candidate(story, monkeypatch):
+async def test_supplemental_memory_change_does_not_block_persistence(automatic_story, monkeypatch):
     from models.agent_operation import AgentOperation
-    project, chapters, _, _ = story
+    project, chapters, _, _ = automatic_story
     generate = SkillExecution.generate_strict
     async def concurrent_change(self, facts):
         result = await generate(self, facts)
@@ -241,17 +249,17 @@ async def test_memory_change_after_model_output_prevents_persistence_and_keeps_c
     task = await chapter_controller.extract(chapters[0].id)
     await ai_task_executor.run(task)
     await task.refresh_from_db()
-    assert task.status == 4 and not await Asset.filter(novel=project).exists()
+    assert task.status == 3, task.error_message
     assert await AgentOperation.filter(task=task, key='model:strict:assets', state='completed').exists()
 
 
 @pytest.mark.asyncio
-async def test_selected_scene_edit_receives_separate_chapter_contexts_and_freezes_both(story, monkeypatch):
+async def test_selected_scene_prompt_edit_does_not_receive_supplemental_memory(automatic_story, monkeypatch):
     from models.creation_agent import AgentConversation, AgentMessage
     from prompts.text_tasks import scene_prompt_batch_method
     from schemas.text_task_contracts import scene_prompt_batch_contract
     from services.creation_agent.strict_text import prepare_text_workflow
-    project, chapters, _, _ = story
+    project, chapters, _, _ = automatic_story
     first = await Scene.create(chapter=chapters[0], sequence=1, prompt='古城木门。')
     second = await Scene.create(chapter=chapters[1], sequence=1, prompt='灾变后的古井。')
     params = await prepare_text_workflow({'novel_id': project.id}, 'story')
@@ -264,16 +272,9 @@ async def test_selected_scene_edit_receives_separate_chapter_contexts_and_freeze
     requests = mock_model(monkeypatch, {'prompts': {str(first.id): first.prompt, str(second.id): second.prompt}, 'reply': '已核对两章背景。'})
     await execution.generate_strict({'targets': [{'id': first.id}, {'id': second.id}], 'user_request': '保持各自年代修改镜头'})
     body = json.loads(requests[0]['messages'][-1]['content'])
-    contexts = body['task_context']['input']['story_memory']['contexts']
-    assert contexts[0]['applies_to'] == [first.id] and contexts[1]['applies_to'] == [second.id]
-    assert '灾变后' not in json.dumps(contexts[0], ensure_ascii=False)
-    assert '灾变后' in json.dumps(contexts[1], ensure_ascii=False)
-    assert '周将军' not in json.dumps(contexts, ensure_ascii=False)
+    assert 'story_memory' not in body['task_context']['input']
     await task.refresh_from_db()
-    assert len(task.request_params['story_memory_bindings']) == 2
-    await chapter_controller.patch(chapters[1].id, ChapterPatch(screenplay='后章再次修改。'))
-    with pytest.raises(HTTPException):
-        await verify_bindings(execution.params)
+    assert 'story_memory_bindings' not in task.request_params
 
 
 @pytest.mark.asyncio
@@ -291,20 +292,14 @@ async def test_read_tool_is_scoped_paged_and_does_not_approve_memory(story):
 
 
 @pytest.mark.asyncio
-async def test_conversation_reloads_confirmed_memory_and_exposes_review_needed_after_an_edit(story):
+async def test_conversation_catalog_does_not_receive_memory(automatic_story):
     from services.creation_agent.project_facts import load_project_facts
-    project, chapters, _, _ = story
+    project, chapters, _, _ = automatic_story
     authorize = AsyncMock()
-    before, _ = await load_project_facts(novel_id=project.id, chapter_id=chapters[0].id,
+    summary, _ = await load_project_facts(novel_id=project.id, chapter_id=chapters[0].id,
         page_size=10, character_budget=4000, authorize=authorize)
-    assert before['story_memory']['enabled'] and before['story_memory']['facts']
-    assert '周将军' not in json.dumps(before['story_memory'], ensure_ascii=False)
-    await chapter_controller.patch(chapters[0].id, ChapterPatch(screenplay='已经修改的导演稿。'))
-    after, _ = await load_project_facts(novel_id=project.id, chapter_id=chapters[0].id,
-        page_size=10, character_budget=4000, authorize=authorize)
-    assert after['story_memory']['state'] == 'needs_review'
-    assert 'facts' not in after['story_memory']
-    assert authorize.await_count == 2
+    assert 'story_memory' not in summary
+    authorize.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -336,15 +331,12 @@ def test_assistant_receipt_projects_story_review_counts_without_candidate_data()
     assert 'story_review_progress' not in receipt_of(task)
 
 
-def test_story_memory_rules_and_skill_mount_are_available_in_both_languages():
-    from prompts.skill_pack import SkillSnapshot, snapshot_skills
-    from services.creation_agent.deep_execution import skill_files
+def test_story_memory_data_leaves_system_and_skill_instructions_unchanged():
     from prompts.text_tasks import render_text_task
-    files = skill_files(SkillSnapshot.model_validate(snapshot_skills()))
-    assert '/skills/novelvids-story/SKILL.md' in files
-    assert '/skills/novelvids-story/references/story_memory.md' in files
     for language in ('zh', 'en'):
-        instructions, _ = render_text_task(language=language, skill={'instructions': '分析方法', 'references': []},
+        method = {'instructions': '分析方法', 'references': []}
+        without, original = render_text_task(language=language, skill=method, context={'input': {}})
+        with_memory, projected = render_text_task(language=language, skill=method,
             context={'input': {'story_memory': {'enabled': True}}})
-        assert f'language={language}' in instructions and '计划、证言、推测不当作已发生事实' in instructions
-        assert '已换下、脱去、交出或损毁的服装与道具不得从基础资产重新叠加' in instructions
+        assert f'language={language}' in with_memory and with_memory == without
+        assert json.loads(original)['creative_method'] == json.loads(projected)['creative_method']

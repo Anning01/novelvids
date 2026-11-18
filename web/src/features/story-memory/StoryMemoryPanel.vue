@@ -58,12 +58,15 @@ const waiting = computed(() => {
 })
 const running = computed(() => job.value && [1, 2, 6].includes(job.value.status) && job.value.stage !== 'needs_review')
 const locked = computed(() => busy.value || Boolean(running.value) || props.disabled)
+const automatic = computed(() => status.value?.automatic === true)
+const visible = computed(() => status.value?.automatic !== false || commits.value.length > 0)
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
 const hasCandidate = computed(() => candidate.value !== null && detail.value?.status !== 'accepted')
 const focusReview = ref(false)
-const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
+const editable = computed(() => !automatic.value && props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
 function scopeState(row?: MemoryChapter) {
   if (row?.candidate_status) return tr('待确认')
+  if (automatic.value && row?.state === 'stale') return tr('待更新')
   return tr(row?.state === 'current' ? '已确认' : row?.state === 'stale' ? '需要复核' : '尚未建立')
 }
 const stateLabel = computed(() => scopeState(selected.value))
@@ -363,16 +366,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="story-memory" :aria-labelledby="`${id}-heading`">
+  <section v-if="visible" class="story-memory" :aria-labelledby="`${id}-heading`">
     <header class="memory-header">
-      <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr('已确认的世界观、人物和前情，将用于资产、分镜与创作助手。') }}</p></div>
+      <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr(automatic ? '世界观、人物和前情会作为剧本、资产和分镜的参考。' : '查看项目中的世界观、人物和前情。') }}</p></div>
       <div class="memory-actions">
         <span v-if="trackingDelayed" class="memory-hint" role="status">{{ tr('正在恢复最新任务状态') }}</span>
         <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
         <AppButton v-if="selected?.state === 'current'" :id="`${id}-current`" size="sm" variant="soft"
           aria-haspopup="dialog" :aria-controls="`${id}-memory-dialog`" :disabled="!context?.enabled" @click="openMemory">{{ tr('查看当前有效记忆') }}</AppButton>
-        <AppButton v-if="hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
-        <AppButton v-if="waiting && waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="Boolean(draft)" @click="openWaitingReview">{{ tr('查看待处理候选') }}</AppButton>
+        <AppButton v-if="!automatic && hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
+        <AppButton v-if="!automatic && waiting && waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="Boolean(draft)" @click="openWaitingReview">{{ tr('查看待处理候选') }}</AppButton>
         <AppButton v-if="canEdit && (running || (!hasCandidate && !waiting && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="showRun">{{ tr('在创作助手查看进度') }}</AppButton>
         <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="refreshMemory"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
       </div>
@@ -381,14 +384,16 @@ onBeforeUnmount(() => {
     <template v-if="status">
       <div class="memory-controls">
         <div class="memory-field"><label :id="`${id}-scope-label`">{{ tr('查看范围') }}</label><AppSelect v-model="scope" :aria-labelledby="`${id}-scope-label`" :ariaLabel="tr('查看范围')" density="compact" :options="scopeOptions" :disabled="Boolean(draft)" /></div>
-        <template v-if="canEdit">
+        <template v-if="canEdit && !automatic">
           <div class="memory-field"><label :id="`${id}-model-label`">{{ tr('故事记忆模型') }}</label><AppSelect v-model="modelId" :aria-labelledby="`${id}-model-label`" :ariaLabel="tr('故事记忆模型')" density="compact" :options="[{ value: '', label: tr(modelsLoading ? '正在读取模型…' : models.length ? '选择分析模型' : '暂无可用模型') }, ...models]" :disabled="locked || !models.length || modelsLoading" /></div>
           <TaskSkillPicker v-model="skillId" task="story" :disabled="locked" />
           <div class="memory-actions"><AppButton v-if="!waiting || waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="locked || Boolean(draft) || !selected?.can_analyze" @click="analyze(false)">{{ tr('分析当前范围') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || Boolean(draft) || Boolean(waiting)" @click="analyze(true)">{{ tr('顺序复核全部') }}</AppButton></div>
         </template>
       </div>
-      <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
-      <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
+      <p v-if="canEdit && !automatic && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
+      <p v-if="automatic" class="memory-hint" role="status">{{ tr(running && status.baseline.state !== 'current' ? '正在建立全局故事底稿。'
+        : selected?.state === 'current' ? '当前范围的记忆已就绪。' : '制作时会自动准备所需的故事记忆。') }}</p>
+      <p v-else-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
       <p v-else-if="selected?.candidate_status" class="memory-hint">{{ tr('本范围已有候选，可在创作助手确认入库。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
     </template>
@@ -417,7 +422,7 @@ onBeforeUnmount(() => {
       <p v-else-if="memoryOpen" class="memory-dialog-body memory-hint" role="status">{{ tr(loading ? '正在读取故事记忆' : '当前范围暂无可查看的有效记忆') }}</p>
     </dialog>
   </Teleport>
-  <Teleport v-if="reviewTarget && hasCandidate && detail && candidate" :to="reviewTarget">
+  <Teleport v-if="!automatic && reviewTarget && hasCandidate && detail && candidate" :to="reviewTarget">
       <section :id="`${id}-candidate-panel`" class="memory-candidate" :aria-labelledby="`${id}-candidate`">
         <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('故事记忆候选') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
         <p class="memory-hint">{{ scopeOptions.find(option => option.value === (detail?.chapter_id ? String(detail.chapter_id) : 'baseline'))?.label }}</p>

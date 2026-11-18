@@ -188,7 +188,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         chapter_query = Chapter.filter(novel_id=novel_id).order_by("number")
         chapter_count = await chapter_query.count()
         if not chapter_count and not novel.episodes_managed:
-            await novel_controller.split(novel_id)
+            from services.creation_agent.handler import authorize_run
+            await novel_controller.split(novel_id, ctx=await authorize_run(request_params), assistant_model_config_id=llm_config.id)
             chapter_count = await chapter_query.count()
 
         samples = []

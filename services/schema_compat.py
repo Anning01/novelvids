@@ -56,10 +56,10 @@ async def ensure_resource_library_schema() -> None:
 
 async def ensure_story_memory_schema() -> None:
     """Only create missing story tables; never rewrite existing project data."""
-    from models.story_memory import StorySubject, StoryCommit, StoryFact, StorySnapshot
+    from models.story_memory import StorySubject, StoryCommit, StoryFact, StoryMemoryProject, StorySnapshot
     connection = Tortoise.get_connection('default')
     generator = connection.schema_generator(connection)
-    for model in (StorySubject, StoryCommit, StoryFact, StorySnapshot):
+    for model in (StorySubject, StoryCommit, StoryFact, StorySnapshot, StoryMemoryProject):
         definition = generator._get_table_sql(model, safe=True)
         await connection.execute_script(definition['table_creation_string'])
 

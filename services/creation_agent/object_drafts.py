@@ -59,18 +59,6 @@ async def _revise_object(service, execution, target, instructions, tool_call_id)
     kind, layout = await service.prompt_standards.asset_kind(obj)
     contract = await service.prompt_standards.contract(kind, layout)
     facts = {'target': current, 'instructions': instructions, 'contract': contract}
-    from services.story_memory.context import execution_context
-    chapter_id = service.request.chapter_id
-    if chapter_id is None:
-        from models.asset import Asset
-        from models.chapter import Chapter
-        asset = await Asset.get(id=obj.asset_id if target.kind == 'variant' else obj.id)
-        numbers = obj.chapter_numbers if target.kind == 'variant' else asset.source_chapters
-        chapter = await Chapter.filter(novel_id=service.novel_id, number__in=numbers or []).order_by('number').first()
-        chapter_id = chapter.id if chapter else None
-    context = await execution_context(execution, chapter_id, purpose='assets')
-    if context['enabled']:
-        facts['story_memory'] = context
     facts['segment'] = 'object:' + fingerprint(facts)
     draft_key = 'draft:' + fingerprint([target.model_dump(), instructions, facts['segment']])
     saved = await AgentOperation.get_or_none(task_id=service.task_id, key=draft_key, state='completed')

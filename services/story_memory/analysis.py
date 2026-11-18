@@ -1,10 +1,11 @@
 """Extract one strict candidate and save it for confirmation."""
 
 from models.story_memory import StoryFact, StorySubject
+from schemas.story_memory import StoryDecision
 from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.strict_text import require_text_execution
 from services.story_memory.sources import conflict, parent_state, verify_inputs
-from services.story_memory.store import get_commit, save_candidate
+from services.story_memory.store import decide, get_commit, save_candidate
 
 
 async def analyze(params):
@@ -29,6 +30,9 @@ async def analyze(params):
     async def persist():
         await execution.before_request()
         saved = await save_candidate(commit.novel_id, commit.id, result, params['story_revision'], initial=True)
+        if params.get('automatic_story_memory'):
+            saved = await decide(commit.novel_id, commit.id, StoryDecision(
+                decision='accept', expected_package_hash=saved.package_hash), None)
         return {'commit_id': saved.id, 'status': saved.status, 'revision': saved.revision}
 
     return await execute_step(params['task_id'], 'persist:story-memory-candidate', persist, atomic=True)

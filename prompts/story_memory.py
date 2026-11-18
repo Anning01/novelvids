@@ -10,7 +10,7 @@ subjects 仅声明本次 facts.subject_ref 或 scope.world_ref 实际引用的�
 只引用 source_snapshot 内的 project.setting、project.outline、project.description、chapter.text 或 opening_chapter.text。
 没有项目设定和大纲时，全局底稿使用 opening_chapter.text 的开篇样本。只提取样本明确支持、可作为起点的世界背景、规则和身份，不把开篇剧情写成整部大纲或全书通用设定。
 项目名称和导入文件名不是故事事实。没有可确认事实时，说明缺什么材料，不从标题推演故事。
-前章事实供衔接和查重，不伪造为本章证据；没有变化的前章事实不重复新增。
+前章事实和 preceding_excerpt 供衔接和查重，不作为本章证据；没有变化的前章事实不重复新增。
 重新分析时，对照 previous_commit 的旧稿和候选，提取当前版本的完整本章变化包。
 本章旧提交会整体被新提交替代，不遗漏仍成立的本章事实；不能引用旧本章事实作为 replaces_id。
 replaces_id 只用于替代 prior_facts 中的前置有效事实。前章变化后重新核对本章因果与世界状态。
@@ -50,14 +50,3 @@ def contract():
 
     strict(schema)
     return {'name': 'story_memory_extract', 'version': 1, 'schema': schema}
-
-
-def context_rules(language):
-    return ('\n已确认故事记忆按章节和世界范围生效。结合全局背景、前情和本章状态创作；'
-        '逐条遵守 scope、nature 和 applies_to，计划、证言、推测不当作已发生事实。'
-        '回忆、梦境、穿越按场景的世界与故事时点选择设定，不把章末状态提前到章首。'
-        '资产与形态只继承本场仍成立的外观；已换下、脱去、交出或损毁的服装与道具不得从基础资产重新叠加，回忆使用当时的旧形态。'
-        '资产目录和旧分镜只作身份与视觉参考，不能补出本章未发生的事件、损伤或行动目标；本章明确的环境状态变化须选用或建立相符形态，不直接沿用旧场景状态。'
-        '未明确的年代、科技和身份保留未知；视觉设计的补全不反向成为原著事实。'
-        '人物档案标识与资产标识不同，引用已登记资产和形态时沿用业务目录中的真实标识。'
-        '\nStory memory language=' + language)

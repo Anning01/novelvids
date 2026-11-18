@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from models.chapter import Chapter
-from models.story_memory import StoryCommit, StorySnapshot
+from models.story_memory import StoryCommit, StoryMemoryProject, StorySnapshot
 
 
 def chapter_source(chapter):
@@ -38,14 +38,15 @@ async def chapter_changed(before, after):
     from services.story_memory.sources import first_opening_chapter, needs_opening_source, opening_source
     if await StoryCommit.filter(novel_id=after.novel_id, chapter_id=None).exists():
         project = await Novel.get(id=after.novel_id)
-        if needs_opening_source(project):
-            other = await first_opening_chapter(after.novel_id, exclude_id=after.id)
+        automatic = await StoryMemoryProject.filter(novel_id=after.novel_id).exists()
+        if automatic or needs_opening_source(project):
+            other = await first_opening_chapter(after.novel_id, exclude_id=after.id, prefer_original=automatic)
 
             def sample(chapter):
-                source = opening_source(chapter)
+                source = opening_source(chapter, prefer_original=automatic)
                 if source and (other is None or (chapter.number, chapter.id) < (other.number, other.id)):
                     return source
-                return opening_source(other)
+                return opening_source(other, prefer_original=automatic)
 
             if sample(before) != sample(after):
                 start = None

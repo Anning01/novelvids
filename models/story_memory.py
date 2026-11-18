@@ -4,6 +4,15 @@ from tortoise import fields
 from models._base import AbstractBaseModel
 
 
+class StoryMemoryProject(AbstractBaseModel):
+    """Provenance for a novel that was successfully split into multiple chapters."""
+
+    novel = fields.OneToOneField('models.Novel', related_name='automatic_story_memory', on_delete=fields.CASCADE)
+
+    class Meta:
+        table = 'story_memory_projects'
+
+
 class StorySubject(AbstractBaseModel):
     novel = fields.ForeignKeyField('models.Novel', related_name='story_subjects', on_delete=fields.CASCADE)
     kind = fields.CharField(max_length=24)

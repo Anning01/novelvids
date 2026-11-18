@@ -1,25 +1,37 @@
-"""One temporal story context for production, editors and conversation tools."""
+"""Read versioned memory and freeze the optional data sent with production requests."""
+
+import json
 
 from fastapi import HTTPException
+from models.agent_operation import AgentOperation
 from models.ai_task import AiTask
 from models.chapter import Chapter
 from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
+from services.creation_agent.operation_receipts import execute_step
 from services.creation_agent.plan_sources import fingerprint
 from services.creation_objects import project_write
 from services.story_memory.sources import latest_commit, predecessor
 from services.story_memory.status import memory_status
 
+MAX_GENERATION_MEMORY_CHARACTERS = 8000
 
-async def story_context(novel_id, chapter_id=None, *, purpose='generation'):
+
+async def story_context(novel_id, chapter_id=None, *, purpose='generation', supplemental=False):
+    unavailable = {'enabled': False, 'chapter_id': chapter_id, 'purpose': purpose}
     baseline = await latest_commit(novel_id, None)
     if baseline is None:
-        return {'enabled': False, 'chapter_id': chapter_id, 'purpose': purpose}
+        return unavailable
     states = await memory_status(novel_id)
     state = states['baseline'] if chapter_id is None else next(
         (item for item in states['chapters'] if item['chapter_id'] == chapter_id), None)
     if state is None:
         raise HTTPException(404, '章节不属于当前作品')
-    if purpose == 'screenplay' and chapter_id is not None:
+    if supplemental:
+        if states['baseline']['state'] != 'current':
+            return unavailable
+        past = [row for row in states['chapters'] if row['number'] <= state['number'] and row['state'] == 'current']
+        commit_id = past[-1]['commit_id'] if past else baseline.id
+    elif purpose == 'screenplay' and chapter_id is not None:
         commit_id = await predecessor(novel_id, chapter_id)
     else:
         if state['state'] != 'current':
@@ -72,7 +84,8 @@ async def story_context(novel_id, chapter_id=None, *, purpose='generation'):
     world_ids = {fact['scope'].get('world_id') for fact in selected} | {
         fact['subject']['id'] for fact in selected if fact['subject']['kind'] == 'world'}
     return {'enabled': True, 'chapter_id': chapter_id, 'chapter_number': number, 'purpose': purpose,
-        'context_position': 'before_chapter' if purpose == 'screenplay' else 'through_chapter',
+        'context_position': 'before_chapter' if (supplemental and commit.chapter_id != chapter_id)
+            or (not supplemental and purpose == 'screenplay') else 'through_chapter',
         'baseline_commit_id': baseline.id, 'commit_id': commit.id,
         'baseline_summary': root.data['summary'],
         'worlds': [{'id': subject.id, 'name': subject.name} for subject in subjects.values()
@@ -89,32 +102,6 @@ def binding(context):
            if context['enabled'] else {})}
 
 
-async def capture_binding(novel_id, chapter_id, purpose):
-    context = await story_context(novel_id, chapter_id, purpose=purpose)
-    return {f'{purpose}:{chapter_id}': binding(context)}
-
-
-async def execution_context(execution, chapter_id=None, *, purpose='generation', model_key=None):
-    params = execution.params
-    novel_id = params['novel_id']
-    chapter_id = chapter_id if chapter_id is not None else params.get('chapter_id')
-    async with project_write(novel_id):
-        context = await story_context(novel_id, chapter_id, purpose=purpose)
-        key, current = f'{purpose}:{chapter_id}', binding(context)
-        task = await AiTask.get(id=params['task_id'])
-        frozen = {**params.get('story_memory_bindings', {}), **task.request_params.get('story_memory_bindings', {})}
-        if model_key and context['enabled'] and key not in frozen:
-            from models.agent_operation import AgentOperation
-            if await AgentOperation.filter(task=task, key=model_key, state='completed').exists():
-                raise HTTPException(409, '旧生成结果未绑定故事记忆，请重新生成；原有结果仍保留')
-        if key in frozen and frozen[key] != current:
-            raise HTTPException(409, '故事记忆在任务提交后已变化，请重新生成；已有结果仍保留')
-        frozen[key] = current
-        params['story_memory_bindings'] = frozen
-        await AiTask.filter(id=task.id).update(request_params={**task.request_params, 'story_memory_bindings': frozen})
-    return context
-
-
 async def verify_bindings(params):
     frozen = params.get('story_memory_bindings', {})
     if params.get('task_id'):
@@ -122,6 +109,8 @@ async def verify_bindings(params):
         if task:
             frozen = {**frozen, **task.request_params.get('story_memory_bindings', {})}
     for expected in frozen.values():
+        if expected.get('supplemental'):
+            continue
         current = await story_context(params['novel_id'], expected['chapter_id'], purpose=expected['purpose'])
         if binding(current) != expected:
             raise HTTPException(409, '故事记忆在生成期间已变化，结果已保留，请复核后重新生成')
@@ -133,35 +122,53 @@ async def saved_binding(params):
     return {key: value for key, value in frozen.items() if value['enabled']}
 
 
-async def conversation_memory(novel_id, chapter_id=None):
-    try:
-        context = await story_context(novel_id, chapter_id)
-    except HTTPException as error:
-        if error.status_code != 409:
-            raise
-        return {'enabled': True, 'state': 'needs_review', 'message': str(error.detail)}
-    if not context['enabled']:
-        return context
-    return {**context, 'facts': context['facts'][:3], 'fact_count': len(context['facts']),
-        'has_more': len(context['facts']) > 3, 'revision': fingerprint(context)}
+def fit_context(context, budget):
+    def fits(data):
+        return len(json.dumps(data, ensure_ascii=False)) <= budget
+
+    if not context['enabled'] or budget <= 0:
+        return None
+    result = {key: value for key, value in context.items() if key not in {'facts', 'worlds', 'baseline_summary', 'current', 'previous'}}
+    result['facts'] = []
+    if not fits(result):
+        return None
+    for key in ('baseline_summary', 'previous', 'current', 'worlds'):
+        if context[key] and fits({**result, key: context[key]}):
+            result[key] = context[key]
+    for fact in sorted(context['facts'], key=lambda fact: fact['commit_id'], reverse=True):
+        # Source quotations stay in the memory viewer. The generation call needs the structured facts.
+        fact = {key: value for key, value in fact.items() if key != 'evidence'}
+        if fits({**result, 'facts': [*result['facts'], fact]}):
+            result['facts'].append(fact)
+    return result if result['facts'] or 'baseline_summary' in result or 'current' in result else None
 
 
-async def add_generation_context(execution, facts):
-    operation = execution.params['output_contract']['name']
-    model_key = 'model:strict:' + operation
-    if operation in {'assets', 'storyboard', 'screenplay'}:
-        context = await execution_context(execution, purpose=operation, model_key=model_key)
-        return {**facts, 'story_memory': context} if context['enabled'] else facts
-    if operation.startswith('scene_prompt_edit'):
-        from models.scene import Scene
-        targets = facts.get('targets') or [facts.get('target', {})]
-        scenes = await Scene.filter(id__in=[target['id'] for target in targets if target.get('id')],
-            chapter__novel_id=execution.params['novel_id']).order_by('id')
-        contexts = []
-        for chapter_id in dict.fromkeys(scene.chapter_id for scene in scenes):
-            context = await execution_context(execution, chapter_id, purpose='storyboard', model_key=model_key)
-            if context['enabled']:
-                contexts.append({**context, 'applies_to': [scene.id for scene in scenes if scene.chapter_id == chapter_id]})
-        if contexts:
-            return {**facts, 'story_memory': {'enabled': True, 'contexts': contexts}}
-    return facts
+async def generation_memory(execution, operation, budget):
+    params = execution.params
+    chapter_id = params.get('chapter_id')
+    if operation not in {'assets', 'storyboard', 'screenplay'} or chapter_id is None:
+        return None
+    from services.story_memory.automatic import enabled, prepare_for_generation
+
+    task_id, novel_id = params['task_id'], params['novel_id']
+    key = f'context:story-memory:{operation}'
+    saved = await AgentOperation.get_or_none(task_id=task_id, key=key, state='completed')
+    if saved is not None:
+        return saved.result['context']
+    if not await enabled(novel_id):
+        return None
+    if await AgentOperation.filter(task_id=task_id, key=f'model:strict:{operation}', state='completed').exists():
+        return None
+    await prepare_for_generation(execution, chapter_id)
+
+    async def freeze():
+        async with project_write(novel_id):
+            context = fit_context(await story_context(novel_id, chapter_id, purpose=operation, supplemental=True), budget)
+            if context is not None:
+                task = await AiTask.get(id=task_id)
+                bindings = {**task.request_params.get('story_memory_bindings', {}),
+                    f'{operation}:{chapter_id}': {**binding(context), 'supplemental': True}}
+                await AiTask.filter(id=task_id).update(request_params={**task.request_params, 'story_memory_bindings': bindings})
+        return {'context': context}
+
+    return (await execute_step(task_id, key, freeze, atomic=True))['context']

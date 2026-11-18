@@ -17,8 +17,10 @@ async def workflow(novel_id, ctx, model_id, skill_id=None):
         'user_id': ctx.user.id if ctx.user else None, 'assistant_model_config_id': model_id}, 'story', skill_id)
 
 
-async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
+async def submit_analysis(novel_id, body, ctx, *, recheck_id=None, automatic=False):
     spec = body.model_dump(mode='json')
+    if automatic:
+        spec['automatic'] = True
     existing = await StoryCommit.get_or_none(novel_id=novel_id, request_id=body.request_id)
     if existing:
         if existing.request_spec != spec:
@@ -26,7 +28,9 @@ async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
         return await AiTask.get(id=existing.task_id)
     params = await workflow(novel_id, ctx, body.assistant_model_config_id, body.skill_id)
     params.update(operation='story_memory_analyze', output_contract=contract(),
-        creative_method=method(params['creative_method'], params['prompt_language']))
+        creative_method=method({'instructions': '', 'references': []} if automatic else params['creative_method'], params['prompt_language']))
+    if automatic:
+        params['automatic_story_memory'] = True
     if recheck_id is not None:
         params['story_recheck_id'] = str(recheck_id)
     async with project_write(novel_id):
@@ -41,7 +45,7 @@ async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
                 continue
             if request.get('operation') == 'story_memory_analyze' and request.get('chapter_id') == body.chapter_id:
                 conflict('这一范围正在分析，请在创作助手查看进度')
-            if not recheck_id and request.get('operation') == 'story_memory_recheck' and task.stage == 'needs_review':
+            if not automatic and not recheck_id and request.get('operation') == 'story_memory_recheck' and task.stage == 'needs_review':
                 commit_id = (task.response_data or {}).get('waiting_commit_id')
                 waiting = await StoryCommit.get_or_none(id=commit_id, novel_id=novel_id)
                 if waiting and waiting.chapter_id == body.chapter_id and waiting.status in CANDIDATE_STATUSES:

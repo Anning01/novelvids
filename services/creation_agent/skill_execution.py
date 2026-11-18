@@ -199,9 +199,6 @@ class SkillExecution:
             key += ':' + self.params['media_preparation_key']
         from models.agent_operation import AgentOperation
         from services.creation_agent.plan_sources import fingerprint
-        if isinstance(facts, dict) and facts.get('story_memory', {}).get('enabled'):
-            from prompts.story_memory import context_rules
-            additional_instructions += context_rules(self.language)
         stable_facts = dict(facts) if isinstance(facts, dict) else facts
         if isinstance(stable_facts, dict) and isinstance(stable_facts.get('selection'), dict):
             stable_facts['selection'] = {k: v for k, v in stable_facts['selection'].items()

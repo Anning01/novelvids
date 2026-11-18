@@ -250,7 +250,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         from services.project_deletion import remove_project
         await remove_project(instance)
 
-    async def split(self, novel_id: int):
+    async def split(self, novel_id: int, *, ctx=None, assistant_model_config_id=None):
         """使用nlp拆分章节"""
         # 使用 NLP 服务识别章节
         novel = await self.get(novel_id)
@@ -291,6 +291,12 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 }
             )
             await novel.save(update_fields=["total_chapters", "updated_at"])
+            if len(parsed_chapters) > 1 and novel.workflow_kind == 'script':
+                from models.story_memory import StoryMemoryProject
+                await StoryMemoryProject.get_or_create(novel_id=novel_id, using_db=connection)
+                if ctx is not None:
+                    from services.story_memory.automatic import queue_memory
+                    await queue_memory(novel_id, None, ctx, model_id=assistant_model_config_id)
         return novel
 
     @staticmethod

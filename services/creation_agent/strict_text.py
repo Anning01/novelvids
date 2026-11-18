@@ -57,9 +57,6 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
         duration_range=params.get('shot_duration_range', (1, 30)), blocking_maps=params.get('generate_blocking_maps', False))
     if rendering:
         contract['rendering'] = rendering
-    if task in {'assets', 'storyboard', 'screenplay'}:
-        from services.story_memory.context import capture_binding
-        params = {**params, 'story_memory_bindings': await capture_binding(params['novel_id'], params.get('chapter_id'), task)}
     return {**params, **(submission.get() or {}), **inherited,
             'workflow_version': WORKFLOW_VERSION, 'assistant_model_config_id': chosen.id,
             'agent_configuration': limits.model_dump(),
@@ -87,8 +84,6 @@ async def generate(execution, facts: dict) -> dict:
     from schemas.creation_agent import AgentConfiguration
 
     params = execution.params
-    from services.story_memory.context import add_generation_context
-    facts = await add_generation_context(execution, facts)
     chosen, _ = await require_workflow_model(params)
     limits = AgentConfiguration.model_validate(params['agent_configuration'])
     contract = params['output_contract']
@@ -101,6 +96,39 @@ async def generate(execution, facts: dict) -> dict:
         await task.save(update_fields=['request_params'])
         params = {**params, 'output_contract': contract}
     key = f'model:strict:{operation}'
+    project = await Novel.get(id=params['novel_id'])
+    project_facts = {'name': project.name, 'setting': project.project_setting,
+                     'style': project.custom_style_prompt or project.style_key}
+    if operation in {'assets', 'storyboard'}:
+        from prompts.skill_pack import read_skill
+        from prompts.project_settings import audiovisual_guidance
+        styles = json.loads(read_skill('styles'))
+        style_kind = 'image' if operation == 'assets' else 'video'
+        project_facts.update(aspect_ratio=project.aspect_ratio,
+            style=(project.custom_style_prompt or styles.get(project.style_key, {}).get(style_kind, '')),
+            audiovisual_guidance=audiovisual_guidance(project.audiovisual_guidance, execution.language))
+        if operation == 'storyboard':
+            project_facts['storyboard_strategy'] = json.loads(read_skill('strategies'))[params.get('storyboard_strategy') or project.storyboard_strategy or 'cinematic']
+    instructions, content = render_text_task(language=execution.language,
+        skill=params['creative_method'], context={
+            'input': facts, 'user_request': await user_instruction(params),
+            'project': project_facts})
+    messages = [ModelRequest(parts=[SystemPromptPart(instructions), UserPromptPart(content)])]
+    request = ModelRequestParameters()
+    if operation in {'assets', 'storyboard', 'screenplay'}:
+        from services.creation_agent.context_budget import wire_size
+        from services.story_memory.context import MAX_GENERATION_MEMORY_CHARACTERS, generation_memory
+        limit = limits.context_character_limit(chosen.max_context_characters)
+        budget = MAX_GENERATION_MEMORY_CHARACTERS
+        if limit is not None:
+            available = limit - wire_size(messages, request)['total_characters'] - len(', "story_memory": ')
+            budget = min(budget, available)
+        memory = await generation_memory(execution, operation, budget)
+        if memory is not None:
+            payload = json.loads(content)
+            payload['task_context']['input']['story_memory'] = memory
+            messages[0].parts[1] = UserPromptPart(json.dumps(payload, ensure_ascii=False))
+
     child, _ = await AiTask.get_or_create(id=uuid5(UUID(params['task_id']), key), defaults={
         'task_type': 7, 'status': 2, 'request_params': {**params, 'parent_task_id': params['task_id'], 'model_config_id': chosen.id}})
     message, _ = await AgentMessage.get_or_create(task=child, role='assistant', defaults={
@@ -124,25 +152,6 @@ async def generate(execution, facts: dict) -> dict:
 
     async def invoke():
         nonlocal rejected
-        project = await Novel.get(id=params['novel_id'])
-        project_facts = {'name': project.name, 'setting': project.project_setting,
-                         'style': project.custom_style_prompt or project.style_key}
-        if operation in {'assets', 'storyboard'}:
-            from prompts.skill_pack import read_skill
-            from prompts.project_settings import audiovisual_guidance
-            styles = json.loads(read_skill('styles'))
-            style_kind = 'image' if operation == 'assets' else 'video'
-            project_facts.update(aspect_ratio=project.aspect_ratio,
-                style=(project.custom_style_prompt or styles.get(project.style_key, {}).get(style_kind, '')),
-                audiovisual_guidance=audiovisual_guidance(project.audiovisual_guidance, execution.language))
-            if operation == 'storyboard':
-                project_facts['storyboard_strategy'] = json.loads(read_skill('strategies'))[params.get('storyboard_strategy') or project.storyboard_strategy or 'cinematic']
-        instructions, content = render_text_task(language=execution.language,
-            skill=params['creative_method'], context={
-                'input': facts, 'user_request': await user_instruction(params),
-                'project': project_facts})
-        messages = [ModelRequest(parts=[SystemPromptPart(instructions), UserPromptPart(content)])]
-        request = ModelRequestParameters()
         try:
             async with recorded.request_stream(messages, limits.output_model_settings(chosen.max_tokens), request) as stream:
                 await activity(None, stream)

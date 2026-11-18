@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from fastapi import HTTPException
-from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
+from models.story_memory import StoryCommit, StoryFact, StoryMemoryProject, StorySnapshot, StorySubject
 from schemas.story_memory import StoryCandidate
 from services.creation_agent.plan_sources import fingerprint
 from services.creation_objects import project_write
@@ -84,7 +84,8 @@ async def decide(novel_id, commit_id, body, actor_id):
             await verify_inputs(commit)
             candidate = await validate_candidate(commit, commit.candidate)
             await publish(commit, candidate)
-            if commit.replaces_id:
+            if commit.replaces_id or (commit.chapter_id is not None and
+                    await StoryMemoryProject.filter(novel_id=novel_id).exists()):
                 from services.story_memory.invalidation import invalidate
                 chapter = commit.source_snapshot.get('chapter')
                 await invalidate(novel_id, chapter_id=commit.chapter_id,

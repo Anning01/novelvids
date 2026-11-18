@@ -73,6 +73,26 @@ it('separates confirmed memory from reviewable candidates and preserves source e
   expect(storyMemoryApi.detail).toHaveBeenCalledWith(9, 10, expect.any(AbortSignal))
 })
 
+it('shows automatic memory status with no manual confirmation or model controls', async () => {
+  vi.mocked(storyMemoryApi.status).mockResolvedValue(response({ ...state, automatic: true }))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('[role="status"]').text()).toBe('当前范围的记忆已就绪。')
+  expect(wrapper.text()).not.toContain('顺序复核全部')
+  expect(wrapper.text()).not.toContain('故事记忆模型')
+  expect(review.text()).not.toContain('确认并入库')
+  expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+})
+
+it('hides story memory for a single-source project without legacy memory', async () => {
+  vi.mocked(storyMemoryApi.status).mockResolvedValue(response({ ...state, automatic: false }))
+  vi.mocked(storyMemoryApi.history).mockResolvedValue(response([]))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.find('.story-memory').exists()).toBe(false)
+  expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
+})
+
 it('keeps confirmed memory in a dialog and closes it when the selected scope changes', async () => {
   vi.mocked(storyMemoryApi.context).mockResolvedValue(response({
     enabled: true,
