@@ -371,7 +371,11 @@ export const api = {
   latestExtraction: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/chapter/extract/${chapterId}/latest`),
   assets: (novelId: number, page = 1, pageSize = 100, chapterId?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, page, page_size: pageSize, chapter_id: chapterId })}`),
   referencePromptPreview: (data: Pick<Asset, 'asset_type' | 'canonical_name' | 'base_traits' | 'description' | 'metadata'> & { aspect_ratio?: string }) => request<SingleResponse<AssetReferencePromptPreview>>('/asset/reference-prompt/preview', { method: 'POST', body: JSON.stringify(data) }),
-  projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number) => request<PaginationResponse<Asset>>(`/asset${qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' })}`),
+  projectAssetLibrary: (novelId: number, page = 1, search = '', pageSize = 24, assetType?: number, sourceChapters: number[] = []) => {
+    const query = new URLSearchParams(qs({ novel_id: novelId, asset_type: assetType, page, page_size: pageSize, search, sort: 'canonical_name' }))
+    for (const number of sourceChapters) query.append('source_chapter_number', String(number))
+    return request<PaginationResponse<Asset>>(`/asset?${query}`)
+  },
   publicAssetLibrary: (assetType: number, page = 1, search = '', pageSize = 24) => request<PaginationResponse<Asset>>(`/resource-library/catalog/project-assets${qs({ asset_type: assetType, page, page_size: pageSize, search })}`),
   asset: (id: number) => request<SingleResponse<Asset>>(`/asset/${id}`),
   deleteFailedAssetGeneration: (assetId: number, taskId: string) => request<SingleResponse<null>>(`/asset/${assetId}/generation-history/${taskId}`, { method: 'DELETE' }),
@@ -458,6 +462,14 @@ export const api = {
   trimAudioReference: (id: number, start: number, end: number, novelId?: number) => request<SingleResponse<AudioReference>>(`/media-library/audio-references/${id}/trim`, {
     method: 'POST',
     body: JSON.stringify({ start, end, novel_id: novelId }),
+  }),
+  autoDesignVoice: (payload: {
+    asset_id: number
+    variant_id: number | null
+    expected_voice_reference_id: number | null
+    expected_voice: string
+  }) => request<SingleResponse<{ reference: AudioReference; metadata: Record<string, unknown> }>>('/media-library/audio-references/auto-design', {
+    method: 'POST', body: JSON.stringify(payload),
   }),
   async uploadAudioReference(file: File, nickname: string, gender: string, novelId?: number) {
     if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav'].includes(file.type) && !/\.(mp3|wav)$/i.test(file.name)) {

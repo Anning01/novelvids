@@ -989,6 +989,30 @@ it('creates ASR configuration with server-provided defaults and minute pricing',
   wrapper.unmount()
 })
 
+it('configures a dedicated voice design model with an explicit output-second price', async () => {
+  baseMocks()
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [] } } as never)
+  const create = vi.spyOn(api, 'createConfig').mockResolvedValue({ data: {} } as never)
+  const wrapper = mountPage(teamAdminStore())
+  await flushPromises()
+  await wrapper.get('.model-category-card.is-voice_design').trigger('click')
+  await wrapper.get('.model-config-section > header button').trigger('click')
+  await wrapper.get('input[name="model-config-name"]').setValue('MiMo VoiceDesign')
+  await wrapper.get('input[name="model-service-base-url"]').setValue('https://mimo.example/v1')
+  await wrapper.get('input[name="model-service-api-key"]').setValue('test-key')
+  await wrapper.get('input[name="model-id"]').setValue('mimo-v2.5-tts-voicedesign')
+  await wrapper.get('form.model-modal').trigger('submit')
+  expect(create).not.toHaveBeenCalled()
+  await wrapper.get('input[name="voice-design-price"]').setValue('0.025')
+  await wrapper.get('form.model-modal').trigger('submit')
+  await flushPromises()
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({
+    task_type: 12, task_types: [12], api_protocol: 'mimo_voice_design',
+    pricing: expect.objectContaining({ type: 'voice_design', billing_unit: 'second', price_per_second: 0.025 }),
+  }))
+  wrapper.unmount()
+})
+
 it.each(['dark', 'light'])('previews channel pixel prices before saving a synced image model (%s)', async theme => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()

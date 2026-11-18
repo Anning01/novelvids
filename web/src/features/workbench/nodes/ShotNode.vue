@@ -4,7 +4,7 @@ import { tr } from '@/i18n'
 import type { NodeProps } from '@vue-flow/core'
 import type { MaterialMention, MaterialMentionMode, MaterialMentionOption } from '../components/materialMentionTypes'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
-import { boundPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt, type ModelPromptVersions, type OptimizationFacts } from '@/shared/sceneModelPrompt'
+import { boundPrompt, cachedModelPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt, type ModelPromptVersions, type OptimizationFacts } from '@/shared/sceneModelPrompt'
 import { includeSheet, sheetReference } from '@/shared/storyboardSheetReference'
 import { useSceneBlockingMap } from '@/shared/useSceneBlockingMap'
 import { withBlockingReference } from '@/shared/sceneBlockingReference'
@@ -306,6 +306,12 @@ function promptVersions(): ModelPromptVersions {
   return {...(scene.value.metadata?.video_prompt_versions as ModelPromptVersions || {})}
 }
 
+const reusablePrompt = computed(() => {
+  const model = selectedModel.value
+  if (!model || activePromptModel.value) return undefined
+  return cachedModelPrompt(scene.value, model, optimizationFacts(), promptVersions())
+})
+
 async function restoreGeneric() {
   const versions = promptVersions()
   const model = activePromptModel.value
@@ -320,7 +326,6 @@ async function togglePrompt() {
   if (saving.value || optimizing.value) return
   const controller = new AbortController()
   optimization = controller
-  optimizing.value = true
   try {
     if (activePromptModel.value) { await restoreGeneric(); return }
     const model = selectedModel.value
@@ -329,7 +334,9 @@ async function togglePrompt() {
     const input = JSON.stringify(facts)
     const versions = promptVersions()
     const sourceId = scene.value.id
-    const draft = await resolveModelPrompt(scene.value, model, facts, versions, controller.signal)
+    const cached = reusablePrompt.value
+    optimizing.value = !cached
+    const draft = cached ?? await resolveModelPrompt(scene.value, model, facts, versions, controller.signal)
     if (controller.signal.aborted || sourceId !== scene.value.id || model.config_id !== selectedModel.value?.config_id) return
     if (input !== JSON.stringify(optimizationFacts())) {
       notice.info(tr('分镜内容已修改，请按当前内容重新优化'))
@@ -567,12 +574,12 @@ watch([selectedModel, generationMode], ([model]) => {
       </template>
       <template #footer-actions>
         <button type="button" class="workbench-prompt-panel__secondary-action"
-          :aria-pressed="Boolean(activePromptModel)" :aria-busy="optimizing"
+          :aria-pressed="Boolean(activePromptModel)" :aria-busy="saving || optimizing"
           :disabled="saving || optimizing || (activePromptModel ? !genericPrompt(scene) : !selectedModel || !prompt.trim())"
           @click="togglePrompt">
           <LoaderCircle v-if="optimizing" class="workbench-prompt-panel__action-spinner" :size="13" />
           <WandSparkles v-else :size="13" />
-          {{ optimizing ? tr('优化中') : activePromptModel ? tr('使用通用 Prompt') : tr('模型 Skills 优化') }}
+          {{ optimizing ? tr('优化中') : saving ? tr('切换中') : activePromptModel ? tr('使用通用 Prompt') : reusablePrompt ? tr('使用优化稿') : tr('模型 Skills 优化') }}
         </button>
       </template>
     </WorkbenchPromptEditorPanel>

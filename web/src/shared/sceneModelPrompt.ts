@@ -41,8 +41,8 @@ export function modelPromptTexts(scene: Scene) {
   return drafts
 }
 
-export async function resolveModelPrompt(scene: Scene, model: VideoGenerationModel, facts: OptimizationFacts,
-  versions: ModelPromptVersions, signal: AbortSignal): Promise<string> {
+export function cachedModelPrompt(scene: Scene, model: VideoGenerationModel, facts: OptimizationFacts,
+  versions: ModelPromptVersions): string | undefined {
   const input = JSON.stringify(facts)
   const cached = versions[model.model_type]
   const importedBase = scene.prompt_params?.generic_prompt ?? importedDrafts(scene).general ??
@@ -56,16 +56,20 @@ export async function resolveModelPrompt(scene: Scene, model: VideoGenerationMod
       .filter(match => !match[1]!.includes(':') && !/^(?:参考图|图片|图|视频|音频)\d+$/.test(match[1]!))
     if (markers.some(match => !optimized!.includes(match[0]))) optimized = undefined
   }
-  if (!optimized) {
-    const {data: task} = await api.optimizeScenePrompt(scene.id, {model_config_id: model.config_id, ...facts})
-    const result = terminalTaskStatuses.has(task.status) ? task : await pollUntilTerminal(
-      async signal => (await api.task(task.id, signal)).data,
-      { signal, intervalMs: 1500, terminalStatuses: terminalTaskStatuses, requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
-    if (result.status !== TaskStatusEnum.COMPLETED) throw new Error(result.error_message || tr('提示词优化失败'))
-    const text = result.response_data?.prompt
-    if (typeof text !== 'string' || !text.trim() || result.response_data?.model_type !== model.model_type ||
-        result.response_data?.scene_id !== scene.id) throw new Error(tr('模型未返回本镜头的提示词'))
-    optimized = text
-  }
   return optimized
+}
+
+export async function resolveModelPrompt(scene: Scene, model: VideoGenerationModel, facts: OptimizationFacts,
+  versions: ModelPromptVersions, signal: AbortSignal): Promise<string> {
+  const cached = cachedModelPrompt(scene, model, facts, versions)
+  if (cached) return cached
+  const {data: task} = await api.optimizeScenePrompt(scene.id, {model_config_id: model.config_id, ...facts})
+  const result = terminalTaskStatuses.has(task.status) ? task : await pollUntilTerminal(
+    async signal => (await api.task(task.id, signal)).data,
+    { signal, intervalMs: 1500, terminalStatuses: terminalTaskStatuses, requestTimeoutMs: 45_000, retryOnError: retryableStatusError })
+  if (result.status !== TaskStatusEnum.COMPLETED) throw new Error(result.error_message || tr('提示词优化失败'))
+  const text = result.response_data?.prompt
+  if (typeof text !== 'string' || !text.trim() || result.response_data?.model_type !== model.model_type ||
+      result.response_data?.scene_id !== scene.id) throw new Error(tr('模型未返回本镜头的提示词'))
+  return text
 }

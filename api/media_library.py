@@ -12,7 +12,10 @@ from controllers.media_library import (
 from models.audio_reference import AudioReference
 from models.digital_human import DigitalHuman
 from models.novel import Novel
-from schemas.media_library import AudioReferenceOssFinalizeIn, AudioReferenceOut, AudioReferenceTrimIn, DigitalHumanOut
+from schemas.media_library import (
+    AudioReferenceAutoDesignIn, AudioReferenceAutoDesignOut, AudioReferenceOssFinalizeIn,
+    AudioReferenceOut, AudioReferenceTrimIn, DigitalHumanOut,
+)
 from services.audio_references import (
     audio_reference_accessible,
     audio_reference_scope_query,
@@ -72,6 +75,24 @@ async def list_audio_references(
         query,
     )
     return ResponseSchema(data=data)
+
+
+@router.post(
+    "/audio-references/auto-design",
+    summary="设计音色并绑定到角色或形态",
+    response_model=ResponseSchema[AudioReferenceAutoDesignOut],
+)
+async def auto_design_audio_reference(
+    payload: AudioReferenceAutoDesignIn,
+    ctx: AuthContext = Depends(get_auth_context),
+    _: AuthContext = _EDITOR,
+):
+    from services.voice_design import auto_design_voice_for_asset
+
+    reference, metadata = await auto_design_voice_for_asset(payload, ctx)
+    return ResponseSchema(data=AudioReferenceAutoDesignOut(
+        reference=AudioReferenceOut.model_validate(reference), metadata=metadata,
+    ))
 
 
 @router.post(
