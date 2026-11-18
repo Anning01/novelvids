@@ -150,7 +150,7 @@ export function formatCoverTitle(title?: string | null, alt?: string | null): {
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Clapperboard, Image } from 'lucide-vue-next'
+import { Clapperboard, Image, ZoomIn } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { tr } from '@/i18n'
@@ -165,6 +165,7 @@ const props = withDefaults(defineProps<{
   maxWidth?: number
   maxHeight?: number
   defaultCover?: boolean
+  previewable?: boolean
   fit?: 'cover' | 'contain'
 }>(), {
   maxWidth: 160,
@@ -174,6 +175,7 @@ const props = withDefaults(defineProps<{
   defaultCover: true,
   fit: 'cover',
 })
+const emit = defineEmits<{ preview: [src: string] }>()
 
 const failed = ref(false)
 watch(() => props.source, () => { failed.value = false })
@@ -190,12 +192,19 @@ const palette = computed(() => getCoverPalette(coverSeed.value))
 const formatted = computed(() => formatCoverTitle(props.title, props.alt))
 
 const hasImage = computed(() => Boolean(props.source && !failed.value))
+const canPreview = computed(() => props.previewable && hasImage.value)
+
+function preview() {
+  const src = props.original || props.source
+  if (canPreview.value && src) emit('preview', mediaUrl(src))
+}
 
 function onError(event: Event) {
   if (!failed.value) {
     if (props.original && props.original !== props.source) {
       fallbackImage(event, mediaUrl(props.original))
-      return
+      const image = event.currentTarget as HTMLImageElement
+      if (!image.hidden) return
     }
     failed.value = true
   }
@@ -203,16 +212,22 @@ function onError(event: Event) {
 </script>
 
 <template>
-  <div class="project-cover" :style="dimensions">
-    <img
-      v-if="hasImage"
-      :src="mediaUrl(source!)"
-      :alt="alt || title || ''"
-      :style="{ objectFit: fit }"
-      loading="lazy"
-      decoding="async"
-      @error="onError"
-    >
+  <component :is="canPreview ? 'button' : 'div'" class="project-cover" :style="dimensions"
+    :type="canPreview ? 'button' : undefined"
+    :aria-label="canPreview ? tr('放大查看 {p0}', { p0: alt || title || tr('图片') }) : undefined"
+    :aria-haspopup="canPreview ? 'dialog' : undefined" @click="preview">
+    <template v-if="hasImage">
+      <img
+        :key="source ?? undefined"
+        :src="mediaUrl(source!)"
+        :alt="alt || title || ''"
+        :style="{ objectFit: fit }"
+        loading="lazy"
+        decoding="async"
+        @error="onError"
+      >
+      <span v-if="canPreview" class="project-cover__zoom" aria-hidden="true"><ZoomIn :size="14" /></span>
+    </template>
     <div
       v-else-if="defaultCover"
       class="project-cover__generated"
@@ -235,7 +250,7 @@ function onError(event: Event) {
       <div class="project-cover__footer-line" :style="{ backgroundColor: palette.lineColor }" aria-hidden="true" />
     </div>
     <Image v-else :size="24" :aria-label="tr('暂无封面')" />
-  </div>
+  </component>
 </template>
 
 <style scoped>
@@ -257,6 +272,19 @@ function onError(event: Event) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+button.project-cover { padding: 0; border: 0; cursor: zoom-in; }
+button.project-cover:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+.project-cover__zoom {
+  position: absolute; right: 4px; bottom: 4px; display: grid; width: 22px; height: 22px; place-items: center;
+  color: white; background: rgb(20 23 32 / 78%); border-radius: 6px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  button.project-cover img { transition: scale 180ms ease-out; }
+  button.project-cover:active img { scale: 1.02; }
+  @media (hover: hover) {
+    button.project-cover:hover:not(:active) img { scale: 1.06; }
+  }
 }
 .project-cover__generated {
   position: relative;

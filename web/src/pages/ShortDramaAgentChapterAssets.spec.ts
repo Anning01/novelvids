@@ -164,6 +164,35 @@ beforeEach(() => {
   })
 })
 
+it('opens the original project cover and can reopen it after closing', async () => {
+  const project = await api.novelMeta(9)
+  vi.mocked(api.novelMeta).mockResolvedValue({
+    ...project,
+    data: { ...project.data, cover: '/media/cover.png', cover_preview: '/media/cover-preview.png' },
+  })
+  const wrapper = mount(ShortDramaAgentPage, {
+    attachTo: document.body,
+    global: { plugins: [pinia], components: { AppButton }, stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+  })
+  await flushPromises()
+
+  const cover = wrapper.get('button[aria-label="放大查看 厄运之手封面"]')
+  expect(cover.get('img').attributes('src')).toBe('/media/cover-preview.png')
+  await cover.trigger('click')
+  await flushPromises()
+
+  const viewer = new DOMWrapper(document.body).get<HTMLDialogElement>('dialog[aria-label="图片放大查看"]')
+  expect(viewer.element.open).toBe(true)
+  expect(viewer.get('img').attributes('src')).toBe('/media/cover.png')
+  await viewer.get('[aria-label="关闭大图"]').trigger('click')
+  await flushPromises()
+  expect(viewer.element.open).toBe(false)
+
+  await cover.trigger('click')
+  await flushPromises()
+  expect(viewer.element.open).toBe(true)
+})
+
 it('shows extracted person assets in the selected chapter footer instead of stale analysis characters', async () => {
   const wrapper = mount(ShortDramaAgentPage, {
     global: {
@@ -241,7 +270,7 @@ it('reanalysis replaces the old failed run only after a new task is admitted', a
   await flushPromises()
   await analyze.trigger('click')
   expect(api.analyzeNovel).toHaveBeenCalledExactlyOnceWith(9, undefined, 12, undefined)
-  expect(wrapper.get('.secondary-action').attributes('disabled')).toBeDefined()
+  expect(analyze.attributes('disabled')).toBeDefined()
   admit({ code: 0, message: '', data: { id: 'new-run', task_type: 5, status: TaskStatusEnum.QUEUED, created_at: '' } })
   await flushPromises()
   expect(api.task).toHaveBeenCalledWith('new-run')
@@ -459,7 +488,7 @@ it('edits the maximum shot duration without changing other project preferences',
   vi.mocked(api.updateNovel).mockResolvedValue({code: 0, message: 'ok', data: {id: 9, shot_duration_max: 12} as Novel})
   const wrapper = mount(ShortDramaAgentPage, {global: {plugins: [pinia], components: {AppButton}, stubs: {RouterLink: {template: '<a><slot /></a>'}}}})
   await flushPromises()
-  expect(wrapper.get('.production-controls').text()).toContain('15s')
+  expect(wrapper.get('.shot-duration-control output').text()).toContain('15s')
   await wrapper.findAll('button').find(b => b.text() === '编辑内容')!.trigger('click')
   await wrapper.get('input[aria-label="单分镜最长时长"]').setValue(12)
   await wrapper.findAll('button').find(b => b.text().includes('保存修改'))!.trigger('click')
