@@ -1641,23 +1641,25 @@ onUnmounted(() => {
             <label v-if="kind === 'character' && !isGroupPortrait" class="asset-field"><span><i>*</i>{{ tr('年龄') }}</span><AppSelect v-model="age" :options="ageOptions" :ariaLabel="tr('选择年龄阶段')" :menu-label="tr('年龄')" /></label>
             <div v-if="kind === 'character' && !isGroupPortrait" class="asset-field" role="group" :aria-label="tr('音色选择')">
               <span>{{ tr('音色选择') }}</span>
-              <div class="asset-voice-control">
-                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving || autoDesigning" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
-                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving || autoDesigning" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
+              <div class="asset-voice-actions">
+                <div class="asset-voice-control">
+                  <AppButton type="button" variant="secondary" class="asset-voice-choice" :title="voice || undefined" :loading="voiceSaving" :disabled="voiceSaving || autoDesigning" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
+                  <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving || autoDesigning" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
+                </div>
+                <AppButton
+                  v-if="asset && !variantDraft?.is_new"
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  class="asset-voice-design"
+                  :loading="autoDesigning"
+                  :disabled="!formHydrated || voiceSaving || autoSaving || saving"
+                  @click="autoDesignVoice"
+                >
+                  <Sparkles v-if="!autoDesigning" :size="14" aria-hidden="true" />
+                  {{ autoDesigning ? tr('正在设计音色…') : tr('AI 设计音色') }}
+                </AppButton>
               </div>
-              <AppButton
-                v-if="asset && !variantDraft?.is_new"
-                type="button"
-                variant="ghost"
-                size="sm"
-                class="asset-voice-design"
-                :loading="autoDesigning"
-                :disabled="!formHydrated || voiceSaving || autoSaving || saving"
-                @click="autoDesignVoice"
-              >
-                <Sparkles v-if="!autoDesigning" :size="14" aria-hidden="true" />
-                {{ autoDesigning ? tr('正在设计音色…') : tr('AI 设计音色') }}
-              </AppButton>
               <span class="asset-voice-status" role="status">{{ autoDesigning ? tr('正在设计音色…') : '' }}</span>
             </div>
           </div>
@@ -1892,9 +1894,10 @@ onUnmounted(() => {
 .asset-field > span { display: flex; align-items: center; gap: 6px; }
 .asset-field > span small { margin-left: auto; color: var(--app-text-muted); font-size: 9px; font-weight: 500; }
 .asset-field > span i,.asset-mode legend i { margin-right: 3px; color: var(--creation-danger); font-style: normal; }
-.asset-voice-design { justify-self: start; }
+.asset-voice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.asset-voice-design { flex: 0 0 auto; min-height: 40px; max-inline-size: 100%; white-space: normal; }
 .asset-voice-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.asset-voice-control { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.asset-voice-control { display: flex; flex: 1 1 0; align-items: center; gap: 6px; min-inline-size: min(7rem, 100%); }
 .asset-voice-choice { flex: 1; overflow: hidden; min-height: 40px; color: var(--app-text-secondary); background: var(--app-surface); }
 .asset-voice-control .asset-voice-choice:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }
 .asset-voice-choice > span { overflow: hidden; text-overflow: ellipsis; }
