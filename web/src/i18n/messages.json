@@ -4559,6 +4559,7 @@
     "复核确认后，才能使用这一范围的记忆生成。": "Review and confirm this scope before using its memory for generation.",
     "等待确认故事记忆": "Awaiting story memory confirmation",
     "在创作助手查看进度": "View progress in the creation assistant",
+    "正在恢复最新任务状态": "Refreshing task status",
     "在创作助手查看候选": "Review candidate in the creation assistant",
     "查看待处理候选": "View candidate awaiting review",
     "本范围已有候选，可在创作助手查看审核结果。": "A candidate is available. View the review in the creation assistant.",

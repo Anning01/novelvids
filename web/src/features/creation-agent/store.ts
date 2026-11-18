@@ -43,6 +43,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   const nextBefore = ref<number | null>(null)
   const changesRevision = ref(0)
   const latestChanges = ref<AgentChange[]>([])
+  const unavailableSnapshots = ref(new Set<string>())
   const busy = computed(() => submitting.value || Boolean(currentRun.value && !currentRun.value.background && isAgentRunning(currentRun.value.status)))
   let subscription: HttpAgent | null = null
   let epoch = 0
@@ -68,14 +69,19 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (changed.length) { latestChanges.value = changed; changesRevision.value += 1 }
   }
 
-  function applySnapshot(run: AgentRun) {
-    currentRun.value = run
+  function updateRunMessage(run: AgentRun) {
+    unavailableSnapshots.value.delete(run.task_id)
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
     if (message) Object.assign(message, {
       recovery: run.recovery,
       activity: streamConnected.value && isAgentRunning(run.status)
         ? mergeActivity(run.activity || [], message.activity || [])
         : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
+  }
+
+  function applySnapshot(run: AgentRun) {
+    currentRun.value = run
+    updateRunMessage(run)
     reportChanges(run.changes)
     if (run.background) {
       statusText.value = tr('任务已提交，正在等待模型执行。')
@@ -176,6 +182,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     conversationId.value = id
     if (id !== null) sessionStorage.setItem(selectionKey(), String(id))
     currentRun.value = null
+    unavailableSnapshots.value.clear()
     if (!sameConversation) messages.value = []
     error.value = ''
     statusText.value = ''
@@ -360,14 +367,14 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))
     if (currentRun.value && isAgentRunning(currentRun.value.status)) runs.add(currentRun.value.task_id)
     await Promise.allSettled([...runs].map(async taskId => {
-      const response = await snapshot(taskId)
-      if (revision !== epoch) return
-      if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }
-      const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
-      if (message) Object.assign(message, { production: response.data.production || [], usage: response.data.usage,
-        activity: streamConnected.value && isAgentRunning(response.data.status)
-          ? mergeActivity(response.data.activity || [], message.activity || [])
-          : response.data.activity, started_at: response.data.started_at, finished_at: response.data.finished_at })
+      try {
+        const response = await snapshot(taskId)
+        if (revision !== epoch) return
+        if (currentRun.value?.task_id === taskId) applySnapshot(response.data)
+        else updateRunMessage(response.data)
+      } catch {
+        if (revision === epoch) unavailableSnapshots.value.add(taskId)
+      }
     }))
   }
 
@@ -400,7 +407,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   }
 
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
-    streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
+    streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges, unavailableSnapshots,
     open, history, send, stop, resume, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
     deleteConversation, restoreConversation, loadDeletedConversations, refreshConversations }
 })

@@ -309,6 +309,41 @@ it('announces request failures and provides a read retry', async () => {
   expect(review.text()).toContain('候选与审核')
 })
 
+it('recovers the original chapter review after task and candidate reads fail', async () => {
+  vi.useFakeTimers()
+  const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+  vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(task(2)))
+  vi.mocked(api.task).mockResolvedValueOnce(response(task(2)))
+    .mockRejectedValueOnce(new TypeError('Connection lost'))
+    .mockResolvedValue(response({ ...task(2, 'needs_review'), response_data: { waiting_commit_id: 10 } }))
+  const wrapper = render()
+  try {
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(wrapper.text()).toContain('正在恢复最新任务状态')
+
+    vi.mocked(storyMemoryApi.status).mockResolvedValue(response({ ...state, chapters: [
+      { ...state.chapters[0]!, candidate_id: 10, candidate_status: 'ready' },
+    ] }))
+    vi.mocked(storyMemoryApi.detail).mockRejectedValueOnce(new TypeError('Candidate read interrupted'))
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(wrapper.text()).toContain('正在恢复最新任务状态')
+
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(wrapper.text()).not.toContain('正在恢复最新任务状态')
+    expect(wrapper.text()).toContain('第 1 集 · 待确认')
+    const confirm = review.findAll('button').find(button => button.text() === '确认并入库')!
+    expect(confirm.attributes('disabled')).toBeUndefined()
+    expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+    expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
+    expect(storyMemoryApi.repair).not.toHaveBeenCalled()
+    expect(storyMemoryApi.decide).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+    visibility.mockRestore()
+  }
+})
+
 it('stops polling on unmount', async () => {
   vi.useFakeTimers()
   vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(task(2)))

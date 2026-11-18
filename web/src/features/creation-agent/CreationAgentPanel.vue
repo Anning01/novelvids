@@ -114,6 +114,7 @@ const bubbles = computed(() => visibleMessages.value.map(message => props.initia
 ).map(message => ({ ...message,
   activityStatus: message.production?.some(receipt => [1, 2, 6].includes(receipt.status)) ? 2 : message.status,
   storyReview: message.production?.find(receipt => receipt.operation === 'story_memory_recheck' && receipt.task_id === message.task_id),
+  snapshotUnavailable: store.unavailableSnapshots.has(message.task_id),
   singleProductionResult: singleProductionResult(message),
   paragraphs: singleProductionResult(message) ? [] : message.content.split(/\n\s*\n/).filter(Boolean),
   noStyle: message.role === 'assistant',
@@ -311,6 +312,7 @@ function selectQueryTarget(target: AgentQueryItem) {
 
 let productionTimer: ReturnType<typeof setInterval> | undefined
 function refreshVisibleState() {
+  if (document.hidden) return
   void refreshTargetStatus()
   void store.refreshProduction()
   void store.refreshConversations().catch(error => notice.error(error instanceof Error ? error.message : tr('加载助手失败')))
@@ -319,11 +321,15 @@ onBeforeUnmount(() => {
   emit('reviewTarget', null)
   catalogEpoch += 1; statusEpoch += 1
   window.removeEventListener('focus', refreshVisibleState)
+  window.removeEventListener('online', refreshVisibleState)
+  document.removeEventListener('visibilitychange', refreshVisibleState)
   clearInterval(productionTimer)
   store.disconnect()
 })
 onMounted(() => {
   window.addEventListener('focus', refreshVisibleState)
+  window.addEventListener('online', refreshVisibleState)
+  document.addEventListener('visibilitychange', refreshVisibleState)
   productionTimer = setInterval(() => {
     if (document.hidden) return
     void store.refreshProduction()
@@ -370,7 +376,7 @@ onMounted(() => {
     <BubbleList v-if="visibleMessages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
         <AgentDisclosure class="creation-agent-panel__message-group" :class="{ 'is-assistant': item.role === 'assistant' }" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
-        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :waiting-text="item.storyReview?.stage === 'needs_review' && item.activityStatus === 2 ? tr('等待确认故事记忆') : undefined" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :waiting-text="item.snapshotUnavailable ? tr('正在恢复最新任务状态') : item.storyReview?.stage === 'needs_review' && item.activityStatus === 2 ? tr('等待确认故事记忆') : undefined" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
         <div v-if="item.storyReview?.story_review_progress" class="creation-agent-panel__story-progress">
           <progress :value="item.storyReview.story_review_progress.completed" :max="item.storyReview.story_review_progress.total" :aria-label="tr('故事复核进度')" />
           <span>{{ tr('已确认 {p0} / {p1} 项', { p0: item.storyReview.story_review_progress.completed, p1: item.storyReview.story_review_progress.total }) }}</span>

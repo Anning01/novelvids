@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRaw, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, useId, watch } from 'vue'
 import { BookOpen, RefreshCw, X } from 'lucide-vue-next'
 import { api } from '@/api'
 import { tr } from '@/i18n'
@@ -29,6 +29,7 @@ const busy = ref(false)
 const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
 const waitingCommitId = ref<number>()
+const trackingDelayed = ref(false)
 let batchTaskId: string | undefined
 const shownFacts = ref(20)
 const memoryDialog = ref<HTMLDialogElement | null>(null)
@@ -41,6 +42,13 @@ let pollRevision = 0
 let scopeRevision = 0
 let requestedRun: string | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
+let readingActivity: Promise<void> | undefined
+const TASK_READ_TIMEOUT = 10_000
+const TASK_READ_RETRY = 4_000
+
+function taskReadSignal() {
+  return AbortSignal.any([requests.signal, AbortSignal.timeout(TASK_READ_TIMEOUT)])
+}
 const chapterId = computed(() => scope.value === 'baseline' ? null : Number(scope.value))
 const rows = computed(() => status.value ? [status.value.baseline, ...status.value.chapters] : [])
 const selected = computed(() => rows.value.find(row => row.chapter_id === chapterId.value))
@@ -90,7 +98,7 @@ function scopeText(value: MemoryScope | Record<string, string | number | null>) 
 async function selectCommit(commitId: number) {
   const current = epoch
   const request = ++selection
-  const response = await storyMemoryApi.detail(props.projectId, commitId, requests.signal)
+  const response = await storyMemoryApi.detail(props.projectId, commitId, taskReadSignal())
   if (current !== epoch || request !== selection) return
   detail.value = response.data
   draft.value = null
@@ -108,25 +116,27 @@ async function loadScope() {
     ?? selected.value?.candidate_id ?? commits.value.find(commit => commit.chapter_id === target)?.id ?? selected.value?.commit_id
   const work: Promise<unknown>[] = []
   if (latest) work.push(selectCommit(latest))
-  if (selected.value?.state === 'current') work.push(storyMemoryApi.context(props.projectId, target, requests.signal).then(response => {
+  if (selected.value?.state === 'current') work.push(storyMemoryApi.context(props.projectId, target, taskReadSignal()).then(response => {
     if (current === epoch && view === scopeRevision && chapterId.value === target) context.value = response.data
   }))
   await Promise.all(work)
 }
-async function reload() {
+async function reload(reportError = true) {
   const current = epoch
   const request = ++refresh
   loading.value = true
   try {
     const [states, records] = await Promise.all([
-      storyMemoryApi.status(props.projectId, requests.signal), storyMemoryApi.history(props.projectId, undefined, requests.signal),
+      storyMemoryApi.status(props.projectId, taskReadSignal()), storyMemoryApi.history(props.projectId, undefined, taskReadSignal()),
     ])
-    if (current !== epoch || request !== refresh) return
+    if (current !== epoch || request !== refresh) return true
     status.value = states.data
     commits.value = records.data
     if (!draft.value) await loadScope()
+    return true
   } catch (reason) {
-    if (current === epoch && request === refresh && !requests.signal.aborted) notice.error((reason as Error).message)
+    if (reportError && current === epoch && request === refresh && !requests.signal.aborted) notice.error((reason as Error).message)
+    return current !== epoch || request !== refresh
   } finally { if (current === epoch && request === refresh) loading.value = false }
 }
 async function track(taskId: string) {
@@ -134,8 +144,9 @@ async function track(taskId: string) {
   const poll = ++pollRevision
   clearTimeout(timer)
   try {
-    const response = await api.task(taskId, requests.signal)
+    const response = await api.task(taskId, taskReadSignal())
     if (current !== epoch || poll !== pollRevision) return
+    trackingDelayed.value = false
     job.value = response.data
     const waitingId = job.value.response_data?.waiting_commit_id
     if (job.value.request_params?.operation === 'story_memory_recheck' || typeof waitingId === 'number') batchTaskId = taskId
@@ -143,16 +154,53 @@ async function track(taskId: string) {
       waitingCommitId.value = job.value.stage === 'needs_review' && typeof waitingId === 'number' ? waitingId : undefined
     }
     if (requestedRun === taskId && showRunDetails()) requestedRun = undefined
-    if (job.value.stage === 'needs_review') {
-      await reload()
-    } else if ([1, 2, 6].includes(job.value.status)) {
-      timer = setTimeout(() => { void track(taskId) }, 1200)
-    } else {
-      await reload()
+    if (job.value.stage !== 'needs_review' && [1, 2, 6].includes(job.value.status)) {
+      timer = setTimeout(() => { if (!document.hidden) void track(taskId) }, 1200)
+    } else if (!await reload(false)) {
+      scheduleTaskRetry(taskId, current, poll)
     }
-  } catch (reason) {
-    if (current === epoch && poll === pollRevision && !requests.signal.aborted) notice.error((reason as Error).message)
+  } catch {
+    scheduleTaskRetry(taskId, current, poll)
   }
+}
+function scheduleTaskRetry(taskId: string, current: number, poll: number) {
+  if (current !== epoch || poll !== pollRevision || requests.signal.aborted) return
+  trackingDelayed.value = true
+  timer = setTimeout(() => { if (!document.hidden) void track(taskId) }, TASK_READ_RETRY)
+}
+function restoreActivity() {
+  if (readingActivity) return readingActivity
+  const current = epoch
+  const poll = pollRevision
+  const read = (async () => {
+    try {
+      const response = await storyMemoryApi.activity(props.projectId, taskReadSignal())
+      if (current !== epoch || poll !== pollRevision || requests.signal.aborted) return
+      if (response.data) await track(response.data.id)
+      else {
+        clearTimeout(timer)
+        trackingDelayed.value = false
+        waitingCommitId.value = undefined
+        job.value = null
+        batchTaskId = undefined
+      }
+    } catch {
+      if (current !== epoch || poll !== pollRevision || requests.signal.aborted) return
+      trackingDelayed.value = true
+      clearTimeout(timer)
+      timer = setTimeout(() => { if (!document.hidden) void restoreActivity() }, TASK_READ_RETRY)
+    }
+  })()
+  readingActivity = read
+  void read.finally(() => { if (readingActivity === read) readingActivity = undefined })
+  return read
+}
+function resumeTaskTracking() {
+  if (!document.hidden && !busy.value) void restoreActivity()
+}
+async function refreshMemory() {
+  await reload()
+  await restoreActivity()
 }
 function showRunDetails() {
   const conversationId = job.value?.request_params?.conversation_id
@@ -313,6 +361,8 @@ watch(() => props.projectId, async () => {
   requests.abort()
   requests = new AbortController()
   clearTimeout(timer)
+  readingActivity = undefined
+  trackingDelayed.value = false
   requestedRun = undefined
   waitingCommitId.value = undefined
   batchTaskId = undefined
@@ -327,12 +377,21 @@ watch(() => props.projectId, async () => {
   scope.value = props.chapterId ? String(props.chapterId) : 'baseline'
   await reload()
   if (current !== epoch || requests.signal.aborted) return
-  try {
-    const response = await storyMemoryApi.activity(props.projectId, requests.signal)
-    if (current === epoch && response.data) await track(response.data.id)
-  } catch (reason) { if (current === epoch && !requests.signal.aborted) notice.error((reason as Error).message) }
+  await restoreActivity()
 }, { immediate: true })
-onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
+onMounted(() => {
+  window.addEventListener('focus', resumeTaskTracking)
+  window.addEventListener('online', resumeTaskTracking)
+  document.addEventListener('visibilitychange', resumeTaskTracking)
+})
+onBeforeUnmount(() => {
+  ++epoch
+  requests.abort()
+  clearTimeout(timer)
+  window.removeEventListener('focus', resumeTaskTracking)
+  window.removeEventListener('online', resumeTaskTracking)
+  document.removeEventListener('visibilitychange', resumeTaskTracking)
+})
 </script>
 
 <template>
@@ -340,13 +399,14 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
     <header class="memory-header">
       <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr('已确认的世界观、人物和前情，将用于资产、分镜与创作助手。') }}</p></div>
       <div class="memory-actions">
+        <span v-if="trackingDelayed" class="memory-hint" role="status">{{ tr('正在恢复最新任务状态') }}</span>
         <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
         <AppButton v-if="selected?.state === 'current'" :id="`${id}-current`" size="sm" variant="soft"
           aria-haspopup="dialog" :aria-controls="`${id}-memory-dialog`" :disabled="!context?.enabled" @click="openMemory">{{ tr('查看当前有效记忆') }}</AppButton>
         <AppButton v-if="hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
         <AppButton v-if="waiting && waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="Boolean(draft)" @click="openWaitingReview">{{ tr('查看待处理候选') }}</AppButton>
         <AppButton v-if="canEdit && (running || (!hasCandidate && !waiting && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="showRun">{{ tr('在创作助手查看进度') }}</AppButton>
-        <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
+        <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="refreshMemory"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
       </div>
     </header>
     <div v-if="loading && !status" class="memory-skeleton" :aria-label="tr('正在读取故事记忆')" aria-busy="true"><span></span><span></span></div>

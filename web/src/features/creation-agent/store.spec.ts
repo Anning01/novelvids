@@ -321,6 +321,31 @@ it('refreshes child generation receipts after the assistant has finished speakin
   expect(agentApi.submit).not.toHaveBeenCalled()
 })
 
+it('recovers a disconnected history turn and replaces its running status with the saved outcome', async () => {
+  const store = useCreationAgentStore()
+  await store.open(7)
+  const taskId = 'chapter-analysis'
+  store.messages = [{ id: 1, role: 'assistant', content: '', task_id: taskId, status: 2,
+    changes: [], usage: {}, created_at: '', production: [{ task_id: taskId, operation: 'story_memory_analyze', status: 2 }] }]
+  const finishedAt = '2026-11-18T04:40:41Z'
+  let historyReads = 0
+  vi.mocked(agentApi.snapshot).mockImplementation(async id => {
+    if (id !== taskId) return { code: 0, message: '', data: run }
+    if (++historyReads === 1) throw new TypeError('Connection lost')
+    return { code: 0, message: '', data: { ...run, task_id: taskId, finished_at: finishedAt,
+      production: [{ task_id: taskId, operation: 'story_memory_analyze', status: 3 }] } }
+  })
+
+  await store.refreshProduction()
+  expect(store.unavailableSnapshots.has(taskId)).toBe(true)
+  await store.refreshProduction()
+  expect(store.unavailableSnapshots.has(taskId)).toBe(false)
+  expect(store.messages[0]).toMatchObject({ status: 3, finished_at: finishedAt, production: [{ status: 3 }] })
+  await store.refreshProduction()
+  expect(historyReads).toBe(2)
+  expect(agentApi.submit).not.toHaveBeenCalled()
+})
+
 
 it('retains the chat run request ID after a lost response and a store/page restart', async () => {
   const first = useCreationAgentStore()
