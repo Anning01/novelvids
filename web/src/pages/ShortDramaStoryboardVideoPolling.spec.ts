@@ -393,7 +393,7 @@ it.each(['light', 'dark'])('switches between edited general and model prompts at
   const toggle = wrapper.get('.prompt-actions .prompt-version-toggle')
   const editor = wrapper.getComponent(ScenePromptEditor)
   expect(toggle.element.nextElementSibling?.getAttribute('aria-label')).toBe('生成视频')
-  expect(toggle.text()).toBe('模型 Skills 优化')
+  expect(toggle.text()).toBe('使用优化稿')
   await toggle.trigger('click')
   expect(editor.props('modelValue')).toBe('已导入的专项稿')
   expect(toggle.text()).toBe('使用通用 Prompt')
@@ -444,6 +444,46 @@ it('keeps the editor on the general prompt during optimization failure and after
   await flushPromises()
   expect(editor.props('modelValue')).toBe('编辑期间的用户改稿')
   expect(toggle.attributes('aria-pressed')).toBe('false')
+})
+
+it.each(['light', 'dark'])('reuses a generated Seedance 2.5 prompt after switching to general and autosaving in %s', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const seedance = { ...model, model_type: 'seedance_2_5' as const }
+  const shot = { ...scene, prompt: '【角色 / 道具 / 场景引用】\n@{苏玄#少年}站在@{墓牌}旁。\n',
+    metadata: { storyboard_sheet: { image_url: '/media/sheet.png' } },
+    storyboard_binding_rules: { general: { line: '{image} 参考构图。', headings: ['【角色 / 道具 / 场景引用】'] } },
+    blocking_reference: { type: 'image' as const, url: '/media/map.png', mention_url: 'novelvids:blocking-map',
+      name: '空间定位图', rules: { general: { line: '{image} 按图调度。', headings: ['空间关系：'] } } } }
+  vi.mocked(api.videoGenerationModels).mockResolvedValue({ data: [seedance] } as never)
+  vi.mocked(api.workbenchBootstrap).mockResolvedValue({ data: { chapter, scenes: [shot], assets: [], videos: {} } } as never)
+  vi.mocked(api.updateScene).mockImplementation(async (_, update) => ({ data: JSON.parse(JSON.stringify({ ...shot, ...update })) }) as never)
+  const optimized = '主体：@{苏玄#少年}站在@{墓牌}旁。镜头缓缓推进。'
+  vi.mocked(api.optimizeScenePrompt).mockResolvedValue({ data: { id: 'optimized', status: 3,
+    response_data: { scene_id: shot.id, model_type: seedance.model_type, prompt: optimized } } } as never)
+  const { wrapper } = await render()
+  const toggle = wrapper.get('.prompt-version-toggle')
+  await toggle.trigger('click')
+  await flushPromises()
+  expect(wrapper.getComponent(ScenePromptEditor).props('modelValue')).toContain(optimized)
+  await vi.advanceTimersByTimeAsync(1000)
+  await flushPromises()
+  await toggle.trigger('click')
+  await vi.advanceTimersByTimeAsync(1000)
+  await flushPromises()
+  expect(toggle.text()).toBe('使用优化稿')
+  await toggle.trigger('click')
+  expect(toggle.text()).toBe('使用通用 Prompt')
+  expect(toggle.attributes('aria-busy')).not.toBe('true')
+  await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledOnce()
+  expect(wrapper.getComponent(ScenePromptEditor).props('modelValue')).toContain(optimized)
+  await toggle.trigger('click')
+  wrapper.getComponent(ScenePromptEditor).vm.$emit('update:modelValue', '修改后的@{苏玄#少年}站在@{墓牌}旁。')
+  await flushPromises()
+  expect(toggle.text()).toBe('模型 Skills 优化')
+  await toggle.trigger('click')
+  await flushPromises()
+  expect(api.optimizeScenePrompt).toHaveBeenCalledTimes(2)
 })
 
 it('waits for a local model choice when imported settings have no binding', async () => {

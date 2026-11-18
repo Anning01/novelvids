@@ -133,6 +133,7 @@ class Settings:
         raise ValueError("AUTH_PROVIDER must be password or qiling")
     if DEPLOYMENT_ROLE == "studio":
         AUTH_PROVIDER = "password"
+    PASSWORD_SIGNUP_ENABLED: bool = _env_bool("PASSWORD_SIGNUP_ENABLED", DEPLOYMENT_ROLE == "studio")
     QILING_API_BASE_URL: str = os.getenv(
         "QILING_API_BASE_URL", os.getenv("NOVELVIDS_DEV_QILING_API_BASE_URL", "")
     ).strip().rstrip("/")

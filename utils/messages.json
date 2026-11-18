@@ -1,4 +1,6 @@
 {
+  "该平台模型当前不可用，请同步模型目录后再试": "This platform model is unavailable. Sync the model catalog and try again.",
+  "暂未开放账号注册，请使用邀请链接": "Account registration is not open. Please use an invitation link.",
   "分镜提示词已修改并保存。": "Storyboard prompts updated and saved.",
   "修改分镜提示词": "Edit storyboard prompts",
   "旧版文本任务已停用，请重新发起生成；历史结果和用量记录仍保留。": "This legacy text task has been retired. Start a new generation; previous results and usage records are retained.",
