@@ -93,3 +93,41 @@ async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monk
         messages = await AgentMessage.filter(task__request_params__not_isnull=True).all()
         # Both real provider calls have their own usage-bearing production message.
         assert len([m for m in messages if m.usage.get('requests')]) >= 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_responses_enum_never_publishes_and_has_a_readable_assistant_error(monkeypatch):
+    from api.creation_agent import router as assistant_router
+    from models.config import AiModelConfig
+    from test.test_services.test_strict_text_tasks import mock_model
+
+    monkeypatch.setattr('config.settings.AUTH_ENABLED', False)
+    await AiModelConfig.create(name='strict', model='strict-model', task_type=7, supports_strict_output=True,
+        base_url='https://model.invalid/v1', api_key='synthetic', is_active=True, text_api='responses')
+    project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。')
+    previous = await accept(project, await reviewed(project))
+    payload = candidate()
+    payload['facts'][0].update(category='plan', nature='plan')
+    seen = mock_model(monkeypatch, payload)
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(assistant_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        submitted = (await client.post(f'/novel/{project.id}/story-memory/analyze',
+            json={'request_id': str(uuid4())})).json()['data']
+        from controllers.novel import novel_controller
+        from models.ai_task import AiTask
+        task = await AiTask.get(id=submitted['id'])
+        assert task.status == 4 and 'facts.0.category' in task.error_message
+        assert len(seen) == 1
+        form = seen[0]['text']['format']
+        assert form['type'] == 'json_schema' and form['strict'] is True
+        props = form['schema']['$defs']['StoryFactProposal']['properties']
+        assert 'plan' not in props['category']['enum'] and 'plan' in props['nature']['enum']
+        assert 'plan 只能填在 nature' in json.dumps(seen[0]['input'], ensure_ascii=False)
+        run = (await client.get(f"/runs/{submitted['id']}")).json()['data']
+        assert '结果未入库' in run['error_message']
+        assert run['production'][0]['error'] == run['error_message']
+        assert (await novel_controller.latest_analysis(project.id)) is None
+        assert await StorySnapshot.filter(commit_id=previous.id).count() == await StorySnapshot.all().count() == 1
+        assert await StoryFact.all().count() == 1

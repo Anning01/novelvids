@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, toRaw, useId, watch } from 'v
 import { BookOpen, RefreshCw } from 'lucide-vue-next'
 import { api } from '@/api'
 import { tr } from '@/i18n'
+import { notice } from '@/shared/notice'
 import type { AiTask } from '@/types'
 import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
@@ -25,14 +26,9 @@ const draft = ref<MemoryCandidate | null>(null)
 const scope = ref('baseline')
 const loading = ref(false)
 const busy = ref(false)
-const error = ref('')
-const message = ref('')
 const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
 const shownFacts = ref(20)
-const hasMore = ref(false)
-const inspectingHistory = ref(false)
-const loadingMore = ref(false)
 let requests = new AbortController()
 let epoch = 0
 let selection = 0
@@ -48,7 +44,6 @@ const running = computed(() => job.value && [1, 2, 6].includes(job.value.status)
 const locked = computed(() => busy.value || Boolean(running.value) || props.disabled)
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
 const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
-const history = computed(() => commits.value.filter(commit => commit.chapter_id === chapterId.value))
 const stateLabel = computed(() => selected.value?.state === 'current' ? tr('已确认') : selected.value?.state === 'stale' ? tr('需要复核') : tr('尚未建立'))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
 const natures: Record<FactNature, string> = { fact: '明确事实', testimony: '人物证言', inference: '尚待证实的推测', plan: '大纲计划', creative_decision: '创作决定' }
@@ -73,13 +68,12 @@ function scopeText(value: MemoryScope | Record<string, string | number | null>) 
   return parts.join(' · ')
 }
 
-async function selectCommit(commitId: number, fromHistory = false) {
+async function selectCommit(commitId: number) {
   const current = epoch
   const request = ++selection
   const response = await storyMemoryApi.detail(props.projectId, commitId, requests.signal)
   if (current !== epoch || request !== selection) return
   detail.value = response.data
-  inspectingHistory.value = fromHistory
   draft.value = null
   decisionNote.value = ''
 }
@@ -103,7 +97,6 @@ async function reload() {
   const current = epoch
   const request = ++refresh
   loading.value = true
-  error.value = ''
   try {
     const [states, records] = await Promise.all([
       storyMemoryApi.status(props.projectId, requests.signal), storyMemoryApi.history(props.projectId, undefined, requests.signal),
@@ -111,10 +104,9 @@ async function reload() {
     if (current !== epoch || request !== refresh) return
     status.value = states.data
     commits.value = records.data
-    hasMore.value = records.data.length === 30
     if (!draft.value) await loadScope()
   } catch (reason) {
-    if (current === epoch && request === refresh && !requests.signal.aborted) error.value = (reason as Error).message
+    if (current === epoch && request === refresh && !requests.signal.aborted) notice.error((reason as Error).message)
   } finally { if (current === epoch && request === refresh) loading.value = false }
 }
 async function track(taskId: string) {
@@ -138,12 +130,9 @@ async function track(taskId: string) {
       timer = setTimeout(() => { void track(taskId) }, 1200)
     } else {
       await reload()
-      if (current !== epoch || poll !== pollRevision || !job.value) return
-      if (job.value.status === 4) error.value = job.value.error_message || tr('本轮未完成，请重试')
-      else if (job.value.status === 3) message.value = tr('本轮已完成，请核对记忆')
     }
   } catch (reason) {
-    if (current === epoch && poll === pollRevision && !requests.signal.aborted) error.value = (reason as Error).message
+    if (current === epoch && poll === pollRevision && !requests.signal.aborted) notice.error((reason as Error).message)
   }
 }
 function showRunDetails() {
@@ -165,13 +154,11 @@ async function action(work: () => Promise<unknown>) {
   if (locked.value || !props.canEdit) return
   const current = epoch
   busy.value = true
-  error.value = ''
-  message.value = ''
-  try { await work() } catch (reason) { if (current === epoch) error.value = (reason as Error).message }
+  try { await work() } catch (reason) { if (current === epoch) notice.error((reason as Error).message) }
   finally { if (current === epoch) busy.value = false }
 }
 async function analyze(all = false) {
-  if (!modelId.value) { error.value = tr('请选择故事记忆模型'); return }
+  if (!modelId.value) { notice.error(tr('请选择故事记忆模型')); return }
   const current = epoch
   await action(async () => {
     const response = all ? await storyMemoryApi.recheck(props.projectId, Number(modelId.value), skillId.value)
@@ -190,7 +177,7 @@ async function decide(decision: 'accept' | 'reject') {
     const response = await storyMemoryApi.decide(props.projectId, current.id, current.package_hash, decision, decisionNote.value)
     if (edition !== epoch) return
     detail.value = response.data
-    message.value = decision === 'accept' ? tr('记忆已正式提交') : tr('候选已退回，原有正式记忆仍保留')
+    notice.success(decision === 'accept' ? tr('记忆已正式提交') : tr('候选已退回，原有正式记忆仍保留'))
     await reload()
     if (response.data.recheck_task_id) {
       const taskId = response.data.recheck_task_id
@@ -218,11 +205,11 @@ async function saveDraft() {
     if (current !== epoch) return
     detail.value = response.data
     draft.value = null
-    message.value = tr('候选已保存，请重新审核后再确认')
+    notice.success(tr('候选已保存，请重新审核后再确认'))
   })
 }
 async function review() {
-  if (!detail.value || !modelId.value) { error.value = tr('请选择故事记忆模型'); return }
+  if (!detail.value || !modelId.value) { notice.error(tr('请选择故事记忆模型')); return }
   const current = epoch
   await action(async () => {
     const response = await storyMemoryApi.review(props.projectId, detail.value!.id, detail.value!.revision, Number(modelId.value))
@@ -249,24 +236,12 @@ async function removeFact(index: number) {
   const target = Math.min(index, (draft.value?.facts.length ?? 0) - 1)
   document.getElementById(target >= 0 ? `${id}-fact-${target}` : `${id}-summary`)?.focus()
 }
-async function loadMore() {
-  if (loadingMore.value) return
+watch(scope, async () => {
+  if (!status.value) return
   const current = epoch
-  loadingMore.value = true
-  await actionRead(async () => {
-    const response = await storyMemoryApi.history(props.projectId, commits.value.at(-1)?.id, requests.signal)
-    if (current !== epoch) return
-    commits.value.push(...response.data)
-    hasMore.value = response.data.length === 30
-  })
-  if (current === epoch) loadingMore.value = false
-}
-async function actionRead(work: () => Promise<unknown>) {
-  const current = epoch
-  error.value = ''
-  try { await work() } catch (reason) { if (current === epoch && !requests.signal.aborted) error.value = (reason as Error).message }
-}
-watch(scope, () => { if (status.value) void actionRead(loadScope) })
+  try { await loadScope() }
+  catch (reason) { if (current === epoch && !requests.signal.aborted) notice.error((reason as Error).message) }
+})
 watch(() => props.chapterId, value => {
   if (!draft.value && !busy.value && value) {
     scope.value = String(value)
@@ -275,7 +250,7 @@ watch(() => props.chapterId, value => {
 })
 watch(() => props.refreshKey, () => {
   if (!draft.value) void reload()
-  else error.value = tr('剧本已修改，当前候选草稿仍保留；请取消修改后重新分析。')
+  else notice.error(tr('剧本已修改，当前候选草稿仍保留；请取消修改后重新分析。'))
 })
 watch(() => props.canEdit, value => { if (!value) draft.value = null })
 watch(() => props.projectId, async () => {
@@ -287,9 +262,6 @@ watch(() => props.projectId, async () => {
   requestedRun = undefined
   job.value = null
   busy.value = false
-  loadingMore.value = false
-  error.value = ''
-  message.value = ''
   draft.value = null
   status.value = null
   commits.value = []
@@ -300,8 +272,8 @@ watch(() => props.projectId, async () => {
   if (current !== epoch || requests.signal.aborted) return
   try {
     const response = await storyMemoryApi.activity(props.projectId, requests.signal)
-    if (response.data) await track(response.data.id)
-  } catch (reason) { if (!requests.signal.aborted) error.value = (reason as Error).message }
+    if (current === epoch && response.data) await track(response.data.id)
+  } catch (reason) { if (current === epoch && !requests.signal.aborted) notice.error((reason as Error).message) }
 }, { immediate: true })
 onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
 </script>
@@ -310,7 +282,11 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
   <section class="story-memory" :aria-labelledby="`${id}-heading`">
     <header class="memory-header">
       <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr('已确认的世界观、人物和前情，将用于资产、分镜与创作助手。') }}</p></div>
-      <div class="memory-actions"><AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge><AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton></div>
+      <div class="memory-actions">
+        <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
+        <AppButton v-if="canEdit && (running || job?.stage === 'needs_review' || job?.status === 4)" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
+        <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
+      </div>
     </header>
     <div v-if="loading && !status" class="memory-skeleton" :aria-label="tr('正在读取故事记忆')" aria-busy="true"><span></span><span></span></div>
     <template v-if="status">
@@ -325,7 +301,6 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
       <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
-      <AppButton v-if="canEdit && (running || job?.stage === 'needs_review')" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
       <div v-if="context?.enabled" class="memory-current">
         <h3 :id="`${id}-current`" tabindex="-1">{{ tr('当前有效记忆') }}</h3><p class="memory-prose">{{ context.current?.summary }}</p>
         <p v-if="chapterId && context.baseline_summary" class="memory-hint">{{ tr('全局背景') }}：{{ context.baseline_summary }}</p>
@@ -335,8 +310,8 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
         <AppButton v-if="(context.facts?.length || 0) > shownFacts" size="sm" @click="shownFacts += 20">{{ tr('显示更多事实') }}</AppButton>
         </details>
       </div>
-      <div v-if="detail && candidate && (detail.status !== 'accepted' || inspectingHistory)" class="memory-candidate">
-        <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr(detail.status === 'accepted' ? '正式提交记录' : '候选与审核') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
+      <div v-if="detail && candidate && detail.status !== 'accepted'" class="memory-candidate">
+        <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('候选与审核') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
         <p v-if="!detail.current" class="memory-hint">{{ detail.stale_reason }}</p>
         <p v-if="detail.review.summary" class="memory-prose">{{ detail.review.summary }}</p>
         <ul v-if="detail.review.issues?.length" class="review-issues"><li v-for="(issue, index) in detail.review.issues" :key="index"><strong>{{ tr(issue.severity === 'blocking' ? '需处理' : '请留意') }}</strong> · {{ issue.reason }}</li></ul>
@@ -370,10 +345,7 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
           <template v-if="editable"><div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div><div class="memory-actions"><AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton><AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton><AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'" @click="decide('accept')">{{ tr('确认并入库') }}</AppButton></div></template>
         </template>
       </div>
-      <details class="memory-history"><summary>{{ tr('提交历史') }}</summary><ol><li v-for="commit in history" :key="commit.id"><AppButton size="sm" :active="detail?.id === commit.id" :disabled="Boolean(draft) || busy" @click="actionRead(() => selectCommit(commit.id, true))">{{ tr(commitLabels[commit.status]) }} · {{ new Date(commit.created_at).toLocaleString() }}</AppButton></li></ol><p v-if="!history.length" class="memory-hint">{{ tr('当前范围尚无提交记录') }}</p><AppButton v-if="hasMore" size="sm" @click="loadMore">{{ tr('加载更早记录') }}</AppButton></details>
     </template>
-    <p v-if="message" role="status" class="memory-message">{{ message }}</p>
-    <div v-if="error" role="alert" class="memory-error"><p>{{ error }}</p><AppButton v-if="!status" size="sm" @click="reload">{{ tr('重试读取记忆') }}</AppButton></div>
   </section>
 </template>
 
@@ -397,7 +369,7 @@ textarea::placeholder { color: var(--app-text-muted); }
 textarea:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .memory-scope-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
 .memory-hint { margin-block: 10px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
-.memory-current, .memory-candidate, .memory-history { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
+.memory-current, .memory-candidate { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
 h3 { margin: 0 0 10px; font-size: 15px; }
 h4 { margin-block: 0 16px; font-size: 14px; }
 .memory-section-heading h3 { margin: 0; }
@@ -413,9 +385,6 @@ summary:hover { color: var(--app-accent); }
 blockquote { margin: 8px 0; padding: 12px 16px; border-inline-start: 1px solid var(--app-border); background: var(--app-surface-muted); color: var(--app-text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-block-start: 1px solid var(--app-border); }
 .review-issues { padding-inline-start: 20px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.8; }
-.memory-history ol { margin: 8px 0; padding-inline-start: 24px; }
-.memory-message { color: var(--creation-success); font-size: 13px; }
-.memory-error { color: var(--creation-danger); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .memory-skeleton { display: grid; gap: 10px; padding-block: 24px; }
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }

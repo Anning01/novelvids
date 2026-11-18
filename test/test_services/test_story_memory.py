@@ -324,6 +324,8 @@ def test_prompt_language_and_strict_contracts():
             assert f'language={language}' in system + content
             assert ('不能登记为已发生事件' if stage == 'extract' else '不代用户批准') in content
             if stage == 'extract':
+                assert 'plan 只能填在 nature' in content
+                assert 'category=outline、nature=plan' in content
                 assert 'facts.subject_ref 或 scope.world_ref 实际引用的对象' in content
                 assert '各场景的事实填写对应 scope.world_ref' in content
                 assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content

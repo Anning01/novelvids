@@ -15,7 +15,9 @@ quote 必须逐字照录并包含足够上下文以唯一定位；程序会用�
 replaces_id 只用于替代 prior_facts 中的前置有效事实。前章变化后重新核对本章因果与世界状态。
 基础底稿只依据已有项目材料，缺少正文不能猜年代、科技、身份或世界规则，未知写入 unresolved。
 当前章材料优先使用提供的剧本；参考原著与改编设定要保留区别。
-亲见事实、人物证言、推测、计划、创作决定分别使用对应 nature。计划不能登记为已发生事件。
+category 表示内容类别，限 world、rule、identity、relation、event、state、outline、decision。
+nature 表示内容的性质，限 fact、testimony、inference、plan、creative_decision。plan 只能填在 nature。
+大纲中的计划使用 category=outline、nature=plan；正文中人物尚未执行的打算根据原文选择类别，nature=plan。计划不能登记为已发生事件。
 个人遭遇不能升格为通用制度。推测保留限定语，证言在内容中写明说话者。
 记录世界、适用章节、故事时点和场景边界，回忆、梦境、穿越不得混用世界状态。
 原文明确跨越不同世界时，为各世界声明 kind=world 的对象，并给各场景的事实填写对应 scope.world_ref；已有同名地点不代替世界对象。

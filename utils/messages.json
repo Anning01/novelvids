@@ -970,6 +970,7 @@
   "请等待当前任务完成后再切换空间定位图设置": "Wait for the current task to finish before changing the blocking diagram setting.",
   "本次生成未取得完整结果，可重新生成。": "Generation did not return a complete result. You can generate it again.",
   "生成未完成，可以重新生成。已完成结果会保留。": "Generation is incomplete. Generate it again; completed results are preserved.",
+  "模型返回的故事记忆格式不符合要求，结果未入库。请重试当前操作或更换模型。": "The model returned an invalid story memory format. The result was not saved to story memory. Retry this operation or choose another model.",
   "故事版未完成，可重新生成。": "The storyboard image is incomplete. You can generate it again.",
   "重置并重试": "Reset and retry",
   "正在恢复…": "Resuming…",

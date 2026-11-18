@@ -4,11 +4,13 @@ import StoryMemoryPanel from './StoryMemoryPanel.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { storyMemoryApi } from './api'
 import { api } from '@/api'
+import { notice } from '@/shared/notice'
 import type { AiTask } from '@/types'
 import type { MemoryCandidate, MemoryDetail, MemoryStatus } from './types'
 
 vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), decide: vi.fn() } }))
 vi.mock('@/api', async original => ({ ...await original<typeof import('@/api')>(), api: { task: vi.fn() } }))
+vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
 const response = <T,>(data: T) => ({ code: 0, message: '', data })
 const candidate: MemoryCandidate = { subjects: [{ ref: 'world', existing_id: 1, kind: 'world', name: '故城世界', aliases: [] }],
   facts: [{ subject_ref: 'world', category: 'world', nature: 'fact', content: '古代王朝，没有电力。',
@@ -103,7 +105,7 @@ it('uses the reviewed package hash and records the human decision note', async (
   await wrapper.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await flushPromises()
   expect(storyMemoryApi.decide).toHaveBeenCalledWith(9, 10, 'a'.repeat(64), 'accept', '已核对剧本，确认古代背景。')
-  expect(wrapper.get('[role="status"]').text()).toContain('记忆已正式提交')
+  expect(notice.success).toHaveBeenCalledWith('记忆已正式提交')
 })
 
 it('edits a candidate without altering the evidence and invalidates its prior review', async () => {
@@ -121,7 +123,7 @@ it('edits a candidate without altering the evidence and invalidates its prior re
     content: '古代城镇，以油灯照明。', nature: 'testimony', evidence: candidate.facts[0]!.evidence,
     scope: expect.objectContaining({ scene: '灾变前的回忆', from_chapter: 2, until_chapter: 3 }),
   })] }), 1)
-  expect(wrapper.text()).toContain('候选已保存，请重新审核后再确认')
+  expect(notice.success).toHaveBeenCalledWith('候选已保存，请重新审核后再确认')
   expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
 })
 
@@ -146,7 +148,7 @@ it('preserves a candidate when the server rejects an outdated confirmation', asy
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toContain('候选版本已变化')
+  expect(notice.error).toHaveBeenCalledWith('候选版本已变化，请重新核对')
   expect(wrapper.get('blockquote').text()).toBe(candidate.facts[0]!.evidence[0]!.quote)
 })
 
@@ -164,7 +166,21 @@ it('starts sequential review explicitly and does not start work on load', async 
   await wrapper.findAll('button').find(button => button.text() === '顺序复核全部')!.trigger('click')
   await flushPromises()
   expect(storyMemoryApi.recheck).toHaveBeenCalledWith(9, 5, undefined)
-  expect(wrapper.text()).toContain('本轮已完成，请核对记忆')
+  expect(wrapper.text()).toContain('候选与审核')
+})
+
+it('omits history and failed run details from the main page while keeping the assistant link', async () => {
+  vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(task(4)))
+  vi.mocked(api.task).mockResolvedValue(response({
+    ...task(4), request_params: { conversation_id: 42 }, error_message: '本章分析未完成',
+  }))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('提交历史')
+  expect(wrapper.text()).not.toContain('本章分析未完成')
+  expect(notice.error).not.toHaveBeenCalled()
+  await wrapper.get('.memory-header').findAll('button').find(button => button.text() === '在创作助手查看进度')!.trigger('click')
+  expect(wrapper.emitted('showRun')).toEqual([[{ taskId: 'job', conversationId: 42 }]])
 })
 
 it('opens the assistant for a queued review and hands off to its conversation when ready', async () => {
@@ -187,8 +203,8 @@ it('announces request failures and provides a read retry', async () => {
   vi.mocked(storyMemoryApi.status).mockRejectedValueOnce(new Error('连接中断'))
   const wrapper = render()
   await flushPromises()
-  expect(wrapper.get('[role="alert"]').text()).toContain('连接中断')
-  await wrapper.findAll('button').find(button => button.text() === '重试读取记忆')!.trigger('click')
+  expect(notice.error).toHaveBeenCalledWith('连接中断')
+  await wrapper.findAll('button').find(button => button.text() === '刷新记忆')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('候选与审核')
 })
@@ -212,7 +228,7 @@ it('retains an unsaved candidate when a script update arrives', async () => {
   await wrapper.get('textarea[name="summary"]').setValue('仍在编辑的世界观说明')
   await wrapper.setProps({ refreshKey: 2 })
   expect((wrapper.get('textarea[name="summary"]').element as HTMLTextAreaElement).value).toBe('仍在编辑的世界观说明')
-  expect(wrapper.get('[role="alert"]').text()).toContain('当前候选草稿仍保留')
+  expect(notice.error).toHaveBeenCalledWith(expect.stringContaining('当前候选草稿仍保留'))
   expect(storyMemoryApi.update).not.toHaveBeenCalled()
 })
 
@@ -244,7 +260,7 @@ it('does not carry a late confirmation into another project', async () => {
   await flushPromises()
   resolve(response({ ...ready, status: 'accepted' }))
   await flushPromises()
-  expect(wrapper.text()).not.toContain('记忆已正式提交')
+  expect(notice.success).not.toHaveBeenCalled()
   expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
 })
 
