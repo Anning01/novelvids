@@ -64,7 +64,7 @@ def storyboard_contract(duration_range, blocking_maps):
     segment = _object({'duration': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': duration_range[1]},
         'description': _STRING, 'shot_size_and_camera': _STRING, 'visual_prose': _STRING,
         'actions': _STRINGS, 'camera_movement': _STRING})
-    shot = _object({**{key: _STRING for key in text_fields}, 'duration': duration,
+    shot = _object({'duration': duration, **{key: _STRING for key in text_fields},
         'transition': {**_STRING, 'description': '本段收尾画面或声音、具体剪辑点与下一段的承接；末段写收束。'},
         'effect_restrictions': _STRINGS, 'allowed_effects': _STRINGS,
         'visible_asset_names': {**_STRINGS, 'description': '本镜引用的全部角色、场景和道具，包含发声角色；名单不强制角色出现在画面中。'},
