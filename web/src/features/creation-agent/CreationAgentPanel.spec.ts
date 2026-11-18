@@ -4,13 +4,13 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CreationAgentPanel from './CreationAgentPanel.vue'
-import { agentApi } from './api'
+import { agentApi, runSubscription } from './api'
 import { api } from '@/api'
 import { useCreationAgentStore } from './store'
 
 const { push, scrollToBottom } = vi.hoisted(() => ({ push: vi.fn(), scrollToBottom: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
-vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn() }, runSubscription: vi.fn() }))
+vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn(), snapshot: vi.fn() }, runSubscription: vi.fn() }))
 vi.mock('@/api', () => ({ api: { assets: vi.fn(), scenes: vi.fn() }, getAuthToken: () => null, getActiveTeamId: () => null }))
 vi.mock('element-plus', () => ({ ElPopover: defineComponent({ props: ['visible'], emits: ['update:visible'], template: `<div><div @click="$emit('update:visible', !visible)"><slot name="reference" /></div><slot v-if="visible" /></div>` }) }))
 vi.mock('vue-element-plus-x', () => ({
@@ -389,6 +389,33 @@ it('preserves draft and model choice after closing and reopening the assistant',
   expect(reopened.get<HTMLTextAreaElement>('[aria-label="创作要求"]').element.value).toBe('先保留草稿，不要发送')
   expect(reopened.get<HTMLSelectElement>('[aria-label="助手模型"]').element.value).toBe('2')
   reopened.unmount()
+})
+
+it('opens the exact story review and keeps its batch progress and pause state in the assistant', async () => {
+  const { useCreationAgentWorkspace } = await import('./workspace')
+  const pinia = createPinia()
+  const workspace = useCreationAgentWorkspace(pinia)
+  const production = [{ task_id: 'review', operation: 'story_memory_recheck', status: 2, stage: 'needs_review',
+    story_review_progress: { completed: 1, total: 185 } }]
+  const activity = [{ id: 'extract', kind: 'status' as const, status: 'completed' as const, label: '提取故事事实候选' }]
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
+    { id: 41, novel_id: 7, active_task_id: null, created_at: '', updated_at: '' },
+    { id: 42, novel_id: 7, active_task_id: 'another-task', created_at: '', updated_at: '' },
+  ] })
+  vi.mocked(agentApi.history).mockResolvedValue({ code: 0, message: '', data: { next_before: 1, items: [] } })
+  vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { task_id: 'review',
+    conversation_id: 42, status: 2, content: '', error_message: null, event_count: 2, changes: [], usage: {}, production, activity } })
+  vi.mocked(runSubscription).mockResolvedValue({ runAgent: vi.fn().mockResolvedValue({}), abortRun: vi.fn() } as unknown as Awaited<ReturnType<typeof runSubscription>>)
+  workspace.showProductionRun(7, { taskId: 'review', conversationId: 42 })
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  expect(workspace.isOpen).toBe(true)
+  expect(agentApi.history).toHaveBeenCalledWith(42, undefined)
+  expect(agentApi.snapshot).toHaveBeenCalledWith('review')
+  expect(agentApi.snapshot).not.toHaveBeenCalledWith('another-task')
+  expect(wrapper.get('progress').attributes()).toMatchObject({ value: '1', max: '185' })
+  expect(wrapper.text()).toContain('等待确认故事记忆')
+  expect(wrapper.get('[aria-label="执行过程"]').text()).not.toContain('用时')
 })
 
 it('sends an explicit page selection even beyond the first catalog page', async () => {

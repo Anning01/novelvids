@@ -161,7 +161,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     return `creation-agent:conversation:${getActiveTeamId() ?? 'personal'}:${novelId}`
   }
 
-  async function selectConversation(id: number | null) {
+  async function selectConversation(id: number | null, taskId?: string) {
     const sameConversation = conversationId.value === id
     disconnect()
     epoch += 1
@@ -179,7 +179,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     try {
       await history()
       if (revision !== epoch) return
-      const latestTaskId = conversations.value.find(item => item.id === id)?.active_task_id
+      const latestTaskId = taskId ?? conversations.value.find(item => item.id === id)?.active_task_id
         ?? [...messages.value].reverse().find(message => message.role === 'assistant')?.task_id
       if (latestTaskId) {
         const response = await snapshot(latestTaskId)
@@ -192,7 +192,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     } finally { if (revision === epoch) loading.value = false }
   }
 
-  async function open(novelId: number) {
+  async function open(novelId: number, productionRun?: { taskId: string; conversationId: number }) {
     const nextIdentity = `${getAuthToken() || ''}:${getActiveTeamId() || ''}`
     disconnect()
     epoch += 1
@@ -214,9 +214,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       capabilities.value = available.data
       conversations.value = listed.data
       const remembered = Number(sessionStorage.getItem(selectionKey(novelId)))
-      const selected = listed.data.find(item => item.id === conversationId.value)
+      const productionConversation = listed.data.find(item => item.id === productionRun?.conversationId)
+      const selected = productionConversation ?? listed.data.find(item => item.id === conversationId.value)
         ?? listed.data.find(item => item.id === remembered) ?? listed.data[0]
-      await selectConversation(selected?.id ?? null)
+      await selectConversation(selected?.id ?? null, productionConversation ? productionRun?.taskId : undefined)
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('加载助手失败')
     } finally { if (revision === epoch) loading.value = false }
@@ -341,9 +342,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   async function refreshProduction() {
     const revision = epoch
-    const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
-      && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))]
-    await Promise.allSettled(runs.map(async taskId => {
+    const runs = new Set(messages.value.filter(message => message.role === 'assistant'
+      && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))
+    if (currentRun.value && isAgentRunning(currentRun.value.status)) runs.add(currentRun.value.task_id)
+    await Promise.allSettled([...runs].map(async taskId => {
       const response = await snapshot(taskId)
       if (revision !== epoch) return
       if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }

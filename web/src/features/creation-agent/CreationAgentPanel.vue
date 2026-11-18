@@ -26,7 +26,7 @@ import AgentDisclosure from './AgentDisclosure.vue'
 import AgentActivity from './AgentActivity.vue'
 import AgentRunActivity from './AgentRunActivity.vue'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
-import type { AgentChange, AgentChangeItem, AgentQueryItem, AgentTarget, ProductionReceipt, PromptTargetStatus } from './types'
+import type { AgentChange, AgentChangeItem, AgentMessage, AgentQueryItem, AgentTarget, ProductionReceipt, PromptTargetStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; suspended?: boolean; phase?: 'script' | 'settings' | 'storyboard' | 'video'; initialConversationId?: number; initialUserText?: string; videoDefaults?: VideoGenerationOptions & { model_config_id: number } }>()
 const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
@@ -94,16 +94,24 @@ function selectSuggestion(text: string) { draft.value = text; void nextTick(() =
 function removeTarget(option: AgentTargetOption) {
   if (!store.busy) workspace.select(workspace.selection.filter(item => targetKey(item.target) !== targetKey(option.target)))
 }
-const productionLabel = (operation: string) => tr(({ story: '项目分析', screenplay: '剧本改编', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p' } as Record<string, string>)[operation] || operation)
+const productionLabel = (operation: string) => tr(({ story: '项目分析', screenplay: '剧本改编', assets: '资产提取', image: '图片生成', storyboard: '分镜生成', storyboard_sheet: '生成线稿故事版', storyboard_sheet_edit: '修改线稿故事版', video: '视频生成', remake: '视频重制', compose: '章节合成', prepare_export: '准备当前原片', enhance_export: '增强到1080p', story_memory_analyze: '分析故事记忆候选', story_memory_review: '审核故事记忆候选', story_memory_recheck: '顺序复核故事记忆' } as Record<string, string>)[operation] || operation)
 function singleProductionResult(message: { role: string; content: string; production?: ProductionReceipt[] }): ProductionReceipt | undefined {
   const receipt = message.production?.length === 1 ? message.production[0] : undefined
   return message.role === 'assistant' && ['', '已完成', 'Completed', '任务未完成', 'Task failed', '后续步骤已停止', 'Further steps stopped', '处理中', 'Processing'].includes(message.content.trim()) ? receipt : undefined
 }
-const bubbles = computed(() => store.messages.map(message => props.initialUserText && store.conversationId === props.initialConversationId
+const visibleMessages = computed<AgentMessage[]>(() => {
+  const run = store.currentRun
+  if (!run?.production?.some(receipt => receipt.task_id === run.task_id && receipt.operation === 'story_memory_recheck')
+    || store.messages.some(message => message.role === 'assistant' && message.task_id === run.task_id)) return store.messages
+  // A long review can outlast the visible history page. Keep the selected run reachable.
+  return [...store.messages, { ...run, id: -1, role: 'assistant', created_at: run.started_at ?? '' }]
+})
+const bubbles = computed(() => visibleMessages.value.map(message => props.initialUserText && store.conversationId === props.initialConversationId
   && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
   message.content || message.query_results?.length || message.changes.length || message.activity?.length || message.production?.length || message.started_at || [1, 2, 4, 5, 6].includes(message.status),
 ).map(message => ({ ...message,
   activityStatus: message.production?.some(receipt => [1, 2, 6].includes(receipt.status)) ? 2 : message.status,
+  storyReview: message.production?.find(receipt => receipt.operation === 'story_memory_recheck' && receipt.task_id === message.task_id),
   singleProductionResult: singleProductionResult(message),
   paragraphs: singleProductionResult(message) ? [] : message.content.split(/\n\s*\n/).filter(Boolean),
   noStyle: message.role === 'assistant',
@@ -172,8 +180,14 @@ async function refreshTargetStatus() {
   }
 }
 
-watch(() => [props.projectId, props.initialConversationId] as const, async ([id, conversationId]) => {
+watch(() => [props.projectId, props.initialConversationId, workspace.productionRun] as const, async ([id, conversationId, run], previous) => {
+  if (!run && previous?.[2] && previous[0] === id && previous[1] === conversationId) return
   workspace.enterProject(id)
+  if (run && workspace.productionRun === run) {
+    workspace.productionRun = undefined
+    await store.open(id, run)
+    return
+  }
   await store.open(id)
   if (props.projectId === id && props.initialConversationId === conversationId && conversationId && store.conversationId !== conversationId) {
     await store.selectConversation(conversationId)
@@ -342,7 +356,7 @@ onMounted(() => {
       />
     </div>
     <AgentSetupState v-if="store.loading || !ready" :capabilities="store.capabilities" :loading="store.loading" :error="store.error" @retry="store.open(projectId)" />
-    <div v-else-if="!store.messages.length" class="creation-agent-panel__welcome">
+    <div v-else-if="!visibleMessages.length" class="creation-agent-panel__welcome">
       <span class="creation-agent-panel__welcome-icon"><Bot :size="27" /></span>
       <strong>{{ targets.length ? tr('想让画面怎样变化？') : tr('一起把故事变成画面') }}</strong>
       <p>{{ welcomeHint }}</p>
@@ -350,10 +364,14 @@ onMounted(() => {
       <span>{{ tr('每次修改都有记录，随时查看或撤销。') }}</span>
     </div>
     <AppButton v-if="store.nextBefore" size="xs" @click="operation(() => store.history(store.nextBefore || undefined))">{{ tr('查看更早的消息') }}</AppButton>
-    <BubbleList v-if="store.messages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
+    <BubbleList v-if="visibleMessages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
         <AgentDisclosure class="creation-agent-panel__message-group" :class="{ 'is-assistant': item.role === 'assistant' }" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
-        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :waiting-text="item.storyReview?.stage === 'needs_review' && item.activityStatus === 2 ? tr('等待确认故事记忆') : undefined" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
+        <div v-if="item.storyReview?.story_review_progress" class="creation-agent-panel__story-progress">
+          <progress :value="item.storyReview.story_review_progress.completed" :max="item.storyReview.story_review_progress.total" :aria-label="tr('故事复核进度')" />
+          <span>{{ tr('已确认 {p0} / {p1} 项', { p0: item.storyReview.story_review_progress.completed, p1: item.storyReview.story_review_progress.total }) }}</span>
+        </div>
         <div v-if="item.paragraphs.length" class="creation-agent-panel__message"><p v-for="(paragraph, index) in item.paragraphs" :key="index">{{ paragraph }}</p></div>
         <AgentQueryResults v-for="(result, index) in item.query_results || []" :key="index" :result="result" :disabled="store.busy"
           @locate="operation(() => locateQuery($event))" @select="selectQueryTarget" />
@@ -370,7 +388,7 @@ onMounted(() => {
         </div>
         <ul v-if="item.production?.length && !item.singleProductionResult" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">
-            {{ productionLabel(receipt.operation) }} · {{ receipt.status === 3 && receipt.saved === false ? tr('已生成，尚未设为当前线稿') : tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            {{ productionLabel(receipt.operation) }} · {{ receipt.status === 2 && receipt.stage === 'needs_review' && receipt.operation === 'story_memory_recheck' ? tr('等待确认故事记忆') : receipt.status === 3 && receipt.saved === false ? tr('已生成，尚未设为当前线稿') : tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
             <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
             <span v-if="receipt.error">{{ receipt.error }}</span>
           </li>
@@ -437,6 +455,8 @@ onMounted(() => {
 .creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 8px 12px; overflow-y: auto; overflow-x: hidden; }
 .creation-agent-panel__production { list-style: none; margin: 6px 0; padding: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; }
 .creation-agent-panel__production li + li { margin-top: 3px; }
+.creation-agent-panel__story-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 6px; color: var(--app-text-secondary); font-size: 12px; }
+.creation-agent-panel__story-progress progress { max-inline-size: 100%; inline-size: 8rem; accent-color: var(--app-accent); }
 .creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__toggle) { width: fit-content; flex: none; font-size: 12px; }
 .creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__title) { color: var(--app-text); font-weight: 600; }
 .creation-agent-panel__message-group.is-assistant :deep(.agent-disclosure__body) { padding: 2px 0 0; }

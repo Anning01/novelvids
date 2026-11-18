@@ -323,6 +323,19 @@ async def test_memory_endpoints_and_legacy_analysis_do_not_mix_task_results(stor
         assert activity['id'] == str(memory.id) and 'request_params' not in activity
 
 
+def test_assistant_receipt_projects_story_review_counts_without_candidate_data():
+    from services.creation_agent.receipts import receipt_of
+
+    task = AiTask(task_type=5, status=2, stage='needs_review', request_params={'operation': 'story_memory_recheck'},
+        response_data={'completed': [{'commit_id': 1}], 'total': 185, 'waiting_commit_id': 2})
+    receipt = receipt_of(task)
+    assert receipt['stage'] == 'needs_review'
+    assert receipt['story_review_progress'] == {'completed': 1, 'total': 185}
+    assert 'waiting_commit_id' not in receipt and 'response_data' not in receipt
+    task.request_params['operation'] = 'story_memory_analyze'
+    assert 'story_review_progress' not in receipt_of(task)
+
+
 def test_story_memory_rules_and_skill_mount_are_available_in_both_languages():
     from prompts.skill_pack import SkillSnapshot, snapshot_skills
     from services.creation_agent.deep_execution import skill_files

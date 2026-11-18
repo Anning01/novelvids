@@ -8,14 +8,12 @@ import AppButton from '@/components/AppButton.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
-import AgentRunActivity from '@/features/creation-agent/AgentRunActivity.vue'
-import { agentApi } from '@/features/creation-agent/api'
-import type { AgentActivityStep } from '@/features/creation-agent/types'
 import { storyMemoryApi } from './api'
 import type { FactNature, MemoryCandidate, MemoryCommit, MemoryContext, MemoryDetail, MemoryScope, MemoryStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId?: number; canEdit: boolean; disabled?: boolean;
   refreshKey?: number; modelsLoading?: boolean; models: { value: string; label: string }[] }>()
+const emit = defineEmits<{ showRun: [run?: { taskId: string; conversationId: number }] }>()
 const modelId = defineModel<string>('modelId', { default: '' })
 const skillId = defineModel<number>('skillId')
 const id = useId()
@@ -31,7 +29,6 @@ const error = ref('')
 const message = ref('')
 const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
-const steps = ref<AgentActivityStep[]>([])
 const shownFacts = ref(20)
 const hasMore = ref(false)
 const inspectingHistory = ref(false)
@@ -42,6 +39,7 @@ let selection = 0
 let refresh = 0
 let pollRevision = 0
 let scopeRevision = 0
+let requestedRun: string | undefined
 let timer: ReturnType<typeof setTimeout> | undefined
 const chapterId = computed(() => scope.value === 'baseline' ? null : Number(scope.value))
 const rows = computed(() => status.value ? [status.value.baseline, ...status.value.chapters] : [])
@@ -51,11 +49,6 @@ const locked = computed(() => busy.value || Boolean(running.value) || props.disa
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
 const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
 const history = computed(() => commits.value.filter(commit => commit.chapter_id === chapterId.value))
-const counts = computed(() => {
-  const data = job.value?.response_data
-  return data && Array.isArray(data.completed) && typeof data.total === 'number'
-    ? { completed: data.completed.length, total: data.total } : null
-})
 const stateLabel = computed(() => selected.value?.state === 'current' ? tr('已确认') : selected.value?.state === 'stale' ? tr('需要复核') : tr('尚未建立'))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
 const natures: Record<FactNature, string> = { fact: '明确事实', testimony: '人物证言', inference: '尚待证实的推测', plan: '大纲计划', creative_decision: '创作决定' }
@@ -132,11 +125,7 @@ async function track(taskId: string) {
     const response = await api.task(taskId, requests.signal)
     if (current !== epoch || poll !== pollRevision) return
     job.value = response.data
-    if (props.canEdit) {
-      const trace = await agentApi.snapshot(taskId).catch(() => null)
-      if (current !== epoch || poll !== pollRevision) return
-      steps.value = trace?.data.activity ?? []
-    }
+    if (requestedRun === taskId && showRunDetails()) requestedRun = undefined
     if (job.value.stage === 'needs_review') {
       await reload()
       if (current !== epoch || poll !== pollRevision || !job.value) return
@@ -157,6 +146,21 @@ async function track(taskId: string) {
     if (current === epoch && poll === pollRevision && !requests.signal.aborted) error.value = (reason as Error).message
   }
 }
+function showRunDetails() {
+  const conversationId = job.value?.request_params?.conversation_id
+  if (!job.value || typeof conversationId !== 'number') return false
+  emit('showRun', { taskId: job.value.id, conversationId })
+  return true
+}
+function showRun() {
+  if (showRunDetails()) return
+  requestedRun = job.value?.id
+  emit('showRun')
+}
+function openProgress() {
+  showRun()
+  if (running.value && job.value) void track(job.value.id)
+}
 async function action(work: () => Promise<unknown>) {
   if (locked.value || !props.canEdit) return
   const current = epoch
@@ -174,6 +178,7 @@ async function analyze(all = false) {
       : await storyMemoryApi.analyze(props.projectId, chapterId.value, Number(modelId.value), skillId.value)
     if (current !== epoch) return
     job.value = response.data
+    showRun()
     await track(response.data.id)
   })
 }
@@ -187,7 +192,14 @@ async function decide(decision: 'accept' | 'reject') {
     detail.value = response.data
     message.value = decision === 'accept' ? tr('记忆已正式提交') : tr('候选已退回，原有正式记忆仍保留')
     await reload()
-    if (response.data.recheck_task_id) await track(response.data.recheck_task_id)
+    if (response.data.recheck_task_id) {
+      const taskId = response.data.recheck_task_id
+      if (decision === 'accept') {
+        requestedRun = taskId
+        emit('showRun')
+      }
+      await track(taskId)
+    }
     await nextTick()
     document.getElementById(`${id}-${detail.value?.status === 'ready' ? 'candidate' : 'current'}`)?.focus()
   })
@@ -216,6 +228,7 @@ async function review() {
     const response = await storyMemoryApi.review(props.projectId, detail.value!.id, detail.value!.revision, Number(modelId.value))
     if (current !== epoch) return
     job.value = response.data
+    showRun()
     await track(response.data.id)
   })
 }
@@ -235,18 +248,6 @@ async function removeFact(index: number) {
   await nextTick()
   const target = Math.min(index, (draft.value?.facts.length ?? 0) - 1)
   document.getElementById(target >= 0 ? `${id}-fact-${target}` : `${id}-summary`)?.focus()
-}
-async function stopJob() {
-  if (!job.value || !props.canEdit || busy.value) return
-  ++pollRevision
-  clearTimeout(timer)
-  const current = epoch
-  await actionRead(async () => {
-    const response = await storyMemoryApi.stop(job.value!.id)
-    if (current !== epoch) return
-    job.value = response.data
-    await reload()
-  })
 }
 async function loadMore() {
   if (loadingMore.value) return
@@ -283,12 +284,12 @@ watch(() => props.projectId, async () => {
   requests.abort()
   requests = new AbortController()
   clearTimeout(timer)
+  requestedRun = undefined
   job.value = null
   busy.value = false
   loadingMore.value = false
   error.value = ''
   message.value = ''
-  steps.value = []
   draft.value = null
   status.value = null
   commits.value = []
@@ -324,11 +325,7 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
       <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
-      <div v-if="job" class="memory-job">
-        <AgentRunActivity :status="job.status" :steps="steps" :started-at="job.started_at" :finished-at="job.finished_at" :status-text="job.stage === 'needs_review' ? tr('等待确认故事记忆') : undefined" />
-        <div v-if="counts" class="memory-progress"><progress :value="counts.completed" :max="Math.max(counts.total, 1)" :aria-label="tr('故事复核进度')"></progress><span>{{ tr('已确认 {p0} / {p1} 项', { p0: counts.completed, p1: counts.total }) }}</span></div>
-        <div class="memory-actions"><AppButton v-if="running" size="xs" :disabled="!canEdit || busy" @click="stopJob">{{ tr('停止本轮') }}</AppButton><AppButton v-if="error && job" size="xs" @click="track(job.id)">{{ tr('重新连接进度') }}</AppButton></div>
-      </div>
+      <AppButton v-if="canEdit && (running || job?.stage === 'needs_review')" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
       <div v-if="context?.enabled" class="memory-current">
         <h3 :id="`${id}-current`" tabindex="-1">{{ tr('当前有效记忆') }}</h3><p class="memory-prose">{{ context.current?.summary }}</p>
         <p v-if="chapterId && context.baseline_summary" class="memory-hint">{{ tr('全局背景') }}：{{ context.baseline_summary }}</p>
@@ -416,9 +413,6 @@ summary:hover { color: var(--app-accent); }
 blockquote { margin: 8px 0; padding: 12px 16px; border-inline-start: 1px solid var(--app-border); background: var(--app-surface-muted); color: var(--app-text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-block-start: 1px solid var(--app-border); }
 .review-issues { padding-inline-start: 20px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.8; }
-.memory-job { padding-block: 8px; }
-.memory-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-block: 10px; color: var(--app-text-secondary); font-size: 12px; }
-.memory-progress progress { max-width: 100%; width: 200px; accent-color: var(--app-accent); }
 .memory-history ol { margin: 8px 0; padding-inline-start: 24px; }
 .memory-message { color: var(--creation-success); font-size: 13px; }
 .memory-error { color: var(--creation-danger); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }

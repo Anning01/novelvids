@@ -4,13 +4,11 @@ import StoryMemoryPanel from './StoryMemoryPanel.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { storyMemoryApi } from './api'
 import { api } from '@/api'
-import { agentApi } from '@/features/creation-agent/api'
 import type { AiTask } from '@/types'
 import type { MemoryCandidate, MemoryDetail, MemoryStatus } from './types'
 
-vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), decide: vi.fn(), stop: vi.fn() } }))
+vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), decide: vi.fn() } }))
 vi.mock('@/api', async original => ({ ...await original<typeof import('@/api')>(), api: { task: vi.fn() } }))
-vi.mock('@/features/creation-agent/api', () => ({ agentApi: { snapshot: vi.fn() } }))
 const response = <T,>(data: T) => ({ code: 0, message: '', data })
 const candidate: MemoryCandidate = { subjects: [{ ref: 'world', existing_id: 1, kind: 'world', name: '故城世界', aliases: [] }],
   facts: [{ subject_ref: 'world', category: 'world', nature: 'fact', content: '古代王朝，没有电力。',
@@ -27,7 +25,7 @@ const task = (status: number, stage?: string): AiTask => ({ id: 'job', task_type
   created_at: '2026-11-17T10:00:00Z', updated_at: '2026-11-17T10:00:00Z' })
 function render(canEdit = true) {
   return mount(StoryMemoryPanel, { props: { projectId: 9, chapterId: 1, canEdit, models: [{ value: '5', label: '分析模型' }], modelId: '5' },
-    global: { stubs: { TaskSkillPicker: true, AgentRunActivity: true } } })
+    global: { stubs: { TaskSkillPicker: true } } })
 }
 
 async function choose(wrapper: ReturnType<typeof render>, label: string, optionLabel: string) {
@@ -53,8 +51,6 @@ beforeEach(() => {
   vi.mocked(storyMemoryApi.recheck).mockResolvedValue(response(task(3)))
   vi.mocked(storyMemoryApi.review).mockResolvedValue(response(task(3)))
   vi.mocked(api.task).mockResolvedValue(response(task(3)))
-  vi.mocked(agentApi.snapshot).mockResolvedValue(response({ task_id: 'job', conversation_id: 1, status: 3, content: '',
-    error_message: null, changes: [], usage: {}, event_count: 0, activity: [] }))
 })
 afterEach(() => vi.useRealTimers())
 
@@ -169,6 +165,22 @@ it('starts sequential review explicitly and does not start work on load', async 
   await flushPromises()
   expect(storyMemoryApi.recheck).toHaveBeenCalledWith(9, 5, undefined)
   expect(wrapper.text()).toContain('本轮已完成，请核对记忆')
+})
+
+it('opens the assistant for a queued review and hands off to its conversation when ready', async () => {
+  vi.mocked(storyMemoryApi.recheck).mockResolvedValue(response(task(6)))
+  vi.mocked(api.task).mockResolvedValue(response({
+    ...task(2, 'rechecking_story'), request_params: { conversation_id: 42 }, response_data: { completed: [{}], total: 185 },
+  }))
+  const wrapper = render()
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '顺序复核全部')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.emitted('showRun')).toEqual([[], [{ taskId: 'job', conversationId: 42 }]])
+  expect(wrapper.find('progress').exists()).toBe(false)
+  expect(wrapper.find('.agent-run-activity').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('停止本轮')
+  expect(wrapper.text()).toContain('在创作助手查看进度')
 })
 
 it('announces request failures and provides a read retry', async () => {

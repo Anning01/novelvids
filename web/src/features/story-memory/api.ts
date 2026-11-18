@@ -24,5 +24,4 @@ export const storyMemoryApi = {
   decide: (id: number, commitId: number, hash: string, decision: 'accept' | 'reject', note: string) => request<SingleResponse<MemoryDetail>>(`${base(id)}/commits/${commitId}/decision`, {
     method: 'POST', body: JSON.stringify({ expected_package_hash: hash, decision, note }),
   }),
-  stop: (id: string) => request<SingleResponse<AiTask>>(`/task/${id}/cancel`, { method: 'POST' }),
 }

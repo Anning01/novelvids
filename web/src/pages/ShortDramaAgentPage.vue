@@ -136,6 +136,7 @@ const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
 const memoryRefreshKey = ref(0)
+const assistantWorkspace = useCreationAgentWorkspace()
 const pendingStoryboard = ref<boolean | null>(null)
 const savingStoryboard = computed(() => pendingStoryboard.value !== null)
 const savingDuration = ref(false)
@@ -936,7 +937,7 @@ onBeforeUnmount(() => {
       </div>
       <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
         :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey"
-        v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" />
+        v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" @show-run="assistantWorkspace.showProductionRun(projectId, $event)" />
 
       <section class="analysis-section episode-section">
         <header>
