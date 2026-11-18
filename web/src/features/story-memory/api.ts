@@ -18,7 +18,7 @@ export const storyMemoryApi = {
   update: (id: number, commitId: number, candidate: MemoryCandidate, revision: number) => request<SingleResponse<MemoryDetail>>(`${base(id)}/commits/${commitId}/candidate`, {
     method: 'PUT', body: JSON.stringify({ candidate, expected_revision: revision }),
   }),
-  review: (id: number, commitId: number, revision: number, modelId: number) => request<SingleResponse<AiTask>>(`${base(id)}/commits/${commitId}/review`, {
+  review: (id: number, commitId: number, revision: number, modelId?: number) => request<SingleResponse<AiTask>>(`${base(id)}/commits/${commitId}/review`, {
     method: 'POST', body: JSON.stringify({ expected_revision: revision, assistant_model_config_id: modelId }),
   }),
   repair: (id: number, commitId: number, revision: number, hash: string, modelId?: number) => request<SingleResponse<AiTask>>(`${base(id)}/commits/${commitId}/repair`, {

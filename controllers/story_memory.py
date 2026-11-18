@@ -86,7 +86,7 @@ async def submit_candidate_task(novel_id, commit_id, body, ctx, *, repair):
                     return task
                 conflict('已有任务正在处理此候选，请等待完成')
         model_id = body.assistant_model_config_id
-        if repair and model_id is None:
+        if model_id is None:
             original = await AiTask.get_or_none(id=commit.task_id)
             model_id = original.request_params.get('assistant_model_config_id') if original else None
         params = await workflow(novel_id, ctx, model_id)

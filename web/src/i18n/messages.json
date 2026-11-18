@@ -4616,6 +4616,8 @@
     "审核意见": "Review findings",
     "查看审核意见": "View review findings",
     "按审核意见补全": "Resolve review findings",
+    "按全局范围复审": "Review global memory again",
+    "原文未交代的内容可保留为「尚未明确」。复审会核对已有候选。": "Details left open by the source can stay unknown. The review checks the existing candidate.",
     "助手会按审核意见和原文补全候选，并重新审核。退回则结束本轮。": "The assistant will revise the candidate using the source and review findings, then review it again. Returning it ends this run.",
     "候选尚未审核，请先重新审核。": "Run a review before confirming the candidate.",
     "已退回": "Returned",

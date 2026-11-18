@@ -236,6 +236,27 @@ it('requests a repair for the reviewed version and presents the new result for h
   expect(storyMemoryApi.decide).not.toHaveBeenCalled()
 })
 
+it('reviews an existing global candidate without starting extraction, repair, or confirmation', async () => {
+  const baseline = { ...ready, chapter_id: null }
+  vi.mocked(storyMemoryApi.history).mockResolvedValue(response([baseline, ready]))
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...baseline, status: 'needs_review' }))
+  const wrapper = render()
+  await wrapper.setProps({ modelId: '' })
+  await flushPromises()
+  await choose(wrapper, '查看范围', '全局故事底稿')
+  expect(review.text()).toContain('原文未交代的内容可保留为「尚未明确」')
+  expect(review.text()).not.toContain('确认并入库')
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(baseline))
+  await review.findAll('button').find(button => button.text() === '按全局范围复审')!.trigger('click')
+  await flushPromises()
+  expect(storyMemoryApi.review).toHaveBeenCalledExactlyOnceWith(9, 10, 1, undefined)
+  expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+  expect(storyMemoryApi.repair).not.toHaveBeenCalled()
+  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
+  expect(review.text()).toContain('具体朝代未明确')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
+})
+
 it('preserves a candidate when the server rejects an outdated confirmation', async () => {
   vi.mocked(storyMemoryApi.decide).mockRejectedValue(new Error('候选版本已变化，请重新核对'))
   render()

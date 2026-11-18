@@ -58,21 +58,29 @@ async def test_api_history_edit_and_decision_enforce_project_and_role(monkeypatc
 @pytest.mark.asyncio
 @pytest.mark.parametrize('opening', [False, True])
 async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monkeypatch, opening):
+    from models.ai_task import AiTask
     from models.config import AiModelConfig
     monkeypatch.setattr('config.settings.AUTH_ENABLED', False)
-    await AiModelConfig.create(name='strict', model='strict', task_type=7, supports_strict_output=True,
+    model = await AiModelConfig.create(name='strict', model='strict', task_type=7, supports_strict_output=True,
         base_url='https://model.invalid/v1', api_key='synthetic', is_active=True)
     text = '古代王朝，没有电力。'
     project = await Novel.create(name='故城', project_setting=None if opening else text)
     if opening:
         await Chapter.create(novel=project, number=1, name='开篇', content=text)
+    proposed = candidate(source='opening_chapter.text' if opening else 'project.setting')
+    if opening:
+        proposed['unresolved'] = ['原文未写明具体朝代。']
     seen = []
     def respond(request):
         body = json.loads(request.content)
         seen.append(body)
         name = body['response_format']['json_schema']['name']
-        payload = (candidate(source='opening_chapter.text' if opening else 'project.setting')
-                   if name == 'story_memory_extract' else {'issues': [], 'summary': '已核对'})
+        if name == 'story_memory_extract':
+            payload = proposed
+        elif opening and len(seen) == 2:
+            payload = {'issues': [{'severity': 'blocking', 'fact_index': None, 'reason': '缺少章末变化'}], 'summary': '需处理'}
+        else:
+            payload = {'issues': [], 'summary': '已核对'}
         return completion_stream_response({'id': 'story', 'created': 1, 'model': 'strict',
             'object': 'chat.completion', 'choices': [{'index': 0, 'message': {
                 'role': 'assistant', 'content': json.dumps(payload, ensure_ascii=False)}, 'finish_reason': 'stop'}],
@@ -86,7 +94,7 @@ async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monk
         response = await client.post(url + '/analyze', json={'request_id': str(uuid4())})
         assert response.status_code == 200, response.text
         row = await StoryCommit.get(novel=project)
-        assert row.status == 'ready', (await row.task).error_message
+        assert row.status == ('needs_review' if opening else 'ready'), (await row.task).error_message
         assert len(seen) == 2 and all(not call.get('tools') for call in seen)
         assert [call['response_format']['json_schema']['name'] for call in seen] == ['story_memory_extract', 'story_memory_review']
         assert not await StoryFact.all().exists()
@@ -94,6 +102,19 @@ async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monk
         if opening:
             assert row.source_snapshot['opening_chapter']['text'] == text
             assert row.candidate['facts'][0]['evidence'][0]['source'] == 'opening_chapter.text'
+            old_hash, revision = row.package_hash, row.revision
+            response = await client.post(url + f'/commits/{row.id}/review', json={'expected_revision': revision})
+            assert response.status_code == 200, response.text
+            review_task = await AiTask.get(id=response.json()['data']['id'])
+            assert review_task.request_params['assistant_model_config_id'] == model.id
+            assert len(seen) == 3 and seen[-1]['response_format']['json_schema']['name'] == 'story_memory_review'
+            sent = json.dumps(seen[-1], ensure_ascii=False)
+            assert '不因未逐条收录开篇剧情、章末能力变化、任务或奖励而阻断' in sent
+            assert '未知项本身不构成问题' in sent and '原文未写明具体朝代' in sent
+            await row.refresh_from_db()
+            assert row.status == 'ready' and row.revision == revision and row.package_hash != old_hash
+            assert row.candidate == proposed
+            assert not await StorySnapshot.all().exists()
         result = await client.post(url + f'/commits/{row.id}/decision', json={
             'expected_package_hash': row.package_hash, 'decision': 'accept'})
         assert result.json()['data']['snapshot']['fact_ids']
