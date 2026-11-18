@@ -368,3 +368,33 @@ async def test_chat_scene_edit_uses_one_strict_request(strict_model, monkeypatch
     fmt = request['text']['format'] if text_api == 'responses' else request['response_format']['json_schema']
     assert fmt['strict'] is True and fmt['schema']['required'] == ['prompt']
     assert '空站台' in json.dumps(request, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('language', 'screenplay'), [('zh', '1-1 内 木屋 日\n老周开门接信。'), ('en', None)])
+async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(strict_model, monkeypatch, language, screenplay):
+    from controllers.scene import scene_controller
+    from test.test_services.test_prompt_language import _shot
+
+    monkeypatch.setattr('controllers.scene.general_config_controller.get_prompt_language', AsyncMock(return_value=language))
+    project = await Novel.create(name='山居')
+    original = '小说独有情节：老周下山赶集。'
+    chapter = await Chapter.create(novel=project, number=1, name='送信', content=original, screenplay=screenplay)
+    shot = _shot().model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
+    shot.update(duration=4, visible_asset_names=[], actions=[{'start': 0, 'end': 4, 'text': '开门'}],
+               visual_prose='木屋门开了。', dialogue=[], narration=[], blocking_map=None)
+    requests = mock_model(monkeypatch, {'shots': [shot]})
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    system, user = requests[0]['messages']
+    assert f'language={language}' in system['content']
+    body = json.loads(user['content'])
+    assert body['task_context']['input']['chapter'] == (screenplay or original)
+    if screenplay:
+        assert original not in user['content']
+    method = json.dumps(body['creative_method'], ensure_ascii=False)
+    assert 'story_memory' in method and '只用于接戏' in method
+    assert '同一场号' in method and '一次视频生成' in method
