@@ -2,7 +2,7 @@ from enum import StrEnum
 
 
 class ImageApiProtocol(StrEnum):
-    """Supported image-generation wire protocols."""
+    """Supported model API protocols."""
 
     openai_compatible = "openai_compatible"
     openrouter_compatible = "openrouter_compatible"
@@ -14,3 +14,4 @@ class ImageApiProtocol(StrEnum):
     dashscope = "dashscope"
     volcengine_mediakit = "volcengine_mediakit"
     volcengine_openspeech = "volcengine_openspeech"
+    mimo_voice_design = "mimo_voice_design"

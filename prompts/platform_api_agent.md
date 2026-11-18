@@ -73,7 +73,15 @@ for chunk in stream:
         print(chunk.choices[0].delta.content or "", end="")
 ```
 
-返回标准 ChatCompletion 或 ChatCompletionChunk SSE 与 `[DONE]`，不包裹 data/result。保留 tools、tool_choice、response_format、tool_calls、tool_call_id 与模型扩展字段。多模态图片使用 image_url.url 中的 HTTPS 链接。对话音频 Base64 输出模式不开放。
+返回标准 ChatCompletion 或 ChatCompletionChunk SSE 与 `[DONE]`，不包裹 data/result。保留 tools、tool_choice、response_format、tool_calls、tool_call_id 与模型扩展字段。多模态图片使用 image_url.url 中的 HTTPS 链接。普通对话不支持内嵌音频输出。
+
+## 音色设计：POST /chat/completions
+
+从 `GET /models` 选择 `kinds` 含 `voice_design` 的模型。使用 `user` 消息描述音色，
+`assistant` 消息填写要朗读的内容，`audio.format` 传 `wav`，`stream` 传 `false`。
+也可设置 `audio.optimize_text_preview=true`，让模型根据描述生成示例台词。
+返回的 `choices[0].message.audio.data` 是 Base64 编码的 WAV。价格以模型目录为准，
+按实际输出音频秒数结算。使用 `Idempotency-Key` 保护提交，并通过请求回执查询用量。
 
 ## 图片：POST /images/generations
 

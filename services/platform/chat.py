@@ -96,6 +96,10 @@ class ChatStream(StreamingResponse):
 
 async def complete(ctx, body, key):
     params = body.model_dump(mode="json", exclude_unset=True)
+    if body.audio is not None:
+        from services.platform.voice_design import complete_voice_design
+
+        return await complete_voice_design(ctx, params, key)
     config, receipt = await admit(ctx, body.model, params, key)
     headers = {"X-Request-Id":str(receipt.public_id), "Cache-Control":"no-store"}
     client = None

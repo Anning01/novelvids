@@ -108,7 +108,7 @@ class BillingStatements:
             if not batch:
                 break
             for row in await self.rows(batch):
-                category = {'text': '文本', 'image': '生图', 'video': '视频', 'media_processing': '画质增强', 'asr': '语音识别'}.get(row.billing_type)
+                category = {'text': '文本', 'image': '生图', 'video': '视频', 'media_processing': '画质增强', 'asr': '语音识别', 'voice_design': '音色设计'}.get(row.billing_type)
                 task = AiTaskTypeEnum(row.task_type).nickname if row.task_type in AiTaskTypeEnum.values() else ''
                 status = TaskStatusEnum(row.task_status).nickname if row.task_status in TaskStatusEnum.values() else localized_message('未记录')
                 yield self.csv_row([row.id, row.created_at, row.team_id, row.team_name, row.user_id, row.user_name,

@@ -31,7 +31,7 @@ const teamOptions = computed(() => [{ value: '', label: tr('全部团队') }, ..
 const userOptions = computed(() => [{ value: '', label: tr('全部用户') }, ...parties.value.users.map(u => ({ value: String(u.id), label: `${u.name} (#${u.id})` }))])
 const filters = (): BillingStatementFilters => ({ team_id: team.value ? Number(team.value) : undefined,
   user_id: user.value ? Number(user.value) : undefined, start_date: start.value || undefined, end_date: end.value || undefined })
-const category = (value: string | null) => ({ text: tr('文本'), image: tr('生图'), video: tr('视频'), media_processing: tr('画质增强'), asr: tr('语音识别') })[value || ''] || '—'
+const category = (value: string | null) => ({ text: tr('文本'), image: tr('生图'), video: tr('视频'), media_processing: tr('画质增强'), asr: tr('语音识别'), voice_design: tr('音色设计') })[value || ''] || '—'
 const exactMoney = (value: string | null | undefined) => value == null ? '—' : `¥${value}`
 const rowUsage = (row: BillingStatementRow) => row.billing_type ? usageLabel({ ...row, billing_type: row.billing_type }) : '—'
 

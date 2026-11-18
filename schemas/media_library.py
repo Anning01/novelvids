@@ -48,6 +48,20 @@ class AudioReferenceOssFinalizeIn(BaseModel):
         return value.strip()
 
 
+class AudioReferenceAutoDesignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: int = Field(ge=1)
+    variant_id: int | None = Field(default=None, ge=1)
+    expected_voice_reference_id: int | None = Field(ge=1)
+    expected_voice: str = Field(default="", max_length=100)
+
+
+class AudioReferenceAutoDesignOut(BaseModel):
+    reference: AudioReferenceOut
+    metadata: dict
+
+
 class AudioReferenceTrimIn(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)

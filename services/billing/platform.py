@@ -19,7 +19,7 @@ from models.studio_call import StudioCall
 from models.usage_record import ModelUsageRecord
 from schemas.platform_billing import PlatformReceiptOut
 from services.balance import ensure_solvent
-from services.billing.pricing import pixel_receipt_cost, compute_image_cost, compute_input_image_cost, compute_text_cost, compute_video_cost
+from services.billing.pricing import pixel_receipt_cost, compute_image_cost, compute_input_image_cost, compute_text_cost, compute_video_cost, compute_voice_design_cost
 
 
 active_model_call = ContextVar("platform_model_call", default=None)
@@ -30,13 +30,13 @@ def is_platform_model(config):
     return config.api_protocol == "novelvids" or (config.model.startswith("nv-") and config.api_key.startswith("nv_"))
 
 
-async def begin_platform_call(config, *, billing_type, task_id=None, video_id=None, message_id=None, request_key=None):
+async def begin_platform_call(config, *, billing_type, task_id=None, video_id=None, message_id=None, request_key=None, attribution=None, task_type=None):
     task = await AiTask.get_or_none(id=task_id) if task_id else None
     if video_id is not None:
         from models.video import Video
         owner = (await Video.get(id=video_id)).metadata
     else:
-        owner = task.request_params if task else {}
+        owner = task.request_params if task else attribution or {}
     await ensure_solvent(owner.get("team_id"), owner.get("user_id"))
     async with in_transaction() as db:
         if request_key:
@@ -44,7 +44,7 @@ async def begin_platform_call(config, *, billing_type, task_id=None, video_id=No
             if existing is not None:
                 return existing
         record = await ModelUsageRecord.create(using_db=db,
-            novel_id=owner.get("novel_id", 0), task_type=task.task_type if task else 4 if billing_type == "video" else 2,
+            novel_id=owner.get("novel_id", 0), task_type=task.task_type if task else task_type or (4 if billing_type == "video" else 2),
             billing_type=billing_type, ai_task_id=task.id if task else None, video_id=video_id,
             model_config_id=config.id, model_name=config.name, model=config.model,
             cost_source="platform_key", status=2, settlement_status="pending",
@@ -175,6 +175,8 @@ async def settle_platform_call(row_id: int, receipt: PlatformReceiptOut) -> None
             elif ledger.billing_type == "video":
                 local_cost = compute_video_cost(usage.get("seconds", 0), usage.get("resolution"), pricing,
                     usage.get("input_video_seconds", 0), usage.get("has_video_reference", False), usage.get("input_image_count", 0))
+            elif ledger.billing_type == "voice_design":
+                local_cost = compute_voice_design_cost(usage["seconds"], pricing)
             elif ledger.billing_type == "media_processing":
                 from services.video_enhancement.contract import enhancement_cost
                 local_cost = enhancement_cost(usage.get("seconds"), usage.get("short_side"), usage.get("fps"), pricing)

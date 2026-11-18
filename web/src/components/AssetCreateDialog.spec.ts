@@ -29,6 +29,7 @@ vi.mock('@/api', () => ({
     assetGenerationHistory: vi.fn(),
     deleteFailedAssetGeneration: vi.fn(),
     assetVariants: vi.fn(),
+    autoDesignVoice: vi.fn(),
     createAssetVariant: vi.fn(),
     updateAssetVariant: vi.fn(),
     updateAsset: vi.fn(),
@@ -455,6 +456,56 @@ async function mountVoiceEditor(asset: Asset, variant?: AssetVariant) {
   if (variant) await wrapper.get(`button[aria-label="切换到${variant.name}"]`).trigger('click')
   return wrapper
 }
+
+it.each(['light', 'dark'])('confirms replacement and binds the original form after switching forms (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const asset = { ...editedAsset, metadata: { voice: '基础音色', voice_reference_id: 19 } }
+  const variant: AssetVariant = {
+    id: 31, asset_id: asset.id, name: '青年', base_traits: '青年形象', images: [],
+    metadata: { voice: '原青年音色', voice_reference_id: 20 }, created_at: '', updated_at: '',
+  }
+  const newVoice = { id: 25, nickname: '新青年音色', gender: '男', audio_url: '/media/design.wav',
+    avatar_url: '', asset_id: 'voice-25', is_active: true, created_at: '', updated_at: '' }
+  const response = { code: 0, message: '', data: {
+    reference: newVoice, metadata: { voice: newVoice.nickname, voice_reference_id: newVoice.id },
+  } }
+  let finish!: (value: typeof response) => void
+  vi.mocked(api.autoDesignVoice).mockClear().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  vi.mocked(appConfirm).mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+  const wrapper = await mountVoiceEditor(asset, variant)
+  const trigger = wrapper.get('.asset-voice-design')
+  await trigger.trigger('click')
+  await flushPromises()
+  expect(api.autoDesignVoice).not.toHaveBeenCalled()
+  await trigger.trigger('click')
+  await flushPromises()
+  expect(api.autoDesignVoice).toHaveBeenCalledWith({
+    asset_id: asset.id, variant_id: variant.id, expected_voice_reference_id: 20, expected_voice: '原青年音色',
+  })
+  expect(trigger.attributes('aria-busy')).toBe('true')
+  expect(trigger.attributes('disabled')).toBeDefined()
+  await wrapper.get('.asset-variant-item.is-base').trigger('click')
+  finish(response)
+  await flushPromises()
+  expect(wrapper.get('.asset-voice-choice').text()).toBe('基础音色')
+  expect(wrapper.emitted('saved')).toBeUndefined()
+  await wrapper.get('button[aria-label="切换到青年"]').trigger('click')
+  expect(wrapper.get('.asset-voice-choice').text()).toBe('新青年音色')
+  wrapper.unmount()
+  delete document.documentElement.dataset.appTheme
+})
+
+it('hides voice design for an unsaved character form and keeps voice selection available after an error', async () => {
+  const wrapper = await mountVoiceEditor({ ...editedAsset, metadata: {} })
+  vi.mocked(api.autoDesignVoice).mockRejectedValueOnce(new Error('服务暂不可用'))
+  await wrapper.get('.asset-voice-design').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.asset-voice-design').attributes('disabled')).toBeUndefined()
+  expect(wrapper.get('.asset-voice-choice').text()).toBe('选择音色')
+  await wrapper.get('.asset-variant-item.is-add').trigger('click')
+  expect(wrapper.find('.asset-voice-design').exists()).toBe(false)
+  wrapper.unmount()
+})
 
 it.each(['light', 'dark'])('clears and persists the voice in %s mode with saving feedback', async theme => {
   document.documentElement.dataset.appTheme = theme

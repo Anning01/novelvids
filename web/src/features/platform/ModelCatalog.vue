@@ -51,7 +51,7 @@ const selectedFeatures = ref<string[]>([])
 const categoryOrder = ['image', 'video', 'text']
 const labels = computed<Record<string, string>>(() => ({
   all: tr('全部'), text: tr('文本'), image: tr('图片'), video: tr('视频'),
-  media_processing: tr('画质增强'), asr: tr('语音识别'),
+  media_processing: tr('画质增强'), asr: tr('语音识别'), voice_design: tr('音色设计'),
 }))
 const categories = computed(() => ['all', ...categoryOrder, ...new Set(props.models.flatMap(model => model.kinds))]
   .filter((value, index, values) => values.indexOf(value) === index)
@@ -271,6 +271,7 @@ function pricingRows(model: CatalogModel) {
     rows.push({ label, value, unit })
   }
   if (pricing.price_per_minute != null) rows.push({ label: tr('标准单价'), value: pricing.price_per_minute, unit: tr('分钟') })
+  if (pricing.price_per_second != null) rows.push({ label: tr('标准单价'), value: pricing.price_per_second, unit: tr('秒') })
   for (const tier of pricing.tiers ?? []) rows.push({ label: `≤${tier.short_side_max}p · ≤${tier.fps_max}fps`, value: tier.price, unit: tr('分钟') })
   for (const [tier, value] of Object.entries(pricing.video_reference_prices ?? {}).sort(([a], [b]) => compareTiers(a, b))) {
     rows.push({ label: `${tr('参考视频')} · ${tier}`, value, unit, reference: true })

@@ -14,7 +14,7 @@ from auth.models import PlatformCallReceipt
 from models.config import AiModelConfig
 from models.usage_record import ModelUsageRecord
 from services.balance import accumulate_member_cost, consume, ensure_solvent
-from services.billing.pricing import compute_image_cost, compute_input_image_cost, compute_text_cost
+from services.billing.pricing import compute_image_cost, compute_input_image_cost, compute_text_cost, compute_voice_design_cost
 from utils.enums import AiTaskTypeEnum
 from utils.messages import localized_message
 
@@ -103,12 +103,17 @@ async def settle(receipt_id):
         if kind == "image":
             cost = compute_image_cost(r.usage["image_count"], r.usage["clarity"], r.pricing)
             cost += compute_input_image_cost(r.usage["input_image_count"], r.pricing)
+        elif kind == "voice_design":
+            cost = compute_voice_design_cost(r.usage["seconds"], r.pricing)
         elif kind == "video":
             from services.platform.videos import video_cost
             cost = video_cost(r.usage, r.pricing)
         else:
             cost = compute_text_cost(r.usage, r.pricing)
-        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type={"image":AiTaskTypeEnum.reference_image,"video":AiTaskTypeEnum.video,"text":AiTaskTypeEnum.creation_agent}[kind],
+        record = await ModelUsageRecord.create(using_db=db, novel_id=0, task_type={
+            "image": AiTaskTypeEnum.reference_image, "video": AiTaskTypeEnum.video,
+            "text": AiTaskTypeEnum.creation_agent, "voice_design": AiTaskTypeEnum.voice_design,
+        }[kind],
             billing_type=kind, model_config_id=r.model_config_id, model_name=r.model_name, model=r.model,
             pricing_snapshot=r.pricing, usage={**r.usage, "platform_request_id":str(r.public_id)},
             cost=cost, platform_cost=cost, local_charge=0, settlement_status="settled",

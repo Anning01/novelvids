@@ -151,6 +151,8 @@ const ownVariants = ref<AssetVariant[]>([])
 const saving = ref(false)
 const autoSaving = ref(false)
 const voiceSaving = ref(false)
+const autoDesigning = ref(false)
+let deferredVoiceAutosave = false
 const formHydrated = ref(false)
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 const promptTouched = ref(false)
@@ -334,6 +336,7 @@ const canSubmit = computed(() => {
 })
 
 function reset() {
+  deferredVoiceAutosave = false
   formHydrated.value = false
   generationController?.abort()
   generationController = null
@@ -1163,10 +1166,76 @@ async function selectVoiceReference(reference: AudioReference | null) {
   }
 }
 
+async function autoDesignVoice() {
+  const asset = promptSourceAsset.value || props.asset
+  const variant = selectedVariant.value
+  const key = activeFormKey()
+  if (!asset || variantDraft.value?.is_new || autoDesigning.value || voiceSaving.value || autoSaving.value || saving.value) return
+
+  const metadata = asRecord((variant || asset).metadata)
+  const editorForm = asRecord(metadata[VARIANT_EDITOR_FORM_KEY])
+  const referenceId = Number('voice_reference_id' in metadata ? metadata.voice_reference_id : editorForm.voice_reference_id)
+  const expectedVoiceReferenceId = referenceId > 0 ? referenceId : null
+  const currentVoice = 'voice' in metadata ? metadata.voice : editorForm.voice
+  const expectedVoice = typeof currentVoice === 'string' ? currentVoice.trim() : ''
+  const targetName = variant ? `${asset.canonical_name} · ${variant.name}` : asset.canonical_name
+  if (expectedVoiceReferenceId || expectedVoice) {
+    const confirmed = await appConfirm({
+      title: tr('替换“{p0}”的音色？', { p0: targetName }),
+      message: tr('生成成功后将绑定新音色。原音色仍可在音色库中选用。'),
+      confirmLabel: tr('生成并替换'),
+      tone: 'warning',
+    })
+    if (!confirmed) return
+  }
+  if (!props.open || props.asset?.id !== asset.id || activeFormKey() !== key || autoDesigning.value
+    || voiceSaving.value || autoSaving.value || saving.value) return
+
+  autoDesigning.value = true
+  try {
+    const { data } = await api.autoDesignVoice({
+      asset_id: asset.id,
+      variant_id: variant?.id ?? null,
+      expected_voice_reference_id: expectedVoiceReferenceId,
+      expected_voice: expectedVoice,
+    })
+    if (props.asset?.id === asset.id) {
+      if (variant) {
+        const latest = ownVariants.value.find(item => item.id === variant.id) || variant
+        const updated = { ...latest, metadata: data.metadata }
+        variantStripRef.value?.upsertVariant(updated)
+        if (selectedVariant.value?.id === variant.id) selectedVariant.value = updated
+      } else {
+        const updated = { ...(promptSourceAsset.value || asset), metadata: data.metadata }
+        promptSourceAsset.value = updated
+        emit('saved', updated)
+      }
+      const nextVoice = { voice: data.reference.nickname, voice_reference_id: data.reference.id }
+      const snapshot = formDrafts.get(key)
+      if (snapshot) formDrafts.set(key, { ...snapshot, ...nextVoice })
+      if (props.open && activeFormKey() === key) {
+        voice.value = nextVoice.voice
+        voiceReferenceId.value = nextVoice.voice_reference_id
+      }
+    }
+    notice.success(tr('已为“{p0}”设计并绑定音色', { p0: targetName }))
+  } catch (error) {
+    notice.error((error as Error).message || tr('音色设计失败，请重试'))
+  } finally {
+    autoDesigning.value = false
+    if (deferredVoiceAutosave && props.asset) scheduleAutoSave()
+    deferredVoiceAutosave = false
+  }
+}
+
 async function persistEdits() {
   if (!props.asset || !formHydrated.value) return
+  if (autoDesigning.value) {
+    deferredVoiceAutosave = true
+    return
+  }
   if (autoSaving.value || voiceSaving.value || saving.value || generationRunning.value) return
-  if (variantDraft.value || pendingReferenceImages.value.length) return
+  if (selectedVariant.value || variantDraft.value || pendingReferenceImages.value.length) return
   if (mode.value !== 'ai') return
   if (!name.value.trim()) return
   const existingMetadata = props.asset.metadata && typeof props.asset.metadata === 'object'
@@ -1195,11 +1264,14 @@ async function persistEdits() {
 
 function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(() => { void persistEdits() }, 600)
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    void persistEdits()
+  }, 600)
 }
 
 async function submit(regenerate = false) {
-  if (!canSubmit.value || saving.value || generationRunning.value) return
+  if (!canSubmit.value || saving.value || generationRunning.value || autoDesigning.value) return
   if (regenerate) {
     generationRequested.value = true
     generationError.value = ''
@@ -1404,8 +1476,12 @@ watch(selectedModel, model => {
   }
 }, { immediate: true })
 watch(
-  [name, description, prompt, gender, age, voice, voiceReferenceId, referenceLayout, modelId, () => referenceImages.value.join('|'), () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
-  () => { if (props.open && props.asset && formHydrated.value && !voiceSaving.value) scheduleAutoSave() },
+  [name, description, prompt, gender, age, referenceLayout, modelId, () => referenceImages.value.join('|'), () => imageParameters.value.clarity, () => imageParameters.value.aspectRatio, () => imageParameters.value.outputFormat, () => imageParameters.value.generationCount],
+  () => {
+    if (!props.open || !props.asset || !formHydrated.value || voiceSaving.value) return
+    if (autoDesigning.value) deferredVoiceAutosave = true
+    else scheduleAutoSave()
+  },
 )
 onMounted(() => {
   window.addEventListener('keydown', onWindowKeydown)
@@ -1566,9 +1642,23 @@ onUnmounted(() => {
             <div v-if="kind === 'character' && !isGroupPortrait" class="asset-field" role="group" :aria-label="tr('音色选择')">
               <span>{{ tr('音色选择') }}</span>
               <div class="asset-voice-control">
-                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
-                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
+                <AppButton type="button" variant="secondary" class="asset-voice-choice" :loading="voiceSaving" :disabled="voiceSaving || autoDesigning" @click="voicePickerOpen = true"><Volume2 :size="15" aria-hidden="true" /><span>{{ voice || tr('选择音色') }}</span></AppButton>
+                <AppButton v-if="voice || voiceReferenceId || voiceSaving" type="button" variant="ghost" icon-only class="asset-voice-clear" :aria-label="tr('清除音色')" :title="tr('清除音色')" :disabled="voiceSaving || autoDesigning" @click="selectVoiceReference(null)"><X :size="16" aria-hidden="true" /></AppButton>
               </div>
+              <AppButton
+                v-if="asset && !variantDraft?.is_new"
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="asset-voice-design"
+                :loading="autoDesigning"
+                :disabled="!formHydrated || voiceSaving || autoSaving || saving"
+                @click="autoDesignVoice"
+              >
+                <Sparkles v-if="!autoDesigning" :size="14" aria-hidden="true" />
+                {{ autoDesigning ? tr('正在设计音色…') : tr('AI 设计音色') }}
+              </AppButton>
+              <span class="asset-voice-status" role="status">{{ autoDesigning ? tr('正在设计音色…') : '' }}</span>
             </div>
           </div>
 
@@ -1674,8 +1764,8 @@ onUnmounted(() => {
           <span v-else />
           <div>
             <AppButton type="button" variant="secondary" @click="emit('close')">{{ tr('取消') }}</AppButton>
-            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : tr('生成图片') }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
-            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? tr('上传并保存') : mode === 'library' ? tr('选择并保存') : tr('保存此版本') : isEditing ? tr('保存修改') : mode === 'ai' ? tr('开始生成') : tr('确认添加') }}<BillingPriceTag v-if="!isEditing && mode === 'ai' && !saving" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
+            <AppButton v-if="isEditing && mode === 'ai'" type="button" variant="primary" :disabled="!canSubmit || generationBusy || autoDesigning" :loading="generationBusy" @click="submit(true)"><RefreshCw v-if="!generationBusy" :size="15" />{{ generationBusy ? generationStatusText : tr('生成图片') }}<BillingPriceTag v-if="!generationBusy" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
+            <AppButton v-else type="submit" variant="primary" :disabled="!canSubmit || generationBusy || autoDesigning" :loading="saving && !generationRequested"><Sparkles v-if="!isEditing && !saving && mode === 'ai'" :size="15" />{{ variantContextActive ? mode === 'upload' ? tr('上传并保存') : mode === 'library' ? tr('选择并保存') : tr('保存此版本') : isEditing ? tr('保存修改') : mode === 'ai' ? tr('开始生成') : tr('确认添加') }}<BillingPriceTag v-if="!isEditing && mode === 'ai' && !saving" :cost="estimatedCost" :pricing="selectedModel?.pricing" /></AppButton>
           </div>
         </footer>
       </form>
@@ -1802,6 +1892,8 @@ onUnmounted(() => {
 .asset-field > span { display: flex; align-items: center; gap: 6px; }
 .asset-field > span small { margin-left: auto; color: var(--app-text-muted); font-size: 9px; font-weight: 500; }
 .asset-field > span i,.asset-mode legend i { margin-right: 3px; color: var(--creation-danger); font-style: normal; }
+.asset-voice-design { justify-self: start; }
+.asset-voice-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .asset-voice-control { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .asset-voice-choice { flex: 1; overflow: hidden; min-height: 40px; color: var(--app-text-secondary); background: var(--app-surface); }
 .asset-voice-control .asset-voice-choice:hover:not(:disabled) { color: var(--app-text); background: var(--app-surface-hover); }

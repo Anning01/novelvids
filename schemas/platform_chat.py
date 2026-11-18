@@ -1,6 +1,8 @@
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from schemas.voice_design import VoiceAudioOptions
+
 
 class TextPart(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -36,6 +38,7 @@ class ChatRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
+    audio: VoiceAudioOptions | None = None
     stream_options: dict[str, Any] | None = None
     max_tokens: int | None = Field(None, gt=0)
     max_completion_tokens: int | None = Field(None, gt=0)
