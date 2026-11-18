@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRaw, useId, watch } from 'vue'
-import { BookOpen, RefreshCw } from 'lucide-vue-next'
+import { BookOpen, RefreshCw, X } from 'lucide-vue-next'
 import { api } from '@/api'
 import { tr } from '@/i18n'
 import { notice } from '@/shared/notice'
@@ -29,6 +29,8 @@ const busy = ref(false)
 const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
 const shownFacts = ref(20)
+const memoryDialog = ref<HTMLDialogElement | null>(null)
+const memoryOpen = ref(false)
 let requests = new AbortController()
 let epoch = 0
 let selection = 0
@@ -54,6 +56,7 @@ const scopeOptions = computed(() => rows.value.map(row => ({
   value: row.chapter_id === null ? 'baseline' : String(row.chapter_id),
   label: row.chapter_id === null ? tr('全局故事底稿') : `${tr('第 {p0} 集', { p0: row.number })} · ${tr(row.state === 'current' ? '已确认' : row.state === 'stale' ? '需要复核' : '尚未建立')}`,
 })))
+const scopeLabel = computed(() => scopeOptions.value.find(option => option.value === scope.value)?.label)
 const natureOptions = computed(() => Object.entries(natures).map(([value, label]) => ({ value, label: tr(label) })))
 const worldOptions = computed(() => [{ value: '', label: tr('未指定世界') },
   ...(draft.value?.subjects.filter(subject => subject.kind === 'world').map(world => ({ value: world.ref, label: world.name })) ?? [])])
@@ -156,6 +159,12 @@ function openProgress() {
 function openReview() {
   focusReview.value = true
   emit('showRun')
+}
+function openMemory() {
+  if (!context.value?.enabled || !memoryDialog.value || memoryDialog.value.open) return
+  shownFacts.value = 20
+  memoryDialog.value.showModal()
+  memoryOpen.value = true
 }
 function focusReviewIssues() {
   document.getElementById(`${id}-review-issues`)?.focus()
@@ -265,6 +274,7 @@ async function removeFact(index: number) {
   document.getElementById(target >= 0 ? `${id}-fact-${target}` : `${id}-summary`)?.focus()
 }
 watch(scope, async () => {
+  if (memoryDialog.value?.open) memoryDialog.value.close()
   if (!status.value) return
   const current = epoch
   try { await loadScope() }
@@ -282,6 +292,7 @@ watch(() => props.refreshKey, () => {
 })
 watch(() => props.canEdit, value => { if (!value) draft.value = null })
 watch(() => props.projectId, async () => {
+  if (memoryDialog.value?.open) memoryDialog.value.close()
   ++epoch
   const current = epoch
   requests.abort()
@@ -313,6 +324,8 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
       <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr('已确认的世界观、人物和前情，将用于资产、分镜与创作助手。') }}</p></div>
       <div class="memory-actions">
         <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
+        <AppButton v-if="selected?.state === 'current'" :id="`${id}-current`" size="sm" variant="soft"
+          aria-haspopup="dialog" :aria-controls="`${id}-memory-dialog`" :disabled="!context?.enabled" @click="openMemory">{{ tr('查看当前有效记忆') }}</AppButton>
         <AppButton v-if="hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
         <AppButton v-if="canEdit && (running || (!hasCandidate && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
         <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
@@ -331,8 +344,22 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
       <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
-      <div v-if="context?.enabled" class="memory-current">
-        <h3 :id="`${id}-current`" tabindex="-1">{{ tr('当前有效记忆') }}</h3><p class="memory-prose">{{ context.current?.summary }}</p>
+    </template>
+  </section>
+  <Teleport to="body">
+    <dialog ref="memoryDialog" :id="`${id}-memory-dialog`" :aria-labelledby="`${id}-memory-dialog-title`"
+      class="memory-dialog" @close="memoryOpen = false">
+      <header class="memory-dialog-header">
+        <div>
+          <h2 :id="`${id}-memory-dialog-title`">{{ tr('当前有效记忆') }}</h2>
+          <p v-if="scopeLabel" class="memory-dialog-scope">{{ scopeLabel }}</p>
+        </div>
+        <form method="dialog">
+          <AppButton type="submit" size="sm" icon-only variant="ghost" :aria-label="tr('关闭')" autofocus><X :size="18" aria-hidden="true" /></AppButton>
+        </form>
+      </header>
+      <div v-if="memoryOpen && context?.enabled" class="memory-dialog-body">
+        <p class="memory-prose">{{ context.current?.summary }}</p>
         <p v-if="chapterId && context.baseline_summary" class="memory-hint">{{ tr('全局背景') }}：{{ context.baseline_summary }}</p>
         <p v-if="context.previous?.ending_state" class="memory-hint">{{ tr('前章状态') }}：{{ context.previous.ending_state }}</p>
         <details v-if="context.facts?.length"><summary>{{ tr('查看已确认事实（{p0}）', { p0: context.facts.length }) }}</summary>
@@ -340,8 +367,9 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
         <AppButton v-if="(context.facts?.length || 0) > shownFacts" size="sm" @click="shownFacts += 20">{{ tr('显示更多事实') }}</AppButton>
         </details>
       </div>
-    </template>
-  </section>
+      <p v-else-if="memoryOpen" class="memory-dialog-body memory-hint" role="status">{{ tr(loading ? '正在读取故事记忆' : '当前范围暂无可查看的有效记忆') }}</p>
+    </dialog>
+  </Teleport>
   <Teleport v-if="reviewTarget && hasCandidate && detail && candidate" :to="reviewTarget">
       <section :id="`${id}-candidate-panel`" class="memory-candidate" :aria-labelledby="`${id}-candidate`">
         <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('候选与审核') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
@@ -428,7 +456,13 @@ textarea::placeholder { color: var(--app-text-muted); }
 textarea:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .memory-scope-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
 .memory-hint { margin-block: 10px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
-.memory-current { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
+.memory-dialog { box-sizing: border-box; inline-size: min(720px, calc(100% - 24px)); max-block-size: calc(100dvh - 32px); margin: auto; padding: 0; overflow: auto; border: 1px solid var(--app-border); border-radius: 16px; background: var(--app-surface); color: var(--app-text); }
+.memory-dialog:modal { overscroll-behavior: contain; }
+.memory-dialog::backdrop { background: rgb(0 0 0 / 55%); overflow: hidden; overscroll-behavior: contain; }
+.memory-dialog-header { position: sticky; inset-block-start: 0; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px; background: var(--app-surface); border-block-end: 1px solid var(--app-border); }
+.memory-dialog-header h2 { margin: 0; font-size: 18px; }
+.memory-dialog-scope { margin: 5px 0 0; color: var(--app-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.memory-dialog-body { padding: 4px 20px 18px; }
 .memory-candidate { min-inline-size: 0; color: var(--app-text); }
 .memory-candidate .memory-field :deep(.app-select) { min-inline-size: 0; }
 h3 { margin: 0 0 10px; font-size: 15px; }
@@ -451,5 +485,5 @@ fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-bloc
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }
 @media (max-width: 680px) { .story-memory { padding: 18px 14px; } .memory-controls > .memory-field { flex-basis: 100%; } .memory-controls > .memory-actions { margin-inline-start: 0; } .memory-controls > .memory-actions :deep(button) { white-space: normal; } }
-@media (pointer: coarse) { textarea, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } :is(.story-memory, .memory-candidate) :deep(.app-button) { min-height: 48px; } }
+@media (pointer: coarse) { textarea, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } :is(.story-memory, .memory-candidate, .memory-dialog) :deep(.app-button) { min-height: 48px; } }
 </style>

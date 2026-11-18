@@ -74,6 +74,29 @@ it('separates confirmed memory from reviewable candidates and preserves source e
   expect(storyMemoryApi.detail).toHaveBeenCalledWith(9, 10, expect.any(AbortSignal))
 })
 
+it('keeps confirmed memory in a dialog and closes it when the selected scope changes', async () => {
+  vi.mocked(storyMemoryApi.context).mockResolvedValue(response({
+    enabled: true,
+    current: { summary: '已确认的章节摘要', ending_state: '', unresolved: [] },
+    facts: [{ id: 12, subject: { id: 1, kind: 'world', name: '故城世界', aliases: [] },
+      category: 'world', nature: 'fact', content: '以油灯照明。', evidence: candidate.facts[0]!.evidence, scope: {} }],
+  }))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('已确认的章节摘要')
+  const trigger = wrapper.findAll('button').find(button => button.text() === '查看当前有效记忆')!
+  const dialog = document.getElementById(trigger.attributes('aria-controls') ?? '') as HTMLDialogElement
+  expect(dialog.open).toBe(false)
+  await trigger.trigger('click')
+  expect(dialog.open).toBe(true)
+  expect(dialog.textContent).toContain('已确认的章节摘要')
+  expect(dialog.textContent).toContain('查看已确认事实（1）')
+  expect(dialog.querySelector('blockquote')?.textContent).toBe('古代王朝，没有电力。')
+  await choose(wrapper, '查看范围', '全局故事底稿')
+  expect(dialog.open).toBe(false)
+  expect(dialog.textContent).not.toContain('已确认的章节摘要')
+})
+
 it('opens candidate review in the assistant and preserves a draft across close and reopen', async () => {
   const wrapper = render(true, false)
   await flushPromises()

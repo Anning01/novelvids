@@ -4566,6 +4566,8 @@
     "审核故事记忆候选": "Review story memory candidates",
     "顺序复核故事记忆": "Recheck story memory in order",
     "当前有效记忆": "Current confirmed memory",
+    "查看当前有效记忆": "View current confirmed memory",
+    "当前范围暂无可查看的有效记忆": "No confirmed memory is available for this scope.",
     "前章状态": "Previous chapter state",
     "原文依据": "Source evidence",
     "显示更多事实": "Show more facts",
