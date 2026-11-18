@@ -55,18 +55,23 @@ async def test_api_history_edit_and_decision_enforce_project_and_role(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monkeypatch):
+@pytest.mark.parametrize('opening', [False, True])
+async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monkeypatch, opening):
     from models.config import AiModelConfig
     monkeypatch.setattr('config.settings.AUTH_ENABLED', False)
     await AiModelConfig.create(name='strict', model='strict', task_type=7, supports_strict_output=True,
         base_url='https://model.invalid/v1', api_key='synthetic', is_active=True)
-    project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。')
+    text = '古代王朝，没有电力。'
+    project = await Novel.create(name='故城', project_setting=None if opening else text)
+    if opening:
+        await Chapter.create(novel=project, number=1, name='开篇', content=text)
     seen = []
     def respond(request):
         body = json.loads(request.content)
         seen.append(body)
         name = body['response_format']['json_schema']['name']
-        payload = candidate() if name == 'story_memory_extract' else {'issues': [], 'summary': '已核对'}
+        payload = (candidate(source='opening_chapter.text' if opening else 'project.setting')
+                   if name == 'story_memory_extract' else {'issues': [], 'summary': '已核对'})
         return completion_stream_response({'id': 'story', 'created': 1, 'model': 'strict',
             'object': 'chat.completion', 'choices': [{'index': 0, 'message': {
                 'role': 'assistant', 'content': json.dumps(payload, ensure_ascii=False)}, 'finish_reason': 'stop'}],
@@ -85,6 +90,9 @@ async def test_http_task_uses_real_model_boundary_for_extraction_and_review(monk
         assert [call['response_format']['json_schema']['name'] for call in seen] == ['story_memory_extract', 'story_memory_review']
         assert not await StoryFact.all().exists()
         assert '古代王朝' in json.dumps(seen, ensure_ascii=False)
+        if opening:
+            assert row.source_snapshot['opening_chapter']['text'] == text
+            assert row.candidate['facts'][0]['evidence'][0]['source'] == 'opening_chapter.text'
         result = await client.post(url + f'/commits/{row.id}/decision', json={
             'expected_package_hash': row.package_hash, 'decision': 'accept'})
         assert result.json()['data']['snapshot']['fact_ids']

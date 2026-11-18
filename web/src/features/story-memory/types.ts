@@ -37,6 +37,7 @@ export interface MemoryCommit {
   decided_at: string | null
 }
 export interface MemoryDetail extends MemoryCommit {
+  source_snapshot?: { opening_chapter?: { number: number; name: string } }
   candidate: MemoryCandidate | Record<string, never>
   review: { issues?: { severity: 'blocking' | 'warning'; fact_index: number | null; reason: string }[]; summary?: string }
   recheck_task_id: string | null

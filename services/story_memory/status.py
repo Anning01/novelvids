@@ -5,7 +5,7 @@ from models.chapter import Chapter
 from models.novel import Novel
 from models.story_memory import StoryCommit, StorySnapshot
 from services.creation_agent.plan_sources import fingerprint
-from services.story_memory.sources import snapshot_data
+from services.story_memory.sources import needs_opening_source, opening_source, snapshot_data
 
 
 async def memory_status(novel_id):
@@ -13,6 +13,7 @@ async def memory_status(novel_id):
     if project is None:
         raise HTTPException(404, '作品不存在')
     chapters = await Chapter.filter(novel_id=novel_id).order_by('number', 'id')
+    opening = next((item for chapter in chapters if (item := opening_source(chapter))), None) if needs_opening_source(project) else None
     # Load each table once; status must not rescan every prefix for every chapter.
     latest = {}
     for commit in await StoryCommit.filter(novel_id=novel_id, status='accepted').order_by('-id').only(
@@ -30,7 +31,9 @@ async def memory_status(novel_id):
         reason = None
         if commit is None:
             reason = '尚未建立正式记忆'
-        elif fingerprint(snapshot_data(project, chapter)) != commit.source_hash:
+        elif chapter is None and snapshot is not None and not snapshot.get('fact_ids'):
+            reason = '全局故事底稿没有可确认事实，请重新分析'
+        elif fingerprint(snapshot_data(project, chapter, opening=opening if chapter is None else None)) != commit.source_hash:
             reason = '剧本或项目设定已变化'
         elif invalidation:
             reason = '来源或前情变化后尚未重新确认'

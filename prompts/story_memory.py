@@ -8,7 +8,9 @@ EXTRACT = '''分析源文本，提取故事记忆候选，供独立审核和用�
 subjects 仅声明本次 facts.subject_ref 或 scope.world_ref 实际引用的对象；原文提到但本次没有事实支撑的对象不列入目录。
 每项事实提供 source、start、end、quote；位置按源字符串 Unicode 字符从零计数，end 不包含。
 quote 必须逐字照录并包含足够上下文以唯一定位；程序会用本次源快照核对并定位唯一引文，重复引文须给出准确位置。
-只引用 source_snapshot 内的 project.setting、project.outline、project.description 或 chapter.text。
+只引用 source_snapshot 内的 project.setting、project.outline、project.description、chapter.text 或 opening_chapter.text。
+没有项目设定和大纲时，全局底稿使用 opening_chapter.text 的开篇样本。只提取样本明确支持、可作为起点的世界背景、规则和身份，不把开篇剧情写成整部大纲或全书通用设定。
+项目名称和导入文件名不是故事事实。没有可确认事实时，说明缺什么材料，不从标题推演故事。
 前章事实供衔接和查重，不伪造为本章证据；没有变化的前章事实不重复新增。
 重新分析时，对照 previous_commit 的旧稿和候选，提取当前版本的完整本章变化包。
 本章旧提交会整体被新提交替代，不遗漏仍成立的本章事实；不能引用旧本章事实作为 replaces_id。

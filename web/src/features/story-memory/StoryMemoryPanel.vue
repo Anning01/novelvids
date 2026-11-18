@@ -13,7 +13,7 @@ import { storyMemoryApi } from './api'
 import type { FactNature, MemoryCandidate, MemoryCommit, MemoryContext, MemoryDetail, MemoryScope, MemoryStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId?: number; canEdit: boolean; disabled?: boolean;
-  refreshKey?: number; modelsLoading?: boolean; models: { value: string; label: string }[] }>()
+  reviewTarget?: HTMLElement | null; refreshKey?: number; modelsLoading?: boolean; models: { value: string; label: string }[] }>()
 const emit = defineEmits<{ showRun: [run?: { taskId: string; conversationId: number }] }>()
 const modelId = defineModel<string>('modelId', { default: '' })
 const skillId = defineModel<number>('skillId')
@@ -43,6 +43,9 @@ const selected = computed(() => rows.value.find(row => row.chapter_id === chapte
 const running = computed(() => job.value && [1, 2, 6].includes(job.value.status) && job.value.stage !== 'needs_review')
 const locked = computed(() => busy.value || Boolean(running.value) || props.disabled)
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
+const hasCandidate = computed(() => candidate.value !== null && detail.value?.status !== 'accepted')
+const emptyBaseline = computed(() => detail.value?.chapter_id === null && candidate.value?.facts.length === 0)
+const focusReview = ref(false)
 const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
 const stateLabel = computed(() => selected.value?.state === 'current' ? tr('已确认') : selected.value?.state === 'stale' ? tr('需要复核') : tr('尚未建立'))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
@@ -150,6 +153,15 @@ function openProgress() {
   showRun()
   if (running.value && job.value) void track(job.value.id)
 }
+function openReview() {
+  focusReview.value = true
+  emit('showRun')
+}
+watch([focusReview, () => props.reviewTarget, hasCandidate], ([focus, target, available]) => {
+  if (!focus || !target || !available) return
+  target.querySelector<HTMLElement>(`[id="${id}-candidate"]`)?.focus()
+  focusReview.value = false
+}, { flush: 'post' })
 async function action(work: () => Promise<unknown>) {
   if (locked.value || !props.canEdit) return
   const current = epoch
@@ -260,6 +272,7 @@ watch(() => props.projectId, async () => {
   requests = new AbortController()
   clearTimeout(timer)
   requestedRun = undefined
+  focusReview.value = false
   job.value = null
   busy.value = false
   draft.value = null
@@ -284,7 +297,8 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
       <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr('已确认的世界观、人物和前情，将用于资产、分镜与创作助手。') }}</p></div>
       <div class="memory-actions">
         <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
-        <AppButton v-if="canEdit && (running || job?.stage === 'needs_review' || job?.status === 4)" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
+        <AppButton v-if="hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
+        <AppButton v-if="canEdit && (running || (!hasCandidate && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
         <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
       </div>
     </header>
@@ -310,8 +324,13 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
         <AppButton v-if="(context.facts?.length || 0) > shownFacts" size="sm" @click="shownFacts += 20">{{ tr('显示更多事实') }}</AppButton>
         </details>
       </div>
-      <div v-if="detail && candidate && detail.status !== 'accepted'" class="memory-candidate">
+    </template>
+  </section>
+  <Teleport v-if="reviewTarget && hasCandidate && detail && candidate" :to="reviewTarget">
+      <section :id="`${id}-candidate-panel`" class="memory-candidate" :aria-labelledby="`${id}-candidate`">
         <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('候选与审核') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
+        <p class="memory-hint">{{ scopeOptions.find(option => option.value === (detail?.chapter_id ? String(detail.chapter_id) : 'baseline'))?.label }}</p>
+        <p v-if="detail.source_snapshot?.opening_chapter" class="memory-hint">{{ tr('开篇依据：第 {p0} 集 · {p1}', { p0: detail.source_snapshot.opening_chapter.number, p1: detail.source_snapshot.opening_chapter.name }) }}</p>
         <p v-if="!detail.current" class="memory-hint">{{ detail.stale_reason }}</p>
         <p v-if="detail.review.summary" class="memory-prose">{{ detail.review.summary }}</p>
         <ul v-if="detail.review.issues?.length" class="review-issues"><li v-for="(issue, index) in detail.review.issues" :key="index"><strong>{{ tr(issue.severity === 'blocking' ? '需处理' : '请留意') }}</strong> · {{ issue.reason }}</li></ul>
@@ -342,11 +361,14 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
           <p class="memory-prose">{{ candidate.summary }}</p><p v-if="candidate.ending_state" class="memory-hint">{{ tr('章末状态') }}：{{ candidate.ending_state }}</p>
           <ul class="memory-facts" role="list"><li v-for="(fact, index) in candidate.facts" :key="index"><div class="fact-heading"><strong>{{ candidate.subjects.find(subject => subject.ref === fact.subject_ref)?.name }}</strong><span>{{ tr(labels[fact.category] || fact.category) }} · {{ tr(natures[fact.nature]) }}</span></div><p>{{ fact.content }}</p><p v-if="scopeText(fact.scope)" class="memory-hint">{{ scopeText(fact.scope) }}</p><p v-if="fact.replaces_id" class="memory-hint">{{ tr(fact.operation === 'retract' ? '将撤回' : '将替代') }}：{{ detail.replaced_facts?.[fact.replaces_id] || tr('原有同类事实') }}</p><details><summary>{{ tr('原文依据') }}</summary><blockquote v-for="(evidence, item) in fact.evidence" :key="item">{{ evidence.quote }}</blockquote></details></li></ul>
           <p v-if="candidate.unresolved.length" class="memory-hint">{{ tr('尚未明确') }}：{{ candidate.unresolved.join('；') }}</p>
-          <template v-if="editable"><div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div><div class="memory-actions"><AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton><AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton><AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'" @click="decide('accept')">{{ tr('确认并入库') }}</AppButton></div></template>
+          <template v-if="emptyBaseline">
+            <p v-if="detail.status === 'ready'" class="memory-hint">{{ tr('全局故事底稿没有可确认事实，请补充故事材料后重新分析') }}</p>
+            <AppButton v-if="editable" size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
+          </template>
+          <template v-else-if="editable"><div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div><div class="memory-actions"><AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton><AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton><AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'" @click="decide('accept')">{{ tr('确认并入库') }}</AppButton></div></template>
         </template>
-      </div>
-    </template>
-  </section>
+      </section>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -369,7 +391,9 @@ textarea::placeholder { color: var(--app-text-muted); }
 textarea:disabled, input:disabled { opacity: .55; cursor: not-allowed; }
 .memory-scope-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
 .memory-hint { margin-block: 10px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
-.memory-current, .memory-candidate { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
+.memory-current { margin-block-start: 22px; padding-block-start: 20px; border-block-start: 1px solid var(--app-border); }
+.memory-candidate { min-inline-size: 0; color: var(--app-text); }
+.memory-candidate .memory-field :deep(.app-select) { min-inline-size: 0; }
 h3 { margin: 0 0 10px; font-size: 15px; }
 h4 { margin-block: 0 16px; font-size: 14px; }
 .memory-section-heading h3 { margin: 0; }
@@ -389,5 +413,5 @@ fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-bloc
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }
 @media (max-width: 680px) { .story-memory { padding: 18px 14px; } .memory-controls > .memory-field { flex-basis: 100%; } .memory-controls > .memory-actions { margin-inline-start: 0; } .memory-controls > .memory-actions :deep(button) { white-space: normal; } }
-@media (pointer: coarse) { textarea, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } .story-memory :deep(.app-button) { min-height: 48px; } }
+@media (pointer: coarse) { textarea, input { font-size: 16px; min-height: 48px; } summary { min-height: 48px; padding-block: 12px; } :is(.story-memory, .memory-candidate) :deep(.app-button) { min-height: 48px; } }
 </style>

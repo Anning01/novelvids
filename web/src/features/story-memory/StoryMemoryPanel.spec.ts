@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import StoryMemoryPanel from './StoryMemoryPanel.vue'
 import AppSelect from '@/components/AppSelect.vue'
@@ -25,8 +25,10 @@ const state: MemoryStatus = { baseline: { chapter_id: null, number: null, commit
 const task = (status: number, stage?: string): AiTask => ({ id: 'job', task_type: 5, status,
   request_params: {}, response_data: undefined, error_message: undefined, stage, progress: 0,
   created_at: '2026-11-17T10:00:00Z', updated_at: '2026-11-17T10:00:00Z' })
-function render(canEdit = true) {
-  return mount(StoryMemoryPanel, { props: { projectId: 9, chapterId: 1, canEdit, models: [{ value: '5', label: '分析模型' }], modelId: '5' },
+let reviewHost: HTMLElement
+let review: DOMWrapper<HTMLElement>
+function render(canEdit = true, showAssistant = true) {
+  return mount(StoryMemoryPanel, { props: { projectId: 9, chapterId: 1, canEdit, reviewTarget: showAssistant ? reviewHost : null, models: [{ value: '5', label: '分析模型' }], modelId: '5' },
     global: { stubs: { TaskSkillPicker: true } } })
 }
 
@@ -42,6 +44,9 @@ async function choose(wrapper: ReturnType<typeof render>, label: string, optionL
 
 beforeEach(() => {
   vi.resetAllMocks()
+  reviewHost = document.createElement('aside')
+  document.body.append(reviewHost)
+  review = new DOMWrapper(reviewHost)
   vi.mocked(storyMemoryApi.status).mockResolvedValue(response(structuredClone(state)))
   vi.mocked(storyMemoryApi.history).mockResolvedValue(response([structuredClone(ready)]))
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(structuredClone(ready)))
@@ -54,18 +59,36 @@ beforeEach(() => {
   vi.mocked(storyMemoryApi.review).mockResolvedValue(response(task(3)))
   vi.mocked(api.task).mockResolvedValue(response(task(3)))
 })
-afterEach(() => vi.useRealTimers())
+afterEach(() => { reviewHost.remove(); vi.useRealTimers() })
 
 it('separates confirmed memory from reviewable candidates and preserves source evidence', async () => {
   const wrapper = render()
   await flushPromises()
   expect(wrapper.get('h2').text()).toContain('故事记忆')
   expect(wrapper.text()).toContain('当前有效记忆')
-  expect(wrapper.text()).toContain('候选与审核')
-  expect(wrapper.get('blockquote').text()).toBe('古代王朝，没有电力。')
-  expect(wrapper.find('details summary').text()).toBe('原文依据')
-  expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
+  expect(wrapper.text()).not.toContain('候选与审核')
+  expect(review.text()).toContain('候选与审核')
+  expect(review.get('blockquote').text()).toBe('古代王朝，没有电力。')
+  expect(review.find('details summary').text()).toBe('原文依据')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
   expect(storyMemoryApi.detail).toHaveBeenCalledWith(9, 10, expect.any(AbortSignal))
+})
+
+it('opens candidate review in the assistant and preserves a draft across close and reopen', async () => {
+  const wrapper = render(true, false)
+  await flushPromises()
+  expect(review.find('section').exists()).toBe(false)
+  await wrapper.findAll('button').find(button => button.text() === '在创作助手查看候选')!.trigger('click')
+  expect(wrapper.emitted('showRun')).toEqual([[]])
+  await wrapper.setProps({ reviewTarget: reviewHost })
+  expect(document.activeElement).toBe(review.get('h3').element)
+  await review.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
+  await review.get('textarea[name="summary"]').setValue('未保存的修改')
+  await wrapper.setProps({ reviewTarget: null })
+  expect(review.find('section').exists()).toBe(false)
+  await wrapper.setProps({ reviewTarget: reviewHost })
+  expect(review.get<HTMLTextAreaElement>('textarea[name="summary"]').element.value).toBe('未保存的修改')
+  expect(wrapper.find('.memory-candidate').exists()).toBe(false)
 })
 
 it('switches to global memory through the shared scope picker', async () => {
@@ -83,15 +106,15 @@ it.each([['world', '未指定世界', null], [null, '故城世界', 'world']] as
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(detail))
   const wrapper = render()
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
+  await review.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
   expect(wrapper.find('select').exists()).toBe(false)
   expect(wrapper.get('button[aria-label="查看范围"]').attributes('disabled')).toBeDefined()
   await choose(wrapper, '所属世界', label)
   await wrapper.setProps({ disabled: true })
-  expect(wrapper.get('button[aria-label="所属世界"]').attributes('disabled')).toBeDefined()
-  expect(wrapper.get('button[aria-label="记忆性质"]').attributes('disabled')).toBeDefined()
+  expect(review.get('button[aria-label="所属世界"]').attributes('disabled')).toBeDefined()
+  expect(review.get('button[aria-label="记忆性质"]').attributes('disabled')).toBeDefined()
   await wrapper.setProps({ disabled: false })
-  await wrapper.get('form').trigger('submit')
+  await review.get('form').trigger('submit')
   await flushPromises()
   expect(storyMemoryApi.update).toHaveBeenCalledWith(9, 10, expect.objectContaining({
     facts: [expect.objectContaining({ scope: expect.objectContaining({ world_ref: expected }) })],
@@ -99,10 +122,10 @@ it.each([['world', '未指定世界', null], [null, '故城世界', 'world']] as
 })
 
 it('uses the reviewed package hash and records the human decision note', async () => {
-  const wrapper = render()
+  render()
   await flushPromises()
-  await wrapper.get('textarea[name="decision_note"]').setValue('已核对剧本，确认古代背景。')
-  await wrapper.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
+  await review.get('textarea[name="decision_note"]').setValue('已核对剧本，确认古代背景。')
+  await review.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await flushPromises()
   expect(storyMemoryApi.decide).toHaveBeenCalledWith(9, 10, 'a'.repeat(64), 'accept', '已核对剧本，确认古代背景。')
   expect(notice.success).toHaveBeenCalledWith('记忆已正式提交')
@@ -111,20 +134,20 @@ it('uses the reviewed package hash and records the human decision note', async (
 it('edits a candidate without altering the evidence and invalidates its prior review', async () => {
   const wrapper = render()
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
-  await wrapper.get('textarea[name="fact_0"]').setValue('古代城镇，以油灯照明。')
+  await review.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
+  await review.get('textarea[name="fact_0"]').setValue('古代城镇，以油灯照明。')
   await choose(wrapper, '记忆性质', '人物证言')
-  await wrapper.get('input[name="scene_0"]').setValue('灾变前的回忆')
-  await wrapper.get('input[name="from_0"]').setValue('2')
-  await wrapper.get('input[name="until_0"]').setValue('3')
-  await wrapper.get('form').trigger('submit')
+  await review.get('input[name="scene_0"]').setValue('灾变前的回忆')
+  await review.get('input[name="from_0"]').setValue('2')
+  await review.get('input[name="until_0"]').setValue('3')
+  await review.get('form').trigger('submit')
   await flushPromises()
   expect(storyMemoryApi.update).toHaveBeenCalledWith(9, 10, expect.objectContaining({ facts: [expect.objectContaining({
     content: '古代城镇，以油灯照明。', nature: 'testimony', evidence: candidate.facts[0]!.evidence,
     scope: expect.objectContaining({ scene: '灾变前的回忆', from_chapter: 2, until_chapter: 3 }),
   })] }), 1)
   expect(notice.success).toHaveBeenCalledWith('候选已保存，请重新审核后再确认')
-  expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
 })
 
 it('prevents approving blocking reviews or stale editions', async () => {
@@ -132,31 +155,31 @@ it('prevents approving blocking reviews or stale editions', async () => {
     review: { summary: '发现问题', issues: [{ severity: 'blocking', fact_index: 0, reason: '年代与正文冲突' }] } }))
   const wrapper = render()
   await flushPromises()
-  expect(wrapper.text()).toContain('年代与正文冲突')
-  expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
+  expect(review.text()).toContain('年代与正文冲突')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'stale', current: false, stale_reason: '剧本已变化' }))
   await wrapper.setProps({ projectId: 10 })
   await flushPromises()
-  expect(wrapper.text()).toContain('剧本已变化')
-  expect(wrapper.findAll('button').some(button => button.text() === '确认并入库')).toBe(false)
+  expect(review.text()).toContain('剧本已变化')
+  expect(review.findAll('button').some(button => button.text() === '确认并入库')).toBe(false)
   expect(storyMemoryApi.decide).not.toHaveBeenCalled()
 })
 
 it('preserves a candidate when the server rejects an outdated confirmation', async () => {
   vi.mocked(storyMemoryApi.decide).mockRejectedValue(new Error('候选版本已变化，请重新核对'))
-  const wrapper = render()
+  render()
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
+  await review.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await flushPromises()
   expect(notice.error).toHaveBeenCalledWith('候选版本已变化，请重新核对')
-  expect(wrapper.get('blockquote').text()).toBe(candidate.facts[0]!.evidence[0]!.quote)
+  expect(review.get('blockquote').text()).toBe(candidate.facts[0]!.evidence[0]!.quote)
 })
 
 it('keeps review and mutation controls out of a viewer session', async () => {
   const wrapper = render(false)
   await flushPromises()
-  expect(wrapper.text()).toContain('古代王朝，没有电力。')
-  for (const label of ['确认并入库', '修改候选', '退回候选', '顺序复核全部']) expect(wrapper.findAll('button').some(button => button.text() === label)).toBe(false)
+  expect(review.text()).toContain('古代王朝，没有电力。')
+  for (const label of ['确认并入库', '修改候选', '退回候选', '顺序复核全部']) expect(wrapper.findAll('button').concat(review.findAll('button')).some(button => button.text() === label)).toBe(false)
 })
 
 it('starts sequential review explicitly and does not start work on load', async () => {
@@ -166,7 +189,8 @@ it('starts sequential review explicitly and does not start work on load', async 
   await wrapper.findAll('button').find(button => button.text() === '顺序复核全部')!.trigger('click')
   await flushPromises()
   expect(storyMemoryApi.recheck).toHaveBeenCalledWith(9, 5, undefined)
-  expect(wrapper.text()).toContain('候选与审核')
+  expect(wrapper.text()).not.toContain('候选与审核')
+  expect(review.text()).toContain('候选与审核')
 })
 
 it('omits history and failed run details from the main page while keeping the assistant link', async () => {
@@ -206,7 +230,8 @@ it('announces request failures and provides a read retry', async () => {
   expect(notice.error).toHaveBeenCalledWith('连接中断')
   await wrapper.findAll('button').find(button => button.text() === '刷新记忆')!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('候选与审核')
+  expect(wrapper.text()).not.toContain('候选与审核')
+  expect(review.text()).toContain('候选与审核')
 })
 
 it('stops polling on unmount', async () => {
@@ -224,10 +249,10 @@ it('stops polling on unmount', async () => {
 it('retains an unsaved candidate when a script update arrives', async () => {
   const wrapper = render()
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
-  await wrapper.get('textarea[name="summary"]').setValue('仍在编辑的世界观说明')
+  await review.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
+  await review.get('textarea[name="summary"]').setValue('仍在编辑的世界观说明')
   await wrapper.setProps({ refreshKey: 2 })
-  expect((wrapper.get('textarea[name="summary"]').element as HTMLTextAreaElement).value).toBe('仍在编辑的世界观说明')
+  expect((review.get('textarea[name="summary"]').element as HTMLTextAreaElement).value).toBe('仍在编辑的世界观说明')
   expect(notice.error).toHaveBeenCalledWith(expect.stringContaining('当前候选草稿仍保留'))
   expect(storyMemoryApi.update).not.toHaveBeenCalled()
 })
@@ -246,8 +271,8 @@ it('ignores a late chapter response after switching scopes', async () => {
   await flushPromises()
   resolve(response(ready))
   await flushPromises()
-  expect(wrapper.get('.memory-candidate').text()).toContain('第二章的独立世界')
-  expect(wrapper.get('.memory-candidate').text()).not.toContain('古城居民寻找水源。')
+  expect(review.get('.memory-candidate').text()).toContain('第二章的独立世界')
+  expect(review.get('.memory-candidate').text()).not.toContain('古城居民寻找水源。')
 })
 
 it('does not carry a late confirmation into another project', async () => {
@@ -255,21 +280,33 @@ it('does not carry a late confirmation into another project', async () => {
   vi.mocked(storyMemoryApi.decide).mockReturnValue(new Promise(done => { resolve = done }))
   const wrapper = render()
   await flushPromises()
-  await wrapper.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
+  await review.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await wrapper.setProps({ projectId: 20 })
   await flushPromises()
   resolve(response({ ...ready, status: 'accepted' }))
   await flushPromises()
   expect(notice.success).not.toHaveBeenCalled()
-  expect(wrapper.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
 })
 
 it('renders source markup as text rather than executable HTML', async () => {
   const unsafe = structuredClone(ready)
   ;(unsafe.candidate as MemoryCandidate).facts[0]!.evidence[0]!.quote = '<script>window.bad = true</script>'
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(unsafe))
+  render()
+  await flushPromises()
+  expect(review.get('blockquote').text()).toBe('<script>window.bad = true</script>')
+  expect(review.find('script').exists()).toBe(false)
+})
+
+it('offers no confirmation for an empty global candidate', async () => {
+  const empty = { ...ready, chapter_id: null, candidate: { ...candidate, facts: [], subjects: [] } }
+  vi.mocked(storyMemoryApi.history).mockResolvedValue(response([empty]))
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(empty))
   const wrapper = render()
   await flushPromises()
-  expect(wrapper.get('blockquote').text()).toBe('<script>window.bad = true</script>')
-  expect(wrapper.find('script').exists()).toBe(false)
+  await choose(wrapper, '查看范围', '全局故事底稿')
+  expect(review.text()).toContain('全局故事底稿没有可确认事实')
+  expect(review.text()).not.toContain('确认并入库')
+  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
 })

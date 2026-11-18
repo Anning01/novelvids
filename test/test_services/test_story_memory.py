@@ -61,6 +61,51 @@ async def accept(project, row, actor=17):
 
 
 @pytest.mark.asyncio
+async def test_global_memory_uses_bounded_opening_when_only_import_metadata_exists():
+    from services.story_memory.status import memory_status
+
+    book = await Novel.create(name='导入作品', description='导入文件.txt')
+    await Chapter.create(novel=book, number=1, name='空白卷首', content='\n')
+    quote = '开篇的古城没有电力。'
+    opening = await Chapter.create(novel=book, number=2, name='开篇', content=quote + '文' * 6100, screenplay='   ')
+    later = await Chapter.create(novel=book, number=3, name='后文', content='后来建立了电网。')
+    source = await source_snapshot(book.id)
+    assert source['chapter'] is None
+    assert source['opening_chapter']['id'] == opening.id
+    assert source['opening_chapter']['kind'] == 'source'
+    assert len(source['opening_chapter']['text']) == 6000
+    assert '后来建立了电网' not in str(source)
+    payload = candidate(quote, source='opening_chapter.text')
+    baseline = await accept(book, await reviewed(book, payload=payload))
+    assert (await memory_status(book.id))['baseline']['state'] == 'current'
+    later.content = '后文经过修改。'
+    await later.save(update_fields=['content'])
+    assert (await memory_status(book.id))['baseline']['state'] == 'current'
+    opening.screenplay = '开篇剧本设在没有电力的古城。'
+    await opening.save(update_fields=['screenplay'])
+    assert (await source_snapshot(book.id))['opening_chapter']['kind'] == 'screenplay'
+    assert (await memory_status(book.id))['baseline']['state'] == 'stale'
+    opening.screenplay = '   '
+    await opening.save(update_fields=['screenplay'])
+    assert (await memory_status(book.id))['baseline']['state'] == 'stale'
+    assert await StoryFact.filter(commit_id=baseline.id).exists()
+
+
+@pytest.mark.asyncio
+async def test_empty_global_review_cannot_publish_even_with_a_previous_ready_status(project):
+    payload = {'subjects': [], 'facts': [], 'summary': '没有可确认的故事事实。', 'ending_state': '', 'unresolved': []}
+    row = await reviewed(project, payload=payload)
+    assert row.status == 'needs_review' and row.review['issues'][0]['severity'] == 'blocking'
+    with pytest.raises(HTTPException, match='没有可确认事实'):
+        await accept(project, row)
+    await StoryCommit.filter(id=row.id).update(status='ready')
+    await row.refresh_from_db()
+    with pytest.raises(HTTPException, match='没有可确认事实'):
+        await accept(project, row)
+    assert not await StorySnapshot.all().exists()
+
+
+@pytest.mark.asyncio
 async def test_candidate_review_confirmation_and_history_preserve_existing_data(project):
     chapter = await Chapter.create(novel=project, number=1, name='邻居', content='原文', screenplay='邻居守着木门。')
     asset = await Asset.create(novel=project, canonical_name='已有邻居', asset_type=1, base_traits='用户已保存的设计')

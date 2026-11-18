@@ -786,6 +786,7 @@ onBeforeUnmount(() => {
       :chapters="chapters"
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
+      <template #default="{ reviewTarget }">
       <section class="agent-content">
       <div class="analysis-hero">
         <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="144" :max-height="96" />
@@ -936,7 +937,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
-        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey"
+        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey" :review-target="reviewTarget"
         v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" @show-run="assistantWorkspace.showProductionRun(projectId, $event)" />
 
       <section class="analysis-section episode-section">
@@ -1010,6 +1011,7 @@ onBeforeUnmount(() => {
       </template>
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />
+    </template>
   </ShortDramaWorkspaceShell>
   </main>
 </template>

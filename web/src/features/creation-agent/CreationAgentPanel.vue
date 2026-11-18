@@ -5,7 +5,7 @@ import { tr } from '@/i18n'
 import AppSelect from '@/components/AppSelect.vue'
 
 import AgentUsageDetails from './AgentUsageDetails.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { BubbleList } from 'vue-element-plus-x'
 import type { BubbleListInstance } from 'vue-element-plus-x/types/BubbleList'
@@ -29,7 +29,9 @@ import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './
 import type { AgentChange, AgentChangeItem, AgentMessage, AgentQueryItem, AgentTarget, ProductionReceipt, PromptTargetStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId: number; selectedTargets?: AgentTarget[]; workflow?: boolean; chapterLabel?: string; suspended?: boolean; phase?: 'script' | 'settings' | 'storyboard' | 'video'; initialConversationId?: number; initialUserText?: string; videoDefaults?: VideoGenerationOptions & { model_config_id: number } }>()
-const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]] }>()
+const emit = defineEmits<{ close: []; changed: [changes: AgentChange[]]; reviewTarget: [target: HTMLElement | null] }>()
+const reviewTarget = useTemplateRef<HTMLElement>('reviewTarget')
+watch(reviewTarget, target => emit('reviewTarget', target), { flush: 'post' })
 const store = useCreationAgentStore()
 const router = useRouter()
 const workspace = useCreationAgentWorkspace()
@@ -314,6 +316,7 @@ function refreshVisibleState() {
   void store.refreshConversations().catch(error => notice.error(error instanceof Error ? error.message : tr('加载助手失败')))
 }
 onBeforeUnmount(() => {
+  emit('reviewTarget', null)
   catalogEpoch += 1; statusEpoch += 1
   window.removeEventListener('focus', refreshVisibleState)
   clearInterval(productionTimer)
@@ -400,6 +403,7 @@ onMounted(() => {
       </template>
       <template #backToBottom="{ unreadCount, scrollToBottom }"><AppButton size="xs" variant="secondary" @click="scrollToBottom()">{{ unreadCount ? tr('{p0} 条新消息', { p0: unreadCount }) : tr('回到最新') }}</AppButton></template>
     </BubbleList>
+    <div v-if="phase === 'script'" ref="reviewTarget" class="creation-agent-panel__review"></div>
     <footer v-if="ready && !store.loading">
       <AgentDisclosure v-if="(!store.busy && (store.currentRun?.usage.turn_limited || store.currentRun?.status === 4 || store.currentRun?.status === 5)) || store.error || pendingCount || statusError" v-model:open="statusOpen" class="creation-agent-panel__run-details" :title="statusLabel">
         <template #title><AgentActivity :text="statusLabel" :active="false" /></template>
@@ -453,6 +457,8 @@ onMounted(() => {
 .creation-agent-panel__welcome p { color: var(--app-text-secondary); line-height: 1.8; margin: 0; }
 .creation-agent-panel__welcome span { font-size: 12px; color: var(--app-text-secondary); }
 .creation-agent-panel__messages { flex: 1; min-width: 0; min-height: 0; padding: 8px 12px; overflow-y: auto; overflow-x: hidden; }
+.creation-agent-panel__review { flex: 0 0 auto; max-block-size: 55%; overflow: auto; padding: 12px; border-block-start: 1px solid var(--app-border); }
+.creation-agent-panel__review:empty { display: none; }
 .creation-agent-panel__production { list-style: none; margin: 6px 0; padding: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.7; }
 .creation-agent-panel__production li + li { margin-top: 3px; }
 .creation-agent-panel__story-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 6px; color: var(--app-text-secondary); font-size: 12px; }

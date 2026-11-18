@@ -11,7 +11,7 @@ class StoryModel(BaseModel):
 
 class StoryEvidence(StoryModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
-    source: Literal['project.setting', 'project.outline', 'project.description', 'chapter.text']
+    source: Literal['project.setting', 'project.outline', 'project.description', 'chapter.text', 'opening_chapter.text']
     start: int = Field(ge=0)
     end: int = Field(gt=0)
     quote: str = Field(min_length=1)

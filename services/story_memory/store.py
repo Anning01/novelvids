@@ -8,6 +8,8 @@ from services.creation_agent.plan_sources import fingerprint
 from services.creation_objects import project_write
 from services.story_memory.sources import conflict, parent_state, verify_inputs
 
+EMPTY_BASELINE = '全局故事底稿没有可确认事实，请补充故事材料后重新分析'
+
 
 def package_hash(commit):
     return fingerprint([commit.id, commit.revision, commit.source_hash, commit.parent_id,
@@ -78,9 +80,11 @@ async def save_review(novel_id, commit_id, revision, candidate_hash, review, *, 
         if any(issue.fact_index is not None and issue.fact_index >= len(commit.candidate['facts']) for issue in parsed.issues):
             raise HTTPException(422, '审核引用了不存在的候选事实')
         commit.review = parsed.model_dump(mode='json')
+        if commit.chapter_id is None and not commit.candidate['facts'] and not any(issue.severity == 'blocking' for issue in parsed.issues):
+            commit.review['issues'].append({'severity': 'blocking', 'fact_index': None, 'reason': EMPTY_BASELINE})
         if task_id:
             commit.review['task_id'] = str(task_id)
-        commit.status = 'needs_review' if any(issue.severity == 'blocking' for issue in parsed.issues) else 'ready'
+        commit.status = 'needs_review' if any(issue['severity'] == 'blocking' for issue in commit.review['issues']) else 'ready'
         commit.package_hash = package_hash(commit)
         await commit.save(update_fields=['review', 'status', 'package_hash', 'updated_at'])
         return commit
@@ -97,6 +101,8 @@ async def decide(novel_id, commit_id, body, actor_id):
                 conflict('此提交已经结束，不能更改裁决')
             return commit
         if body.decision == 'accept':
+            if commit.chapter_id is None and commit.candidate and not commit.candidate.get('facts'):
+                conflict(EMPTY_BASELINE)
             if commit.status == 'stale':
                 await verify_inputs(commit)
             if commit.status != 'ready' or not commit.review:

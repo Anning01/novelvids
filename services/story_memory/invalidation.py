@@ -34,5 +34,20 @@ async def chapter_changed(before, after):
     if before is not None and chapter_source(before) == chapter_source(after):
         return
     start = min(before.number, after.number) if before else after.number
+    from models.novel import Novel
+    from services.story_memory.sources import first_opening_chapter, needs_opening_source, opening_source
+    if await StoryCommit.filter(novel_id=after.novel_id, chapter_id=None).exists():
+        project = await Novel.get(id=after.novel_id)
+        if needs_opening_source(project):
+            other = await first_opening_chapter(after.novel_id, exclude_id=after.id)
+
+            def sample(chapter):
+                source = opening_source(chapter)
+                if source and (other is None or (chapter.number, chapter.id) < (other.number, other.id)):
+                    return source
+                return opening_source(other)
+
+            if sample(before) != sample(after):
+                start = None
     await invalidate(after.novel_id, chapter_id=after.id, from_number=start,
         reason='chapter_changed' if before else 'chapter_inserted')
