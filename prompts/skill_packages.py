@@ -65,9 +65,14 @@ def builtin_package(task: str) -> SkillPackage:
     from utils.skill_package import entry_metadata
     metadata, _ = entry_metadata(next(file['content'] for file in files if file['path'] == 'references/source-skill.md'))
     # The application entry preserves its single-task method; generic Codex guidance stays available as files.
-    method_path = 'references/runtime-method.md'
-    files.append(package_file(method_path, read_skill(f'strict_{task}').encode('utf-8')))
+    body = read_skill(f'strict_{task}')
+    if task == 'storyboard':
+        body = read_skill('storyboard_continuity').rstrip() + '\n\n' + body
+    else:
+        method_path = 'references/runtime-method.md'
+        files.append(package_file(method_path, body.encode('utf-8')))
+        body = f'完成当前创作任务，遵循 [创作方法]({method_path})。\n'
     header = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
-    entry = f'---\n{header}---\n\n完成当前创作任务，遵循 [创作方法]({method_path})。\n'
+    entry = f'---\n{header}---\n\n{body}'
     files.append(package_file('SKILL.md', entry.encode('utf-8')))
     return SkillPackage(files)

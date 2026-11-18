@@ -400,6 +400,9 @@ async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(st
     assert '同一场号' in method and '一次视频生成' in method
     assert '10 秒' in method and '14 秒' in method and '声音' in method
     assert '共用的表演时间轴' in method and '共用秒数' in method
+    entry = body['creative_method']['instructions']
+    assert '相邻两段的 duration 之和' in entry and '并入同一个 shot' in entry
+    assert not body['creative_method']['references']
     fields = requests[0]['response_format']['json_schema']['schema']['properties']['shots']['items']['properties']
     assert '观看重点' in fields['segments']['description']
     assert '剪辑点' in fields['transition']['description']

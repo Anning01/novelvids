@@ -106,10 +106,18 @@ def test_builtin_folders_are_portable_and_include_their_linked_resources(task):
         assert 'agents/openai.yaml' in package.by_path
         from prompts.skill_pack import read_skill
         method = package.as_method()
-        resource = 'screenplay' if task == 'screenplay' else f'strict_{task}'
-        assert len(method['references']) == 1
-        assert method['references'][0]['content'] == read_skill(resource)
         assert 'references/source-skill.md' in package.by_path
+        if task == 'storyboard':
+            entry = package.by_path['SKILL.md']['content']
+            continuity = read_skill('storyboard_continuity').strip()
+            assert continuity in entry and entry.endswith(read_skill('strict_storyboard'))
+            assert 'continuity.md' in read_skill('novelvids-storyboard')
+            assert package.by_path['references/continuity.md']['content'].strip() == continuity
+            assert method['instructions'] == entry
+            assert not method['references']
+        else:
+            assert len(method['references']) == 1
+            assert method['references'][0]['content'] == read_skill(f'strict_{task}')
 
 
 @pytest.mark.asyncio
