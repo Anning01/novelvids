@@ -84,6 +84,39 @@ it('shows automatic memory status with no manual confirmation or model controls'
   expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
 })
 
+it('discovers the screenplay-save update and shows when memory is ready without a manual refresh', async () => {
+  vi.useFakeTimers()
+  const visibility = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+  const current = { ...state, automatic: true }
+  vi.mocked(storyMemoryApi.status).mockResolvedValue(response(current))
+  const wrapper = render()
+  try {
+    await flushPromises()
+    const updating = { ...task(2), request_params: { operation: 'story_memory_analyze', chapter_id: 1 } }
+    vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(updating))
+    vi.mocked(api.task).mockResolvedValue(response(updating))
+    vi.mocked(storyMemoryApi.status).mockResolvedValue(response({ ...current,
+      chapters: [{ ...state.chapters[0]!, state: 'stale' }],
+    }))
+
+    await wrapper.setProps({ refreshKey: 1 })
+    await flushPromises()
+    expect(wrapper.get('[role="status"]').text()).toBe('正在更新本集记忆。')
+    expect(wrapper.text()).toContain('第 1 集 · 更新中')
+    expect(wrapper.text()).not.toContain('刷新记忆')
+
+    vi.mocked(api.task).mockResolvedValue(response({ ...updating, status: 3 }))
+    vi.mocked(storyMemoryApi.status).mockResolvedValue(response(current))
+    await vi.advanceTimersByTimeAsync(1200)
+    expect(wrapper.get('[role="status"]').text()).toBe('当前范围的记忆已就绪。')
+    expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+    expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+    visibility.mockRestore()
+  }
+})
+
 it('hides story memory for a single-source project without legacy memory', async () => {
   vi.mocked(storyMemoryApi.status).mockResolvedValue(response({ ...state, automatic: false }))
   vi.mocked(storyMemoryApi.history).mockResolvedValue(response([]))

@@ -102,7 +102,7 @@ async def test_multi_chapter_split_queues_one_global_task_and_target_episode_aut
     episode_context = json.loads(requests[1]['messages'][-1]['content'])['task_context']['input']
     assert episode_context['source_snapshot']['preceding_excerpt']['number'] == 2
     assert not await StoryCommit.filter(novel=project, chapter__number__in=[1, 2]).exists()
-    saved = await StoryCommit.get(chapter=episode)
+    saved = await StoryCommit.get(chapter=episode, status='accepted')
     assert saved.status == 'accepted' and saved.parent_id == baseline.id
     prompt = json.loads(requests[2]['messages'][-1]['content'])
     memory = prompt['task_context']['input']['story_memory']
@@ -111,6 +111,16 @@ async def test_multi_chapter_split_queues_one_global_task_and_target_episode_aut
     assert '老周穿过隧道来到未来城' in prompt['task_context']['input']['source_text']
     assert 'story_memory' not in json.dumps(prompt['creative_method'])
     assert 'Story memory language' not in requests[2]['messages'][0]['content']
+
+    queued = await StoryCommit.get(chapter=episode, status='pending')
+    assert queued.source_snapshot['chapter']['kind'] == 'screenplay'
+    assert queued.replaces_id == saved.id
+    after_save = await queued.task
+    assert after_save.status == 1
+    await ai_task_executor.run(after_save)
+    await queued.refresh_from_db()
+    assert queued.status == 'accepted'
+    assert (await memory_status(project.id))['chapters'][2]['state'] == 'current'
 
     for _ in range(2):
         extraction = await chapter_controller.extract(episode.id)
@@ -125,6 +135,13 @@ async def test_multi_chapter_split_queues_one_global_task_and_target_episode_aut
     assert latest.source_snapshot['chapter']['kind'] == 'screenplay'
     assert latest.replaces_id == saved.id
     assert (await memory_status(project.id))['baseline']['state'] == 'current'
+
+    await episode.refresh_from_db()
+    identical = await submit_screenplay(episode.id, AuthContext(), expected_screenplay=episode.screenplay)
+    await ai_task_executor.run(identical)
+    await identical.refresh_from_db()
+    assert identical.status == 3 and len(requests) == 7
+    assert await StoryCommit.filter(chapter=episode).count() == 2
 
 
 @pytest.mark.asyncio

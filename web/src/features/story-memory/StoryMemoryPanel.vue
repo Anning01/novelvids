@@ -65,9 +65,14 @@ const hasCandidate = computed(() => candidate.value !== null && detail.value?.st
 const focusReview = ref(false)
 const editable = computed(() => !automatic.value && props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
 function scopeState(row?: MemoryChapter) {
+  if (isUpdating(row)) return tr('更新中')
   if (row?.candidate_status) return tr('待确认')
   if (automatic.value && row?.state === 'stale') return tr('待更新')
   return tr(row?.state === 'current' ? '已确认' : row?.state === 'stale' ? '需要复核' : '尚未建立')
+}
+function isUpdating(row?: MemoryChapter) {
+  return automatic.value && Boolean(row && running.value && job.value?.request_params?.operation === 'story_memory_analyze'
+    && (job.value.request_params.chapter_id ?? null) === row.chapter_id)
 }
 const stateLabel = computed(() => scopeState(selected.value))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
@@ -154,8 +159,12 @@ async function track(taskId: string) {
     if (requestedRun === taskId && showRunDetails()) requestedRun = undefined
     if (job.value.stage !== 'needs_review' && [1, 2, 6].includes(job.value.status)) {
       timer = setTimeout(() => { if (!document.hidden) void track(taskId) }, 1200)
-    } else if (!await reload(false)) {
-      scheduleTaskRetry(taskId, current, poll)
+    } else {
+      const loaded = await reload(false)
+      if (!loaded) scheduleTaskRetry(taskId, current, poll)
+      else if (automatic.value && current === epoch && poll === pollRevision) {
+        timer = setTimeout(() => { if (!document.hidden) void restoreActivity(taskId) }, 1200)
+      }
     }
   } catch {
     scheduleTaskRetry(taskId, current, poll)
@@ -166,7 +175,7 @@ function scheduleTaskRetry(taskId: string, current: number, poll: number) {
   trackingDelayed.value = true
   timer = setTimeout(() => { if (!document.hidden) void track(taskId) }, TASK_READ_RETRY)
 }
-function restoreActivity() {
+function restoreActivity(lastTaskId?: string) {
   if (readingActivity) return readingActivity
   const current = epoch
   const poll = pollRevision
@@ -174,7 +183,9 @@ function restoreActivity() {
     try {
       const response = await storyMemoryApi.activity(props.projectId, taskReadSignal())
       if (current !== epoch || poll !== pollRevision || requests.signal.aborted) return
-      if (response.data) await track(response.data.id)
+      if (response.data) {
+        if (response.data.id !== lastTaskId) await track(response.data.id)
+      }
       else {
         clearTimeout(timer)
         trackingDelayed.value = false
@@ -197,8 +208,10 @@ function resumeTaskTracking() {
   if (!document.hidden && !busy.value) void restoreActivity()
 }
 async function refreshMemory() {
+  const current = epoch
   await reload()
-  await restoreActivity()
+  if (readingActivity) await readingActivity
+  if (current === epoch && !requests.signal.aborted) await restoreActivity()
 }
 function showRunDetails() {
   const conversationId = job.value?.request_params?.conversation_id
@@ -321,7 +334,7 @@ watch([() => props.chapterId, () => props.chapterSelectionKey], ([value]) => {
   }
 })
 watch(() => props.refreshKey, () => {
-  if (!draft.value) void reload()
+  if (!draft.value) void refreshMemory()
   else notice.error(tr('剧本已修改，当前候选草稿仍保留；请取消修改后重新分析。'))
 })
 watch(() => props.canEdit, value => { if (!value) draft.value = null })
@@ -371,13 +384,13 @@ onBeforeUnmount(() => {
       <div><h2 :id="`${id}-heading`"><BookOpen :size="18" aria-hidden="true" />{{ tr('故事记忆') }}</h2><p>{{ tr(automatic ? '世界观、人物和前情会作为剧本、资产和分镜的参考。' : '查看项目中的世界观、人物和前情。') }}</p></div>
       <div class="memory-actions">
         <span v-if="trackingDelayed" class="memory-hint" role="status">{{ tr('正在恢复最新任务状态') }}</span>
-        <AppBadge :tone="selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
+        <AppBadge :tone="isUpdating(selected) ? 'accent' : selected?.state === 'current' ? 'success' : selected?.state === 'stale' ? 'warning' : 'neutral'">{{ stateLabel }}</AppBadge>
         <AppButton v-if="selected?.state === 'current'" :id="`${id}-current`" size="sm" variant="soft"
           aria-haspopup="dialog" :aria-controls="`${id}-memory-dialog`" :disabled="!context?.enabled" @click="openMemory">{{ tr('查看当前有效记忆') }}</AppButton>
         <AppButton v-if="!automatic && hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
         <AppButton v-if="!automatic && waiting && waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="Boolean(draft)" @click="openWaitingReview">{{ tr('查看待处理候选') }}</AppButton>
         <AppButton v-if="canEdit && (running || (!hasCandidate && !waiting && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="showRun">{{ tr('在创作助手查看进度') }}</AppButton>
-        <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="refreshMemory"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
+        <AppButton v-if="!automatic" size="sm" :disabled="loading || Boolean(draft)" @click="refreshMemory"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
       </div>
     </header>
     <div v-if="loading && !status" class="memory-skeleton" :aria-label="tr('正在读取故事记忆')" aria-busy="true"><span></span><span></span></div>
@@ -392,7 +405,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="canEdit && !automatic && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="automatic" class="memory-hint" role="status">{{ tr(running && status.baseline.state !== 'current' ? '正在建立全局故事底稿。'
-        : selected?.state === 'current' ? '当前范围的记忆已就绪。' : '制作时会自动准备所需的故事记忆。') }}</p>
+        : isUpdating(selected) ? '正在更新本集记忆。' : selected?.state === 'current' ? '当前范围的记忆已就绪。' : '制作时会自动准备所需的故事记忆。') }}</p>
       <p v-else-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
       <p v-else-if="selected?.candidate_status" class="memory-hint">{{ tr('本范围已有候选，可在创作助手确认入库。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
