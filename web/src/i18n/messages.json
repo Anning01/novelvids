@@ -4560,6 +4560,8 @@
     "等待确认故事记忆": "Awaiting story memory confirmation",
     "在创作助手查看进度": "View progress in the creation assistant",
     "在创作助手查看候选": "Review candidate in the creation assistant",
+    "查看待处理候选": "View candidate awaiting review",
+    "本范围已有候选，可在创作助手查看审核结果。": "A candidate is available. View the review in the creation assistant.",
     "开篇依据：第 {p0} 集 · {p1}": "Opening source: Episode {p0} · {p1}",
     "全局故事底稿没有可确认事实，请补充故事材料后重新分析": "There are no facts to confirm in the story baseline. Add story material and run the analysis again.",
     "分析故事记忆候选": "Analyze story memory candidates",

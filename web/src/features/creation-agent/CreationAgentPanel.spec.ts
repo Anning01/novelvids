@@ -416,6 +416,10 @@ it('opens the exact story review and keeps its batch progress and pause state in
   expect(wrapper.get('progress').attributes()).toMatchObject({ value: '1', max: '185' })
   expect(wrapper.text()).toContain('等待确认故事记忆')
   expect(wrapper.get('[aria-label="执行过程"]').text()).not.toContain('用时')
+  workspace.showProductionRun(7, { taskId: 'review', conversationId: 42 })
+  await flushPromises()
+  expect(agentApi.history).toHaveBeenCalledTimes(1)
+  expect(runSubscription).not.toHaveBeenCalled()
 })
 
 it('sends an explicit page selection even beyond the first catalog page', async () => {

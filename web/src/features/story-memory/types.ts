@@ -3,6 +3,8 @@ export interface MemoryChapter {
   chapter_id: number | null
   number: number | null
   commit_id: number | null
+  candidate_id?: number | null
+  candidate_status?: 'draft' | 'ready' | 'needs_review' | null
   state: MemoryState
   reason: string | null
   can_analyze: boolean

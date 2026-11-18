@@ -13,6 +13,10 @@ import type { AgentActivityStep, AgentCapabilities, AgentChange, AgentConversati
 const activeStatuses = new Set([1, 2, 6])
 export const isAgentRunning = (status: number) => activeStatuses.has(status)
 
+function isStoryMemoryRun(run: AgentRun) {
+  return run.production?.some(receipt => receipt.task_id === run.task_id && receipt.operation.startsWith('story_memory_'))
+}
+
 export const useCreationAgentStore = defineStore('creation-agent', () => {
   const snapshotRequests = new Map<string, ReturnType<typeof agentApi.snapshot>>()
   function snapshot(taskId: string) {
@@ -101,6 +105,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   async function follow(taskId: string) {
     if (!conversationId.value) return
+    if (currentRun.value?.task_id === taskId && isStoryMemoryRun(currentRun.value)) {
+      await refreshProduction()
+      return
+    }
     disconnect()
     const revision = epoch
     const id = conversationId.value
@@ -185,7 +193,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
         const response = await snapshot(latestTaskId)
         if (revision !== epoch) return
         applySnapshot(response.data)
-        if (isAgentRunning(response.data.status)) void follow(latestTaskId)
+        if (isAgentRunning(response.data.status) && !isStoryMemoryRun(response.data)) void follow(latestTaskId)
       }
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('无法恢复当前对话')
@@ -194,6 +202,12 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   async function open(novelId: number, productionRun?: { taskId: string; conversationId: number }) {
     const nextIdentity = `${getAuthToken() || ''}:${getActiveTeamId() || ''}`
+    if (productionRun && identity === nextIdentity && projectId.value === novelId && !loading.value
+        && conversationId.value === productionRun.conversationId && currentRun.value?.task_id === productionRun.taskId
+        && isStoryMemoryRun(currentRun.value)) {
+      await refreshProduction()
+      return
+    }
     disconnect()
     epoch += 1
     const revision = epoch

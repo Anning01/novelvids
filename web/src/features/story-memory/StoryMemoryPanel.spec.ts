@@ -121,6 +121,30 @@ it('switches to global memory through the shared scope picker', async () => {
   await choose(wrapper, '查看范围', '全局故事底稿')
   expect(storyMemoryApi.context).toHaveBeenLastCalledWith(9, null, expect.any(AbortSignal))
   expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('全局故事底稿')
+  await wrapper.setProps({ chapterSelectionKey: 1 })
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('第 1 集')
+})
+
+it('keeps the viewed chapter while offering direct access to the batch candidate', async () => {
+  const baseline = { ...ready, id: 12, chapter_id: null, status: 'needs_review' as const }
+  vi.mocked(storyMemoryApi.history).mockResolvedValue(response([]))
+  vi.mocked(storyMemoryApi.status).mockResolvedValue(response({
+    ...state, baseline: { ...state.baseline, candidate_id: 12, candidate_status: 'needs_review' },
+  }))
+  vi.mocked(storyMemoryApi.detail).mockImplementation(async (_project, id) => response(id === 12 ? baseline : ready))
+  vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(task(2, 'needs_review')))
+  vi.mocked(api.task).mockResolvedValue(response({ ...task(2, 'needs_review'), response_data: { waiting_commit_id: 12 } }))
+  const wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('第 1 集')
+  await wrapper.findAll('button').find(button => button.text() === '查看待处理候选')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('全局故事底稿')
+  expect(review.text()).toContain('按审核意见补全')
+  expect(storyMemoryApi.detail).toHaveBeenLastCalledWith(9, 12, expect.any(AbortSignal))
+  expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+  expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
 })
 
 it.each([['world', '未指定世界', null], [null, '故城世界', 'world']] as const)('saves the world picker value from %s without changing nullable semantics', async (initial, label, expected) => {
@@ -268,6 +292,10 @@ it('opens the assistant for a queued review and hands off to its conversation wh
   expect(wrapper.find('.agent-run-activity').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('停止本轮')
   expect(wrapper.text()).toContain('在创作助手查看进度')
+  const polls = vi.mocked(api.task).mock.calls.length
+  await wrapper.findAll('button').find(button => button.text() === '在创作助手查看进度')!.trigger('click')
+  expect(api.task).toHaveBeenCalledTimes(polls)
+  expect(storyMemoryApi.recheck).toHaveBeenCalledTimes(1)
 })
 
 it('announces request failures and provides a read retry', async () => {

@@ -171,6 +171,17 @@ async def test_recheck_advances_in_order_and_pauses_for_each_human_decision(monk
     assert batch.response_data['total'] == 2 and not batch.response_data['completed']
     waiting = await StoryCommit.get(id=batch.response_data['waiting_commit_id'])
     assert waiting.chapter_id == chapters[1].id and waiting.status == 'ready'
+    row = (await memory_status(project.id))['chapters'][1]
+    assert row['state'] == 'stale' and row['candidate_id'] == waiting.id and row['candidate_status'] == 'ready'
+    with pytest.raises(HTTPException, match='已有待处理候选'):
+        await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4(), chapter_id=waiting.chapter_id), AuthContext())
+    from controllers.creation_agent import creation_agent_controller
+    from models.creation_agent import AgentMessage
+    message = await AgentMessage.get(task_id=batch.id, role='assistant')
+    history = await creation_agent_controller.messages(message.conversation_id, AuthContext(), before=None)
+    assert all(item['task_id'] != str(waiting.task_id) for item in history['items'])
+    run = await creation_agent_controller.snapshot(batch.id, AuthContext())
+    assert any(item['task_id'] == str(waiting.task_id) for item in run.production)
     assert len(calls) == 2
     assert (await memory_status(project.id))['chapters'][2]['state'] == 'stale'
     await accept(project, waiting)

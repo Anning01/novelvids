@@ -10,10 +10,10 @@ import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import { storyMemoryApi } from './api'
-import type { FactNature, MemoryCandidate, MemoryCommit, MemoryContext, MemoryDetail, MemoryScope, MemoryStatus } from './types'
+import type { FactNature, MemoryCandidate, MemoryChapter, MemoryCommit, MemoryContext, MemoryDetail, MemoryScope, MemoryStatus } from './types'
 
 const props = defineProps<{ projectId: number; chapterId?: number; canEdit: boolean; disabled?: boolean;
-  reviewTarget?: HTMLElement | null; refreshKey?: number; modelsLoading?: boolean; models: { value: string; label: string }[] }>()
+  reviewTarget?: HTMLElement | null; refreshKey?: number; chapterSelectionKey?: number; modelsLoading?: boolean; models: { value: string; label: string }[] }>()
 const emit = defineEmits<{ showRun: [run?: { taskId: string; conversationId: number }] }>()
 const modelId = defineModel<string>('modelId', { default: '' })
 const skillId = defineModel<number>('skillId')
@@ -28,6 +28,8 @@ const loading = ref(false)
 const busy = ref(false)
 const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
+const waitingCommitId = ref<number>()
+let batchTaskId: string | undefined
 const shownFacts = ref(20)
 const memoryDialog = ref<HTMLDialogElement | null>(null)
 const memoryOpen = ref(false)
@@ -42,6 +44,11 @@ let timer: ReturnType<typeof setTimeout> | undefined
 const chapterId = computed(() => scope.value === 'baseline' ? null : Number(scope.value))
 const rows = computed(() => status.value ? [status.value.baseline, ...status.value.chapters] : [])
 const selected = computed(() => rows.value.find(row => row.chapter_id === chapterId.value))
+const waiting = computed(() => {
+  const commitId = waitingCommitId.value
+  if (commitId === undefined) return undefined
+  return rows.value.find(row => row.candidate_id === commitId) ?? commits.value.find(commit => commit.id === commitId)
+})
 const running = computed(() => job.value && [1, 2, 6].includes(job.value.status) && job.value.stage !== 'needs_review')
 const locked = computed(() => busy.value || Boolean(running.value) || props.disabled)
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
@@ -49,12 +56,18 @@ const hasCandidate = computed(() => candidate.value !== null && detail.value?.st
 const emptyBaseline = computed(() => detail.value?.chapter_id === null && candidate.value?.facts.length === 0)
 const focusReview = ref(false)
 const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
-const stateLabel = computed(() => selected.value?.state === 'current' ? tr('已确认') : selected.value?.state === 'stale' ? tr('需要复核') : tr('尚未建立'))
+function scopeState(row?: MemoryChapter) {
+  if (row?.candidate_status === 'ready') return tr('待确认')
+  if (row?.candidate_status === 'needs_review') return tr('待处理')
+  if (row?.candidate_status === 'draft') return tr('尚未审核')
+  return tr(row?.state === 'current' ? '已确认' : row?.state === 'stale' ? '需要复核' : '尚未建立')
+}
+const stateLabel = computed(() => scopeState(selected.value))
 const labels: Record<string, string> = { world: '世界观', rule: '故事规则', identity: '人物身份', relation: '人物关系', event: '故事事件', state: '人物与环境状态', outline: '故事大纲', decision: '创作决定' }
 const natures: Record<FactNature, string> = { fact: '明确事实', testimony: '人物证言', inference: '尚待证实的推测', plan: '大纲计划', creative_decision: '创作决定' }
 const scopeOptions = computed(() => rows.value.map(row => ({
   value: row.chapter_id === null ? 'baseline' : String(row.chapter_id),
-  label: row.chapter_id === null ? tr('全局故事底稿') : `${tr('第 {p0} 集', { p0: row.number })} · ${tr(row.state === 'current' ? '已确认' : row.state === 'stale' ? '需要复核' : '尚未建立')}`,
+  label: row.chapter_id === null ? tr('全局故事底稿') : `${tr('第 {p0} 集', { p0: row.number })} · ${scopeState(row)}`,
 })))
 const scopeLabel = computed(() => scopeOptions.value.find(option => option.value === scope.value)?.label)
 const natureOptions = computed(() => Object.entries(natures).map(([value, label]) => ({ value, label: tr(label) })))
@@ -91,7 +104,8 @@ async function loadScope() {
   context.value = null
   detail.value = null
   shownFacts.value = 20
-  const latest = commits.value.find(commit => commit.chapter_id === target)?.id ?? selected.value?.commit_id
+  const latest = (waiting.value?.chapter_id === target ? waitingCommitId.value : undefined)
+    ?? selected.value?.candidate_id ?? commits.value.find(commit => commit.chapter_id === target)?.id ?? selected.value?.commit_id
   const work: Promise<unknown>[] = []
   if (latest) work.push(selectCommit(latest))
   if (selected.value?.state === 'current') work.push(storyMemoryApi.context(props.projectId, target, requests.signal).then(response => {
@@ -123,15 +137,14 @@ async function track(taskId: string) {
     const response = await api.task(taskId, requests.signal)
     if (current !== epoch || poll !== pollRevision) return
     job.value = response.data
+    const waitingId = job.value.response_data?.waiting_commit_id
+    if (job.value.request_params?.operation === 'story_memory_recheck' || typeof waitingId === 'number') batchTaskId = taskId
+    if (batchTaskId === taskId) {
+      waitingCommitId.value = job.value.stage === 'needs_review' && typeof waitingId === 'number' ? waitingId : undefined
+    }
     if (requestedRun === taskId && showRunDetails()) requestedRun = undefined
     if (job.value.stage === 'needs_review') {
       await reload()
-      if (current !== epoch || poll !== pollRevision || !job.value) return
-      const waiting = job.value.response_data?.waiting_commit_id
-      if (typeof waiting === 'number') {
-        await selectCommit(waiting)
-        scope.value = detail.value?.chapter_id ? String(detail.value.chapter_id) : 'baseline'
-      }
     } else if ([1, 2, 6].includes(job.value.status)) {
       timer = setTimeout(() => { void track(taskId) }, 1200)
     } else {
@@ -152,13 +165,14 @@ function showRun() {
   requestedRun = job.value?.id
   emit('showRun')
 }
-function openProgress() {
-  showRun()
-  if (running.value && job.value) void track(job.value.id)
-}
 function openReview() {
   focusReview.value = true
   emit('showRun')
+}
+function openWaitingReview() {
+  if (!waiting.value || draft.value) return
+  scope.value = waiting.value.chapter_id === null ? 'baseline' : String(waiting.value.chapter_id)
+  openReview()
 }
 function openMemory() {
   if (!context.value?.enabled || !memoryDialog.value || memoryDialog.value.open) return
@@ -200,6 +214,7 @@ async function decide(decision: 'accept' | 'reject') {
   await action(async () => {
     const response = await storyMemoryApi.decide(props.projectId, current.id, current.package_hash, decision, decisionNote.value)
     if (edition !== epoch) return
+    if (waitingCommitId.value === current.id) waitingCommitId.value = undefined
     detail.value = response.data
     notice.success(decision === 'accept' ? tr('记忆已正式提交') : tr('候选已退回，原有正式记忆仍保留'))
     await reload()
@@ -280,8 +295,8 @@ watch(scope, async () => {
   try { await loadScope() }
   catch (reason) { if (current === epoch && !requests.signal.aborted) notice.error((reason as Error).message) }
 })
-watch(() => props.chapterId, value => {
-  if (!draft.value && !busy.value && value) {
+watch([() => props.chapterId, () => props.chapterSelectionKey], ([value]) => {
+  if (!draft.value && value) {
     scope.value = String(value)
     if (status.value && !status.value.chapters.some(row => row.chapter_id === value)) void reload()
   }
@@ -299,6 +314,8 @@ watch(() => props.projectId, async () => {
   requests = new AbortController()
   clearTimeout(timer)
   requestedRun = undefined
+  waitingCommitId.value = undefined
+  batchTaskId = undefined
   focusReview.value = false
   job.value = null
   busy.value = false
@@ -327,22 +344,24 @@ onBeforeUnmount(() => { ++epoch; requests.abort(); clearTimeout(timer) })
         <AppButton v-if="selected?.state === 'current'" :id="`${id}-current`" size="sm" variant="soft"
           aria-haspopup="dialog" :aria-controls="`${id}-memory-dialog`" :disabled="!context?.enabled" @click="openMemory">{{ tr('查看当前有效记忆') }}</AppButton>
         <AppButton v-if="hasCandidate" size="sm" variant="soft" :aria-controls="reviewTarget ? `${id}-candidate-panel` : undefined" @click="openReview">{{ tr('在创作助手查看候选') }}</AppButton>
-        <AppButton v-if="canEdit && (running || (!hasCandidate && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="openProgress">{{ tr('在创作助手查看进度') }}</AppButton>
+        <AppButton v-if="waiting && waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="Boolean(draft)" @click="openWaitingReview">{{ tr('查看待处理候选') }}</AppButton>
+        <AppButton v-if="canEdit && (running || (!hasCandidate && !waiting && job?.stage === 'needs_review') || job?.status === 4)" size="sm" variant="ghost" @click="showRun">{{ tr('在创作助手查看进度') }}</AppButton>
         <AppButton size="sm" :disabled="loading || Boolean(draft)" @click="reload"><RefreshCw :size="14" aria-hidden="true" />{{ tr('刷新记忆') }}</AppButton>
       </div>
     </header>
     <div v-if="loading && !status" class="memory-skeleton" :aria-label="tr('正在读取故事记忆')" aria-busy="true"><span></span><span></span></div>
     <template v-if="status">
       <div class="memory-controls">
-        <div class="memory-field"><label :id="`${id}-scope-label`">{{ tr('查看范围') }}</label><AppSelect v-model="scope" :aria-labelledby="`${id}-scope-label`" :ariaLabel="tr('查看范围')" density="compact" :options="scopeOptions" :disabled="Boolean(draft) || busy" /></div>
+        <div class="memory-field"><label :id="`${id}-scope-label`">{{ tr('查看范围') }}</label><AppSelect v-model="scope" :aria-labelledby="`${id}-scope-label`" :ariaLabel="tr('查看范围')" density="compact" :options="scopeOptions" :disabled="Boolean(draft)" /></div>
         <template v-if="canEdit">
           <div class="memory-field"><label :id="`${id}-model-label`">{{ tr('故事记忆模型') }}</label><AppSelect v-model="modelId" :aria-labelledby="`${id}-model-label`" :ariaLabel="tr('故事记忆模型')" density="compact" :options="[{ value: '', label: tr(modelsLoading ? '正在读取模型…' : models.length ? '选择分析模型' : '暂无可用模型') }, ...models]" :disabled="locked || !models.length || modelsLoading" /></div>
           <TaskSkillPicker v-model="skillId" task="story" :disabled="locked" />
-          <div class="memory-actions"><AppButton size="sm" variant="soft" :disabled="locked || Boolean(draft) || !selected?.can_analyze" @click="analyze(false)">{{ tr('分析当前范围') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || Boolean(draft)" @click="analyze(true)">{{ tr('顺序复核全部') }}</AppButton></div>
+          <div class="memory-actions"><AppButton v-if="!waiting || waiting.chapter_id !== chapterId" size="sm" variant="soft" :disabled="locked || Boolean(draft) || !selected?.can_analyze" @click="analyze(false)">{{ tr('分析当前范围') }}</AppButton><AppButton size="sm" variant="primary" :disabled="locked || Boolean(draft) || Boolean(waiting)" @click="analyze(true)">{{ tr('顺序复核全部') }}</AppButton></div>
         </template>
       </div>
       <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
+      <p v-else-if="selected?.candidate_status" class="memory-hint">{{ tr('本范围已有候选，可在创作助手查看审核结果。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
     </template>
   </section>

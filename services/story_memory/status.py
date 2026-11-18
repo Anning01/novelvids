@@ -15,10 +15,12 @@ async def memory_status(novel_id):
     chapters = await Chapter.filter(novel_id=novel_id).order_by('number', 'id')
     opening = next((item for chapter in chapters if (item := opening_source(chapter))), None) if needs_opening_source(project) else None
     # Load each table once; status must not rescan every prefix for every chapter.
-    latest = {}
-    for commit in await StoryCommit.filter(novel_id=novel_id, status='accepted').order_by('-id').only(
-            'id', 'chapter_id', 'parent_id', 'source_hash'):
-        latest.setdefault(commit.chapter_id, commit)
+    latest, attempts = {}, {}
+    for commit in await StoryCommit.filter(novel_id=novel_id).order_by('-id').only(
+            'id', 'chapter_id', 'parent_id', 'source_hash', 'status'):
+        attempts.setdefault(commit.chapter_id, commit)
+        if commit.status == 'accepted':
+            latest.setdefault(commit.chapter_id, commit)
     snapshots = {row['commit_id']: row['data'] for row in await StorySnapshot.filter(
         novel_id=novel_id, commit_id__in=[commit.id for commit in latest.values()]).values('commit_id', 'data')}
     result = []
@@ -26,6 +28,8 @@ async def memory_status(novel_id):
     for chapter in [None, *chapters]:
         chapter_id = chapter.id if chapter else None
         commit = latest.get(chapter_id)
+        attempt = attempts.get(chapter_id)
+        candidate = attempt if attempt and attempt.status in {'draft', 'ready', 'needs_review'} else None
         snapshot = snapshots.get(commit.id) if commit else None
         invalidation = snapshot.get('invalidation') if snapshot else None
         reason = None
@@ -45,6 +49,7 @@ async def memory_status(novel_id):
             reason = '前置故事提交已变化'
         result.append({'chapter_id': chapter_id, 'number': chapter.number if chapter else None,
             'commit_id': commit.id if commit else None,
+            'candidate_id': candidate.id if candidate else None, 'candidate_status': candidate.status if candidate else None,
             'state': 'missing' if commit is None else 'stale' if reason else 'current',
             'reason': reason, 'can_analyze': blocked_by is None, 'blocked_by': blocked_by,
             'invalidation': invalidation})

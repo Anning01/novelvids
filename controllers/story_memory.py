@@ -35,6 +35,17 @@ async def submit_analysis(novel_id, body, ctx, *, recheck_id=None):
             if existing.request_spec != spec:
                 conflict('同一请求标识不能用于不同的故事分析')
             return await AiTask.get(id=existing.task_id)
+        for task in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis, status__in=ACTIVE_TASK_STATUSES):
+            request = task.request_params
+            if request.get('novel_id') != novel_id:
+                continue
+            if request.get('operation') == 'story_memory_analyze' and request.get('chapter_id') == body.chapter_id:
+                conflict('这一范围正在分析，请在创作助手查看进度')
+            if not recheck_id and request.get('operation') == 'story_memory_recheck' and task.stage == 'needs_review':
+                commit_id = (task.response_data or {}).get('waiting_commit_id')
+                waiting = await StoryCommit.get_or_none(id=commit_id, novel_id=novel_id)
+                if waiting and waiting.chapter_id == body.chapter_id and waiting.status in {'draft', 'ready', 'needs_review'}:
+                    conflict('这一范围已有待处理候选，请在创作助手查看候选')
         source = await source_snapshot(novel_id, body.chapter_id)
         parent_id = await predecessor(novel_id, body.chapter_id)
         previous = await latest_commit(novel_id, body.chapter_id)

@@ -136,6 +136,7 @@ const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
 const memoryRefreshKey = ref(0)
+const memoryChapterSelection = ref(0)
 const assistantWorkspace = useCreationAgentWorkspace()
 const pendingStoryboard = ref<boolean | null>(null)
 const savingStoryboard = computed(() => pendingStoryboard.value !== null)
@@ -731,13 +732,14 @@ function continueToSettings() {
 }
 
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
+  const button = event?.currentTarget as HTMLElement | null
   activeEpisode.value = chapterNumber
+  memoryChapterSelection.value += 1
   const chapter = chapters.value.find(item => item.number === chapterNumber)
   if (chapter) void router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapterContent(chapter)
   if (editing.value && selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   await nextTick()
-  const button = event?.currentTarget as HTMLElement | null
   if (!button || !episodeTabs.value) return
   const left = button.offsetLeft - (episodeTabs.value.clientWidth - button.offsetWidth) / 2
   episodeTabs.value.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
@@ -937,7 +939,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
       <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
-        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey" :review-target="reviewTarget"
+        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey" :chapter-selection-key="memoryChapterSelection" :review-target="reviewTarget"
         v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" @show-run="assistantWorkspace.showProductionRun(projectId, $event)" />
 
       <section class="analysis-section episode-section">
