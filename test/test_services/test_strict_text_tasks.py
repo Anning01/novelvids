@@ -398,3 +398,7 @@ async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(st
     method = json.dumps(body['creative_method'], ensure_ascii=False)
     assert 'story_memory' in method and '只用于接戏' in method
     assert '同一场号' in method and '一次视频生成' in method
+    assert '10 秒' in method and '14 秒' in method and '声音' in method
+    fields = requests[0]['response_format']['json_schema']['schema']['properties']['shots']['items']['properties']
+    assert '观看重点' in fields['segments']['description']
+    assert '剪辑点' in fields['transition']['description']
