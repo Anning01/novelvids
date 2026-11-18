@@ -61,7 +61,8 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
             'workflow_version': WORKFLOW_VERSION, 'assistant_model_config_id': chosen.id,
             'agent_configuration': limits.model_dump(),
             'prompt_language': language,
-            'creative_method': await snapshot_method(params.get('user_id') or 0, task, skill_id),
+            'creative_method': await snapshot_method(params.get('user_id') or 0, task, skill_id,
+                                                     blocking_maps=params.get('generate_blocking_maps', False)),
             'output_contract': contract}
 
 

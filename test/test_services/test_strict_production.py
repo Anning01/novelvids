@@ -242,6 +242,7 @@ async def test_storyboard_includes_blocking_and_segments_without_extra_model_cal
     requests = mock_model(monkeypatch, payload)
     monkeypatch.setattr('services.storyboard.blocking_plans.place_shot', AsyncMock(side_effect=AssertionError('no second model request')))
     task = await scene_controller.generate(chapter.id, generate_blocking_maps=True)
+    assert 'references/blocking.md' in {ref['name'] for ref in task.request_params['creative_method']['references']}
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
@@ -346,7 +347,7 @@ async def test_speaking_character_uses_normal_asset_binding_without_another_mode
     assert '@{王叔}（画外呼喊）: 阿岚！' in scene.prompt
     assert (await scene.assets.all().get(id=speaker.id)).metadata['voice_reference_id'] == 12
     assert len(requests) == 1
-    assert '发声角色也属于角色引用' in str(requests[0]['messages'])
+    assert '发声角色也统一列入角色名单' in str(requests[0]['messages'])
 
 
 @pytest.mark.parametrize('language', ['zh', 'en'])

@@ -395,14 +395,16 @@ async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(st
     assert body['task_context']['input']['chapter'] == (screenplay or original)
     if screenplay:
         assert original not in user['content']
-    method = json.dumps(body['creative_method'], ensure_ascii=False)
-    assert 'story_memory' in method and '只用于接戏' in method
-    assert '同一场号' in method and '一次视频生成' in method
-    assert '10 秒' in method and '14 秒' in method and '声音' in method
-    assert '共用的表演时间轴' in method and '共用秒数' in method
-    entry = body['creative_method']['instructions']
-    assert '相邻两段的 duration 之和' in entry and '并入同一个 shot' in entry
-    assert not body['creative_method']['references']
+    from prompts.text_tasks import builtin_method
+    method = body['creative_method']
+    assert method['instructions'] == builtin_method('storyboard')['instructions']
+    rules = {ref['name']: ref['content'] for ref in method['references']}
+    assert '相邻两段的 duration 之和' in rules['references/continuity.md']
+    assert '并入同一个 shot' in rules['references/continuity.md']
+    assert '故事记忆只用于接戏' in rules['references/storyboard.md']
+    assert '段尾 transition' in rules['references/storyboard.md']
+    assert 'references/blocking.md' not in rules
+    assert 'references/runtime-method.md' not in rules
     fields = requests[0]['response_format']['json_schema']['schema']['properties']['shots']['items']['properties']
     assert '观看重点' in fields['segments']['description']
     assert '剪辑点' in fields['transition']['description']

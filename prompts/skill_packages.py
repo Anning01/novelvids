@@ -33,7 +33,7 @@ def builtin_package(task: str) -> SkillPackage:
     original_entry = folder / 'SKILL.md'
 
     def virtual(path):
-        if path == original_entry and task != 'screenplay':
+        if path == original_entry and task == 'assets':
             return 'references/source-skill.md'
         return str(path.relative_to(folder)) if path.is_relative_to(folder) else 'shared/' + str(path.relative_to(ROOT))
 
@@ -60,19 +60,14 @@ def builtin_package(task: str) -> SkillPackage:
                 return match[1] + relative + match[4]
             file['content'] = LINK.sub(rewrite, file['content'])
         files.append(file)
-    if task == 'screenplay':
+    if task != 'assets':
         return SkillPackage(files)
     from utils.skill_package import entry_metadata
     metadata, _ = entry_metadata(next(file['content'] for file in files if file['path'] == 'references/source-skill.md'))
     # The application entry preserves its single-task method; generic Codex guidance stays available as files.
-    body = read_skill(f'strict_{task}')
-    if task == 'storyboard':
-        body = read_skill('storyboard_continuity').rstrip() + '\n\n' + body
-    else:
-        method_path = 'references/runtime-method.md'
-        files.append(package_file(method_path, body.encode('utf-8')))
-        body = f'完成当前创作任务，遵循 [创作方法]({method_path})。\n'
+    method_path = 'references/runtime-method.md'
+    files.append(package_file(method_path, read_skill('strict_assets').encode('utf-8')))
     header = yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
-    entry = f'---\n{header}---\n\n{body}'
+    entry = f'---\n{header}---\n\n完成当前创作任务，遵循 [创作方法]({method_path})。\n'
     files.append(package_file('SKILL.md', entry.encode('utf-8')))
     return SkillPackage(files)

@@ -211,8 +211,9 @@ class SkillPackage:
                     add(target)
         return resources
 
-    def as_method(self) -> dict:
-        resources = self.linked_paths()
+    def as_method(self, resources: list[str] | None = None) -> dict:
+        if resources is None:
+            resources = self.linked_paths()
         manifest = []
         for path in ['SKILL.md', *resources]:
             file = self.by_path[path]

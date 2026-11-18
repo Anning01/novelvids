@@ -106,16 +106,23 @@ def test_builtin_folders_are_portable_and_include_their_linked_resources(task):
         assert 'agents/openai.yaml' in package.by_path
         from prompts.skill_pack import read_skill
         method = package.as_method()
-        assert 'references/source-skill.md' in package.by_path
         if task == 'storyboard':
+            from prompts.text_tasks import builtin_method
             entry = package.by_path['SKILL.md']['content']
-            continuity = read_skill('storyboard_continuity').strip()
-            assert continuity in entry and entry.endswith(read_skill('strict_storyboard'))
-            assert 'continuity.md' in read_skill('novelvids-storyboard')
-            assert package.by_path['references/continuity.md']['content'].strip() == continuity
-            assert method['instructions'] == entry
-            assert not method['references']
+            assert entry.startswith('---') and 'references/continuity.md' in entry
+            assert 'references/source-skill.md' not in package.by_path
+            default = builtin_method(task)
+            assert default['instructions'] == entry
+            assert [item['name'] for item in default['references']] == [
+                'references/continuity.md', 'references/storyboard.md',
+                'references/speech_pacing.md', 'references/video_presentation.md']
+            for item in default['references']:
+                assert item['content'] == package.by_path[item['name']]['content']
+            with_maps = builtin_method(task, blocking_maps=True)
+            assert with_maps['references'][:-1] == default['references']
+            assert with_maps['references'][-1]['name'] == 'references/blocking.md'
         else:
+            assert 'references/source-skill.md' in package.by_path
             assert len(method['references']) == 1
             assert method['references'][0]['content'] == read_skill(f'strict_{task}')
 
