@@ -1304,6 +1304,28 @@
               "title": "Search"
             },
             "description": "\n        1. 搜索：直接传关键词（会对预设的可搜索字段进行模糊匹配）\n           示例：?search=张三 → 搜索所有含\"张三\"的记录\n           \n        2. 过滤：按「字段__操作符=值」格式传参，支持多条件（用&连接）\n           常用操作符：\n           - __contains: 包含（字符串模糊匹配）\n           - __lte: 小于等于（数字/日期）\n           - __gte: 大于等于（数字/日期）\n           - __gt: 大于（数字/日期）\n           - __lt: 小于（数字/日期）\n           \n           示例：\n           ?search=张三&age__gte=18 → 姓名含\"张三\"且年龄≥18\n           ?create_time__gte=2023-01-01 → 创建时间在2023-01-01之后\n        "
+          },
+          {
+            "name": "source_chapter_number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可重复传入章节序号，返回出现在任意所选章节的资产",
+              "title": "Source Chapter Number"
+            },
+            "description": "可重复传入章节序号，返回出现在任意所选章节的资产"
           }
         ],
         "responses": {

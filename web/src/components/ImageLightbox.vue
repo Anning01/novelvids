@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   alt: string
   format?: string
   images?: PreviewImage[]
+  animated?: boolean
 }>(), { format: '', images: () => [] })
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -62,7 +63,22 @@ function load(event: Event, item: PreviewImage) {
   const image = event.currentTarget as HTMLImageElement
   loaded.value[item.src] = `${image.naturalWidth} × ${image.naturalHeight}`
 }
-function close() { dialog.value?.close() }
+async function close() {
+  const panel = dialog.value
+  if (!panel?.open || panel.hasAttribute('data-closing')) return
+  if (props.animated && typeof panel.getAnimations === 'function') {
+    // Keep the native dialog in the top layer until its exit finishes.
+    panel.setAttribute('data-closing', '')
+    await Promise.allSettled(panel.getAnimations({ subtree: true }).map(animation => animation.finished))
+    panel.removeAttribute('data-closing')
+  }
+  panel.close()
+}
+function cancel(event: Event) {
+  if (!props.animated) return
+  event.preventDefault()
+  void close()
+}
 watch(() => [props.open, props.src] as const, async ([open]) => {
   await nextTick()
   if (!dialog.value) return
@@ -86,7 +102,8 @@ onBeforeUnmount(() => { clearTimeout(scrollTimer); resize?.disconnect(); dialog.
 
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" class="image-lightbox" :aria-label="tr('图片放大查看')" @keydown="keydown" @close="emit('close')">
+    <dialog ref="dialog" class="image-lightbox" :class="{ 'is-animated': animated }" :aria-label="tr('图片放大查看')"
+      @keydown="keydown" @cancel="cancel" @close="emit('close')">
       <template v-if="open">
         <header class="image-lightbox__toolbar">
           <div class="image-lightbox__heading">
@@ -105,7 +122,7 @@ onBeforeUnmount(() => { clearTimeout(scrollTimer); resize?.disconnect(); dialog.
           <div ref="track" class="image-lightbox__track" :class="{ 'is-zoomed': zoom > 1 }" @scroll.passive="settleScroll">
             <div v-for="(item, position) in slides" :key="`${position}:${item.src}`" class="image-lightbox__stage" :class="{ 'is-zoomed': position === index && zoom > 1 }"
               role="group" :aria-label="`${position + 1} / ${slides.length} · ${item.alt}`" :inert="position !== index ? true : undefined">
-              <p v-if="failed[item.src]" role="status">{{ tr('图片加载失败，可切换其他图片') }}</p>
+              <p v-if="failed[item.src]" role="status">{{ slides.length > 1 ? tr('图片加载失败，可切换其他图片') : tr('图片加载失败，请检查图片是否仍可访问') }}</p>
               <template v-else-if="Math.abs(position - index) <= 1">
                 <span v-if="!loaded[item.src]" class="image-lightbox__loading">{{ tr('正在加载图片…') }}</span>
                 <img :src="item.src" :alt="item.alt" :style="{ transform: `scale(${position === index ? zoom : 1})` }" draggable="false"
@@ -166,5 +183,41 @@ onBeforeUnmount(() => { clearTimeout(scrollTimer); resize?.disconnect(); dialog.
   .image-lightbox__heading { flex: 1 1 100%; }
   .image-lightbox__toolbar nav { margin-left: auto; }
   .image-lightbox__footer small { text-align: center; }
+}
+</style>
+
+<style>
+.image-lightbox.is-animated {
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+.image-lightbox.is-animated::backdrop {
+  background-color: transparent;
+  transition: background-color 140ms ease-out;
+}
+.image-lightbox.is-animated[open]:not([data-closing]) {
+  opacity: 1;
+  transition-duration: 220ms;
+}
+.image-lightbox.is-animated[open]:not([data-closing])::backdrop {
+  background-color: rgb(15 17 23 / 38%);
+  transition-duration: 220ms;
+}
+@starting-style {
+  .image-lightbox.is-animated[open]:not([data-closing]) { opacity: 0; }
+  .image-lightbox.is-animated[open]:not([data-closing])::backdrop { background-color: transparent; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .image-lightbox.is-animated .image-lightbox__viewport {
+    scale: .965;
+    transition: scale 140ms ease-out;
+  }
+  .image-lightbox.is-animated[open]:not([data-closing]) .image-lightbox__viewport {
+    scale: 1;
+    transition: scale 220ms cubic-bezier(.16, 1, .3, 1);
+  }
+  @starting-style {
+    .image-lightbox.is-animated[open]:not([data-closing]) .image-lightbox__viewport { scale: .965; }
+  }
 }
 </style>

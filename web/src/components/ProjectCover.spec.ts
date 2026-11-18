@@ -76,4 +76,17 @@ describe('ProjectCover', () => {
     const generated = wrapper.get('.project-cover__generated')
     expect(generated.get('.project-cover__title').text()).toBe('两位剑客')
   })
+
+  it('offers preview only while a cover image is available', async () => {
+    const wrapper = mount(ProjectCover, {
+      props: { source: '/preview.png', original: '/cover.png', alt: '项目封面', previewable: true },
+    })
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('preview')).toEqual([['/cover.png']])
+    await wrapper.get('img').trigger('error')
+    expect(wrapper.get('img').attributes('src')).toBe('/cover.png')
+    await wrapper.get('img').trigger('error')
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('.project-cover__generated').exists()).toBe(true)
+  })
 })

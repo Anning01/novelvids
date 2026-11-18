@@ -27,7 +27,7 @@ from services.oss import normalize_media_url, oss
 from utils.crud import CRUDBase
 from utils.decorators import atomic
 from utils.enums import AiTaskTypeEnum, ImageSourceEnum, TaskStatusEnum
-from utils.page import QueryParams
+from utils.page import QueryBuilder, QueryParams
 from controllers._creation import creation_write
 from services.creation_objects import CreationObjects
 
@@ -141,17 +141,18 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         response_model: Type[BaseModel],
         search_fields: Optional[list[str]] = None,
         base_query: Optional["QuerySet"] = None,
+        *,
+        source_chapter_numbers: list[int] | None = None,
     ) -> dict[str, dict[str, int | Any] | Any]:
         """
-        重写 list 方法，支持通过 chapter_id 过滤 JSON 数组。
+        按章节关联筛选资产，兼容单章 ID 和多章序号。
         """
         if base_query is None:
             base_query = self.model.all()
         # Load variants for the paginated asset set without one request per asset.
         base_query = base_query.prefetch_related("variants")
 
-        # 处理 chapter_id 过滤（Python 端过滤 JSON 数组，兼容 SQLite）
-        # 前端传参: /api/asset?chapter_id=3
+        required_chapter = None
         if params.filters and "chapter_id" in params.filters:
             try:
                 chapter_id = int(params.filters.pop("chapter_id"))
@@ -163,16 +164,23 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
                         search_fields,
                         base_query.filter(id__in=[]),
                     )
-                all_assets = await self.model.filter(
-                    novel_id=chapter.novel_id
-                ).values("id", "source_chapters")
-                matching_ids = [
-                    a["id"] for a in all_assets
-                    if chapter.number in (a["source_chapters"] or [])
-                ]
-                base_query = base_query.filter(id__in=matching_ids)
+                required_chapter = chapter.number
+                base_query = base_query.filter(novel_id=chapter.novel_id)
             except (ValueError, TypeError):
                 pass  # 忽略无效的 chapter_id
+
+        if required_chapter is not None or source_chapter_numbers:
+            numbers = set(source_chapter_numbers or [])
+            scoped = await QueryBuilder.apply_filters(base_query, self.model, params.filters)
+            sources = await scoped.values_list("id", "source_chapters")
+            matching_ids = []
+            for asset_id, raw_chapters in sources:
+                chapters = raw_chapters or []
+                if required_chapter is not None and required_chapter not in chapters:
+                    continue
+                if not numbers or not numbers.isdisjoint(chapters):
+                    matching_ids.append(asset_id)
+            base_query = base_query.filter(id__in=matching_ids)
 
         effective_search_fields = search_fields or (
             ["canonical_name", "description"]
