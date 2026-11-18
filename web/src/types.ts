@@ -157,7 +157,7 @@ export interface AiTask {
   created_at: string
   updated_at?: string
 }
-export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech'
+export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_compatible' | 'volcengine_ark' | 'minimax' | 'autodl' | 'dashscope' | 'volcengine_mediakit' | 'volcengine_openspeech' | 'mimo_voice_design'
 export type ImageModelType = 'seedream_5_5' | 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
 export interface ImageGenerationCapabilities { sizes?: Record<string, string[]>; clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
@@ -233,12 +233,13 @@ export interface VideoGenerationCapabilities {
 }
 export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
 export interface ModelPricing {
-  type: 'text' | 'image' | 'video' | 'media_processing' | 'asr'
+  type: 'text' | 'image' | 'video' | 'media_processing' | 'asr' | 'voice_design'
   currency: string
   input_price_per_1m?: number
   cache_input_price_per_1m?: number
   output_price_per_1m?: number
   price_per_minute?: number
+  price_per_second?: number
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>

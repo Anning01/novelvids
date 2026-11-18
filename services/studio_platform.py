@@ -142,6 +142,17 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                 await synced.filter(model=entry.id).update(is_active=False, api_key=key)
                 continue
             seen.add(entry.id)
+            if AiTaskTypeEnum.voice_design in capabilities:
+                from services.billing.pricing import validate_voice_design_pricing
+
+                try:
+                    if capabilities != [AiTaskTypeEnum.voice_design]:
+                        raise ValueError
+                    validate_voice_design_pricing(public_tariff(entry.pricing))
+                except ValueError:
+                    unsupported[entry.id] = "voice_design"
+                    await synced.filter(model=entry.id).update(is_active=False, api_key=key)
+                    continue
             processing_options = None
             if AiTaskTypeEnum.video_enhancement.value in capabilities and entry.processing_options is not None:
                 try:

@@ -459,6 +459,14 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ start, end, novel_id: novelId }),
   }),
+  autoDesignVoice: (payload: {
+    asset_id: number
+    variant_id: number | null
+    expected_voice_reference_id: number | null
+    expected_voice: string
+  }) => request<SingleResponse<{ reference: AudioReference; metadata: Record<string, unknown> }>>('/media-library/audio-references/auto-design', {
+    method: 'POST', body: JSON.stringify(payload),
+  }),
   async uploadAudioReference(file: File, nickname: string, gender: string, novelId?: number) {
     if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav'].includes(file.type) && !/\.(mp3|wav)$/i.test(file.name)) {
       throw new Error(tr('参考音频仅支持 MP3 或 WAV'))
