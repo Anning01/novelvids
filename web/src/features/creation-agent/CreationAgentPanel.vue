@@ -25,6 +25,7 @@ import AgentSetupState from './AgentSetupState.vue'
 import AgentDisclosure from './AgentDisclosure.vue'
 import AgentActivity from './AgentActivity.vue'
 import AgentRunActivity from './AgentRunActivity.vue'
+import { productionTimeline } from './productionTimeline'
 import { targetKey, useCreationAgentWorkspace, type AgentTargetOption } from './workspace'
 import type { AgentChange, AgentChangeItem, AgentMessage, AgentQueryItem, AgentTarget, ProductionReceipt, PromptTargetStatus } from './types'
 
@@ -108,7 +109,7 @@ const visibleMessages = computed<AgentMessage[]>(() => {
   // A long review can outlast the visible history page. Keep the selected run reachable.
   return [...store.messages, { ...run, id: -1, role: 'assistant', created_at: run.started_at ?? '' }]
 })
-const bubbles = computed(() => visibleMessages.value.map(message => props.initialUserText && store.conversationId === props.initialConversationId
+const bubbles = computed(() => productionTimeline(visibleMessages.value).map(message => props.initialUserText && store.conversationId === props.initialConversationId
   && message.id === store.messages.find(item => item.role === 'user')?.id ? { ...message, content: props.initialUserText } : message).filter(message => message.role === 'user' ||
   message.content || message.query_results?.length || message.changes.length || message.activity?.length || message.production?.length || message.started_at || [1, 2, 4, 5, 6].includes(message.status),
 ).map(message => ({ ...message,
@@ -376,7 +377,7 @@ onMounted(() => {
     <BubbleList v-if="visibleMessages.length" ref="messageList" class="creation-agent-panel__messages" :list="bubbles" :virtual="false" :auto-scroll="true" :show-back-button="true" max-height="100%">
       <template #content="{ item }">
         <AgentDisclosure class="creation-agent-panel__message-group" :class="{ 'is-assistant': item.role === 'assistant' }" :title="item.role === 'user' ? tr('你') : tr('创作助手')" :summary="item.preview" :open="messageIsOpen(item)" @update:open="toggleMessage(item.id, $event)">
-        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :waiting-text="item.snapshotUnavailable ? tr('正在恢复最新任务状态') : item.storyReview?.stage === 'needs_review' && item.activityStatus === 2 ? tr('等待确认故事记忆') : undefined" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
+        <AgentRunActivity v-if="item.role === 'assistant' && ([1, 2, 6].includes(item.activityStatus) || item.activity?.length || item.started_at || item.singleProductionResult)" :status="item.activityStatus" :waiting-text="item.snapshotUnavailable ? tr('正在恢复最新任务状态') : item.waitingForMemory && item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) + ' · ' + tr('等待故事记忆') : item.storyReview?.stage === 'needs_review' && item.activityStatus === 2 ? tr('等待确认故事记忆') : undefined" :operation-label="item.singleProductionResult ? productionLabel(item.singleProductionResult.operation) : undefined" :steps="item.activity" :started-at="item.started_at || item.created_at" :finished-at="item.finished_at" :status-text="store.currentRun?.task_id === item.task_id && [1, 2, 6].includes(item.status) ? store.statusText : undefined" @stream-update="messageList?.scrollToBottom(false)" />
         <div v-if="item.storyReview?.story_review_progress" class="creation-agent-panel__story-progress">
           <progress :value="item.storyReview.story_review_progress.completed" :max="item.storyReview.story_review_progress.total" :aria-label="tr('故事复核进度')" />
           <span>{{ tr('已确认 {p0} / {p1} 项', { p0: item.storyReview.story_review_progress.completed, p1: item.storyReview.story_review_progress.total }) }}</span>
@@ -397,7 +398,7 @@ onMounted(() => {
         </div>
         <ul v-if="item.production?.length && !item.singleProductionResult" class="creation-agent-panel__production">
           <li v-for="receipt in item.production" :key="receipt.task_id">
-            {{ productionLabel(receipt.operation) }} · {{ receipt.status === 2 && receipt.stage === 'needs_review' && receipt.operation === 'story_memory_recheck' ? tr('等待确认故事记忆') : receipt.status === 3 && receipt.saved === false ? tr('已生成，尚未设为当前线稿') : tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
+            {{ productionLabel(receipt.operation) }} · {{ item.waitingForMemory && receipt.task_id === item.task_id ? tr('等待故事记忆') : receipt.status === 2 && receipt.stage === 'needs_review' && receipt.operation === 'story_memory_recheck' ? tr('等待确认故事记忆') : receipt.status === 3 && receipt.saved === false ? tr('已生成，尚未设为当前线稿') : tr(({ 1: '等待中', 2: '处理中', 3: '已完成', 4: '失败', 5: '已取消', 6: '排队中' } as Record<number, string>)[receipt.status] || '未知') }}
             <span v-if="receipt.stage === 'billing_pending'">{{ tr('用量正在结算') }}</span>
             <span v-if="receipt.error">{{ receipt.error }}</span>
           </li>

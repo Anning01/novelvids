@@ -614,3 +614,50 @@ it.each([
     applySavedLocale('zh')
   }
 })
+
+it.each(['light', 'dark'])('shows memory before the screenplay and keeps the saved-script refresh after it (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  const memory = { task_id: 'memory', operation: 'story_memory_analyze', status: 2 }
+  const screenplay = { task_id: 'script', operation: 'screenplay', status: 2 }
+  const first = { id: 'model:memory', kind: 'status' as const, label: '整理世界观与剧情进展', status: 'running' as const }
+  const second = { id: 'model:script', kind: 'status' as const, label: '编写本集剧本', status: 'running' as const }
+  const base = { changes: [], usage: {}, created_at: '', status: 2, content: '' }
+  store.messages = [
+    { ...base, id: 1, role: 'user', task_id: 'script', content: '生成本集剧本' },
+    { ...base, id: 2, role: 'assistant', task_id: 'script', production: [screenplay, memory], activity: [first] },
+    { ...base, id: 3, role: 'user', task_id: 'memory', content: '分析故事记忆候选' },
+    { ...base, id: 4, role: 'assistant', task_id: 'memory', production: [memory], activity: [first] },
+  ]
+  await flushPromises()
+  const groups = () => wrapper.findAll('.creation-agent-panel__message-group')
+  expect(groups()[2]!.text()).toContain('整理世界观与剧情进展')
+  expect(groups()[3]!.text()).toContain('等待故事记忆')
+  expect(groups()[3]!.text()).not.toContain('整理世界观与剧情进展')
+  store.messages[1]!.activity = [{ ...first, status: 'completed' }, second]
+  store.messages[1]!.production = [screenplay, { ...memory, status: 3 }]
+  Object.assign(store.messages[3]!, { status: 3, activity: [{ ...first, status: 'completed' }], production: [{ ...memory, status: 3 }] })
+  store.messages.push({ ...base, id: 5, role: 'user', task_id: 'after-save', content: '更新成稿记忆' })
+  await flushPromises()
+  expect(groups()[3]!.text()).toContain('编写本集剧本')
+  expect(groups()[4]!.text()).toContain('更新成稿记忆')
+  wrapper.unmount()
+})
+
+it('orders receipt-only progress before history has loaded its child messages', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [{ id: 1, task_id: 'script', role: 'assistant', status: 2, content: '', usage: {}, changes: [], created_at: '',
+    production: [{ task_id: 'script', operation: 'screenplay', status: 2 },
+      { task_id: 'memory', operation: 'story_memory_analyze', status: 2 }] }]
+  await flushPromises()
+  expect(wrapper.findAll('.creation-agent-panel__production li').map(el => el.text())).toEqual([
+    '分析故事记忆候选 · 处理中', '剧本改编 · 等待故事记忆',
+  ])
+  wrapper.unmount()
+})

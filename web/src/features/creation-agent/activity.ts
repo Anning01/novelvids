@@ -70,5 +70,10 @@ export function mergeActivity(...groups: AgentActivityStep[][]): AgentActivitySt
     }
     merged.set(step.id, next)
   }
-  return [...merged.values()]
+  const steps = [...merged.values()]
+  // Snapshots and live events may arrive in a different order from the model calls.
+  if (steps.every(step => step.started_at && Number.isFinite(Date.parse(step.started_at)))) {
+    steps.sort((a, b) => Date.parse(a.started_at!) - Date.parse(b.started_at!))
+  }
+  return steps
 }

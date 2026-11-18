@@ -4579,6 +4579,7 @@
     "顺序复核全部": "Recheck in order",
     "先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。": "Confirm the global foundation, then each chapter. Until memory is enabled, generation uses project settings and the current script.",
     "复核确认后，才能使用这一范围的记忆生成。": "Review and confirm this scope before using its memory for generation.",
+    "等待故事记忆": "Waiting for story memory",
     "等待确认故事记忆": "Awaiting story memory confirmation",
     "在创作助手查看进度": "View progress in the creation assistant",
     "正在恢复最新任务状态": "Refreshing task status",
