@@ -441,11 +441,32 @@ async def test_model_evidence_anchors_unique_quotes_without_weakening_store_vali
     await save_candidate(project.id, row.id, anchored, 1, initial=True)
 
 
+@pytest.mark.asyncio
+async def test_model_evidence_restores_a_unique_quote_with_collapsed_blank_lines(project):
+    from services.story_memory.evidence import anchor_evidence
+
+    original = '匾上刻着三个大字：\n\n“无极宗”'
+    project.project_setting = '前文。' + original + '\n后文。'
+    await project.save(update_fields=['project_setting'])
+    row = await pending(project)
+    payload = candidate(original.replace('\n\n', '\n'))
+    anchored = anchor_evidence(payload, row.source_snapshot)
+
+    with pytest.raises(HTTPException, match='逐字匹配'):
+        await save_candidate(project.id, row.id, payload, 1, initial=True)
+    saved = await save_candidate(project.id, row.id, anchored, 1, initial=True)
+    assert saved.candidate['facts'][0]['evidence'] == [
+        {'source': 'project.setting', 'quote': original, 'start': 3, 'end': 3 + len(original)},
+    ]
+
+
 @pytest.mark.parametrize('text,quote,start,end,expected', [
     ('古城。古城。', '古城', 1, 3, (1, 3)),
     ('古城。古城。', '古城', 3, 5, (3, 5)),
     ('古城。', '未来城', 0, 3, (0, 3)),
     ('\n  古城🏯。\n', '  古城🏯。', 0, 5, (1, 7)),
+    ('刻着：\n\n无极宗。又刻着：\n\n无极宗。', '刻着：\n无极宗', 0, 6, (0, 6)),
+    ('他说：\n\n也不打声招呼。', '他说：\n也不打个招呼。', 0, 6, (0, 6)),
 ])
 def test_evidence_anchor_preserves_ambiguous_missing_and_exact_quotes(text, quote, start, end, expected):
     from services.story_memory.evidence import anchor_evidence
