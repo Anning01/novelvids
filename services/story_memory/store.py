@@ -3,12 +3,12 @@
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
-from schemas.story_memory import StoryCandidate, StoryReview
+from schemas.story_memory import StoryCandidate
 from services.creation_agent.plan_sources import fingerprint
 from services.creation_objects import project_write
 from services.story_memory.sources import conflict, parent_state, verify_inputs
 
-EMPTY_BASELINE = '全局故事底稿没有可确认事实，请补充故事材料后重新分析'
+CANDIDATE_STATUSES = {'draft', 'ready', 'needs_review'}
 
 
 def package_hash(commit):
@@ -30,8 +30,6 @@ async def validate_candidate(commit, candidate):
             existing = await StorySubject.get_or_none(id=subject.existing_id, novel_id=commit.novel_id)
             if existing is None or existing.kind != subject.kind or existing.name != subject.name:
                 raise HTTPException(422, '故事对象标识与当前作品不匹配')
-            if not set(existing.aliases) <= set(subject.aliases):
-                raise HTTPException(422, '更新对象时须保留已有别名')
         elif await StorySubject.filter(novel_id=commit.novel_id, kind=subject.kind, name=subject.name).exists():
             raise HTTPException(422, '同名故事对象已存在，请核对身份并显式引用 existing_id；不同对象须使用可区分的标准名')
     state = await parent_state(commit)
@@ -40,9 +38,8 @@ async def validate_candidate(commit, candidate):
     for fact in candidate.facts:
         for evidence in fact.evidence:
             section, key = evidence.source.split('.')
-            text = (commit.source_snapshot.get(section) or {}).get(key, '')
-            if text[evidence.start:evidence.end] != evidence.quote or evidence.end > len(text):
-                raise HTTPException(422, '事实证据必须逐字匹配本次源文本快照及位置')
+            if key not in (commit.source_snapshot.get(section) or {}):
+                raise HTTPException(422, '候选引用了本次源快照中不存在的字段')
         if fact.replaces_id:
             previous = active.get(fact.replaces_id)
             subject = subjects[fact.subject_ref]
@@ -54,14 +51,14 @@ async def validate_candidate(commit, candidate):
 async def save_candidate(novel_id, commit_id, candidate, expected_revision, *, initial=False):
     async with project_write(novel_id):
         commit = await get_commit(novel_id, commit_id)
-        allowed = {'pending'} if initial else {'draft', 'ready', 'needs_review'}
+        allowed = {'pending'} if initial else CANDIDATE_STATUSES
         if commit.status not in allowed or commit.revision != expected_revision:
             conflict('候选已变化或已结束，请重新读取')
         await verify_inputs(commit)
         parsed = await validate_candidate(commit, candidate)
         commit.candidate = parsed.model_dump(mode='json')
         commit.review = {}
-        commit.status = 'draft'
+        commit.status = 'ready'
         if not initial:
             commit.revision += 1
         commit.package_hash = package_hash(commit)
@@ -69,53 +66,21 @@ async def save_candidate(novel_id, commit_id, candidate, expected_revision, *, i
         return commit
 
 
-async def save_review(novel_id, commit_id, revision, candidate_hash, review, *, task_id=None):
-    parsed = StoryReview.model_validate(review)
-    async with project_write(novel_id):
-        commit = await get_commit(novel_id, commit_id)
-        if commit.status not in {'draft', 'ready', 'needs_review'} or commit.revision != revision or fingerprint(commit.candidate) != candidate_hash:
-            conflict('审核期间候选已变化，本次审核不能使用')
-        await verify_inputs(commit)
-        await validate_candidate(commit, commit.candidate)
-        if any(issue.fact_index is not None and issue.fact_index >= len(commit.candidate['facts']) for issue in parsed.issues):
-            raise HTTPException(422, '审核引用了不存在的候选事实')
-        commit.review = parsed.model_dump(mode='json')
-        if commit.chapter_id is None and not commit.candidate['facts'] and not any(issue.severity == 'blocking' for issue in parsed.issues):
-            commit.review['issues'].append({'severity': 'blocking', 'fact_index': None, 'reason': EMPTY_BASELINE})
-        if task_id:
-            commit.review['task_id'] = str(task_id)
-        commit.status = 'needs_review' if any(issue['severity'] == 'blocking' for issue in commit.review['issues']) else 'ready'
-        commit.package_hash = package_hash(commit)
-        await commit.save(update_fields=['review', 'status', 'package_hash', 'updated_at'])
-        return commit
-
-
-async def save_repaired_candidate(novel_id, commit_id, expected_hash, candidate, review, *, task_id):
-    async with project_write(novel_id):
-        current = await get_commit(novel_id, commit_id)
-        if current.status != 'needs_review' or current.package_hash != expected_hash:
-            conflict('候选或审核已变化，补全结果不能使用')
-        revised = await save_candidate(novel_id, commit_id, candidate, current.revision)
-        return await save_review(novel_id, commit_id, revised.revision, fingerprint(revised.candidate), review, task_id=task_id)
-
-
 async def decide(novel_id, commit_id, body, actor_id):
     async with project_write(novel_id):
         commit = await get_commit(novel_id, commit_id)
         if commit.package_hash != body.expected_package_hash:
-            conflict('确认对应的候选或审核已变化，请重新核对')
+            conflict('候选版本已变化，请重新读取')
         desired = 'accepted' if body.decision == 'accept' else 'rejected'
         if commit.status in {'accepted', 'rejected'}:
             if commit.status != desired:
                 conflict('此提交已经结束，不能更改裁决')
             return commit
         if body.decision == 'accept':
-            if commit.chapter_id is None and commit.candidate and not commit.candidate.get('facts'):
-                conflict(EMPTY_BASELINE)
             if commit.status == 'stale':
                 await verify_inputs(commit)
-            if commit.status != 'ready' or not commit.review:
-                conflict('候选须先完成审核，并处理阻断问题')
+            if commit.status not in CANDIDATE_STATUSES:
+                conflict('候选尚未生成，不能确认')
             await verify_inputs(commit)
             candidate = await validate_candidate(commit, commit.candidate)
             await publish(commit, candidate)
@@ -125,7 +90,7 @@ async def decide(novel_id, commit_id, body, actor_id):
                 await invalidate(novel_id, chapter_id=commit.chapter_id,
                     from_number=chapter['number'] + 1 if chapter else None,
                     reason='upstream_commit_changed', exclude_commit_id=commit.id)
-        elif commit.status not in {'draft', 'ready', 'needs_review'}:
+        elif commit.status not in CANDIDATE_STATUSES:
             conflict('候选尚未生成，不能裁决')
         commit.status = desired
         commit.decided_by, commit.decision = actor_id, body.note

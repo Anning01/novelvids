@@ -8,15 +8,15 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from auth.deps import AuthContext
-from controllers.story_memory import submit_analysis, submit_review
+from controllers.story_memory import submit_analysis
 from models.asset import Asset
 from models.chapter import Chapter
 from models.novel import Novel
 from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
-from schemas.story_memory import StoryAnalysisRequest, StoryCandidate, StoryDecision, StoryReviewRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryCandidate, StoryDecision
 from services.creation_agent.plan_sources import fingerprint
 from services.story_memory.sources import latest_commit, predecessor, source_snapshot
-from services.story_memory.store import commit_data, decide, save_candidate, save_review
+from services.story_memory.store import commit_data, decide, package_hash, save_candidate
 
 
 @pytest.fixture(autouse=True)
@@ -47,12 +47,10 @@ async def pending(project, chapter=None):
         replaces_id=previous.id if previous else None)
 
 
-async def reviewed(project, chapter=None, payload=None, issues=None):
+async def saved_candidate(project, chapter=None, payload=None):
     row = await pending(project, chapter)
     subject = await StorySubject.get_or_none(novel=project, name='故城世界')
-    row = await save_candidate(project.id, row.id, payload or candidate(existing_id=subject.id if subject else None), 1, initial=True)
-    return await save_review(project.id, row.id, row.revision, fingerprint(row.candidate),
-        {'issues': issues or [], 'summary': '逐项核对了主体、时点和原文依据。'})
+    return await save_candidate(project.id, row.id, payload or candidate(existing_id=subject.id if subject else None), 1, initial=True)
 
 
 async def accept(project, row, actor=17):
@@ -76,7 +74,7 @@ async def test_global_memory_uses_bounded_opening_when_only_import_metadata_exis
     assert len(source['opening_chapter']['text']) == 6000
     assert '后来建立了电网' not in str(source)
     payload = candidate(quote, source='opening_chapter.text')
-    baseline = await accept(book, await reviewed(book, payload=payload))
+    baseline = await accept(book, await saved_candidate(book, payload=payload))
     assert (await memory_status(book.id))['baseline']['state'] == 'current'
     later.content = '后文经过修改。'
     await later.save(update_fields=['content'])
@@ -92,31 +90,27 @@ async def test_global_memory_uses_bounded_opening_when_only_import_metadata_exis
 
 
 @pytest.mark.asyncio
-async def test_empty_global_review_cannot_publish_even_with_a_previous_ready_status(project):
-    payload = {'subjects': [], 'facts': [], 'summary': '没有可确认的故事事实。', 'ending_state': '', 'unresolved': []}
-    row = await reviewed(project, payload=payload)
-    assert row.status == 'needs_review' and row.review['issues'][0]['severity'] == 'blocking'
-    with pytest.raises(HTTPException, match='没有可确认事实'):
-        await accept(project, row)
-    await StoryCommit.filter(id=row.id).update(status='ready')
-    await row.refresh_from_db()
-    with pytest.raises(HTTPException, match='没有可确认事实'):
-        await accept(project, row)
-    assert not await StorySnapshot.all().exists()
-
+async def test_empty_global_candidate_is_valid_and_enables_chapter_analysis(project):
+    from services.story_memory.status import memory_status
+    chapter = await Chapter.create(novel=project, number=1, name='第一章', content='原文。')
+    payload = {'subjects': [], 'facts': [], 'summary': '现有资料有限。', 'ending_state': '', 'unresolved': ['时代未定。']}
+    row = await accept(project, await saved_candidate(project, payload=payload))
+    snapshot = await StorySnapshot.get(commit=row)
+    assert snapshot.data['fact_ids'] == []
+    assert snapshot.data['unresolved'] == ['时代未定。']
+    state = await memory_status(project.id)
+    assert state['baseline']['state'] == 'current'
+    assert state['chapters'][0]['can_analyze']
+    assert await predecessor(project.id, chapter.id) == row.id
 
 @pytest.mark.asyncio
-async def test_candidate_review_confirmation_and_history_preserve_existing_data(project):
+async def test_candidate_confirmation_and_history_preserve_existing_data(project):
     chapter = await Chapter.create(novel=project, number=1, name='邻居', content='原文', screenplay='邻居守着木门。')
     asset = await Asset.create(novel=project, canonical_name='已有邻居', asset_type=1, base_traits='用户已保存的设计')
     row = await pending(project)
     row = await save_candidate(project.id, row.id, candidate(), 1, initial=True)
-    assert row.status == 'draft'
+    assert row.status == 'ready' and row.review == {}
     assert not await StoryFact.all().exists() and not await StorySubject.all().exists()
-    with pytest.raises(HTTPException, match='审核'):
-        await accept(project, row)
-    row = await save_review(project.id, row.id, row.revision, fingerprint(row.candidate), {'issues': [], 'summary': '核对通过'})
-    assert not await StoryFact.all().exists()
     row = await accept(project, row)
     assert row.status == 'accepted' and row.decided_by == 17
     assert await StoryFact.all().count() == await StorySubject.all().count() == await StorySnapshot.all().count() == 1
@@ -132,7 +126,7 @@ async def test_candidate_review_confirmation_and_history_preserve_existing_data(
 
 @pytest.mark.asyncio
 async def test_repeated_and_parallel_decisions_publish_once(project):
-    row = await reviewed(project)
+    row = await saved_candidate(project)
     first, second = await asyncio.gather(accept(project, row), accept(project, row))
     assert first.id == second.id
     assert await StoryFact.all().count() == await StorySnapshot.all().count() == 1
@@ -141,18 +135,13 @@ async def test_repeated_and_parallel_decisions_publish_once(project):
 
 
 @pytest.mark.asyncio
-async def test_blocking_review_rejection_and_candidate_edit_invalidate_approval(project):
-    row = await reviewed(project, issues=[{'severity': 'blocking', 'fact_index': 0, 'reason': '证言被写成了事实'}])
-    assert row.status == 'needs_review'
-    with pytest.raises(HTTPException, match='阻断'):
-        await accept(project, row)
+async def test_candidate_edit_invalidates_previous_version_and_can_be_rejected(project):
+    row = await saved_candidate(project)
     old_hash = row.package_hash
     updated = await save_candidate(project.id, row.id, candidate(content='仅作为候选核对'), row.revision)
-    assert updated.revision == 2 and updated.status == 'draft' and not updated.review
+    assert updated.revision == 2 and updated.status == 'ready' and not updated.review
     with pytest.raises(HTTPException, match='变化'):
         await accept(project, row)
-    with pytest.raises(HTTPException, match='审核期间'):
-        await save_review(project.id, row.id, 1, fingerprint(row.candidate), {'issues': [], 'summary': '迟到审核'})
     with pytest.raises(HTTPException, match='变化'):
         await save_candidate(project.id, row.id, candidate(), 1)
     rejected = await decide(project.id, row.id, StoryDecision(expected_package_hash=updated.package_hash,
@@ -162,27 +151,20 @@ async def test_blocking_review_rejection_and_candidate_edit_invalidate_approval(
 
 
 @pytest.mark.asyncio
-async def test_rereview_blocks_unresolved_conflicts_and_revokes_prior_approval_package(project):
-    payload = candidate()
-    payload['facts'][0]['nature'] = 'inference'
-    payload['unresolved'] = ['前后章首次停电的时序互斥，尚未修正剧本。']
-    row = await reviewed(project, payload=payload)
-    previously_ready_hash = row.package_hash
-    row = await save_review(project.id, row.id, row.revision, fingerprint(row.candidate), {
-        'issues': [{'severity': 'blocking', 'fact_index': 0, 'reason': '标注待确认不能解除未解决的时序矛盾。'}],
-        'summary': '须修正剧本或候选并重新审核。'})
-    assert row.status == 'needs_review'
-    with pytest.raises(HTTPException, match='变化'):
-        await decide(project.id, row.id, StoryDecision(expected_package_hash=previously_ready_hash,
-            decision='accept'), 17)
-    with pytest.raises(HTTPException, match='阻断'):
-        await accept(project, row)
-    assert not await StoryFact.all().exists() and not await StorySnapshot.all().exists()
-
+@pytest.mark.parametrize('status', ['draft', 'needs_review'])
+async def test_legacy_candidates_are_confirmable_and_keep_the_saved_review(project, status):
+    row = await saved_candidate(project)
+    row.status = status
+    row.review = {'issues': [{'severity': 'blocking', 'fact_index': 0, 'reason': '旧审核意见'}]} if status == 'needs_review' else {}
+    row.package_hash = package_hash(row)
+    await row.save(update_fields=['status', 'review', 'package_hash'])
+    accepted = await accept(project, row)
+    assert accepted.status == 'accepted' and accepted.review == row.review
+    assert await StoryFact.filter(commit=accepted).count() == 1
 
 @pytest.mark.asyncio
 async def test_changed_source_rejects_approval_and_retains_snapshot(project):
-    row = await reviewed(project)
+    row = await saved_candidate(project)
     project.project_setting = '未来世界，有电力。'
     await project.save(update_fields=['project_setting'])
     with pytest.raises(HTTPException, match='变化'):
@@ -197,11 +179,8 @@ async def test_evidence_scope_subject_and_cross_project_validation(project):
     row = await pending(project)
     other = await Novel.create(name='另一部书')
     foreign = await StorySubject.create(novel=other, kind='world', name='故城世界')
-    bad_quote = candidate()
-    bad_quote['facts'][0]['evidence'][0]['quote'] = '原文没有这句话'
-    bad_range = candidate()
-    bad_range['facts'][0]['evidence'][0].update(start=1, end=200)
-    for payload in (bad_quote, bad_range, candidate(existing_id=foreign.id)):
+    wrong_source = candidate(source='chapter.text')
+    for payload in (wrong_source, candidate(existing_id=foreign.id)):
         with pytest.raises(HTTPException) as error:
             await save_candidate(project.id, row.id, payload, 1, initial=True)
         assert error.value.status_code == 422
@@ -218,12 +197,12 @@ async def test_baseline_and_chapter_prefix_are_required_and_versioned(project):
     second = await Chapter.create(novel=project, number=2, name='第二章', content='守卫离开。')
     with pytest.raises(HTTPException, match='全局'):
         await pending(project, first)
-    baseline = await accept(project, await reviewed(project))
+    baseline = await accept(project, await saved_candidate(project))
     with pytest.raises(HTTPException, match='第 1 章'):
         await pending(project, second)
     subject = await StorySubject.get(novel=project)
-    one = await accept(project, await reviewed(project, first, candidate(first.screenplay, source='chapter.text', existing_id=subject.id)))
-    two = await reviewed(project, second, candidate(second.content, source='chapter.text', existing_id=subject.id))
+    one = await accept(project, await saved_candidate(project, first, candidate(first.screenplay, source='chapter.text', existing_id=subject.id)))
+    two = await saved_candidate(project, second, candidate(second.content, source='chapter.text', existing_id=subject.id))
     assert one.parent_id == baseline.id and two.parent_id == one.id
     assert one.source_snapshot['chapter']['kind'] == 'screenplay'
     assert two.source_snapshot['chapter']['kind'] == 'source'
@@ -236,24 +215,24 @@ async def test_baseline_and_chapter_prefix_are_required_and_versioned(project):
 
 @pytest.mark.asyncio
 async def test_new_baseline_or_competing_commit_invalidates_old_candidates(project):
-    a, b = await reviewed(project), await reviewed(project)
+    a, b = await saved_candidate(project), await saved_candidate(project)
     await accept(project, a)
     with pytest.raises(HTTPException, match='新的正式提交'):
         await accept(project, b)
-    new = await accept(project, await reviewed(project))
+    new = await accept(project, await saved_candidate(project))
     assert new.replaces_id == a.id and not (await commit_data(a))['current']
     assert (await commit_data(new))['current']
 
 
 @pytest.mark.asyncio
 async def test_replacements_retractions_and_rollback_are_atomic(project, monkeypatch):
-    baseline = await accept(project, await reviewed(project))
+    baseline = await accept(project, await saved_candidate(project))
     old_fact = await StoryFact.get(commit=baseline)
     subject = await StorySubject.get(id=old_fact.subject_id)
     first = await Chapter.create(novel=project, number=1, name='变化', content='古城出现电力。')
     payload = candidate(first.content, source='chapter.text', existing_id=subject.id)
     payload['facts'][0].update(operation='replace', replaces_id=old_fact.id, content=first.content)
-    row = await reviewed(project, first, payload)
+    row = await saved_candidate(project, first, payload)
     original = StorySnapshot.create
     monkeypatch.setattr(StorySnapshot, 'create', AsyncMock(side_effect=RuntimeError('snapshot failure')))
     with pytest.raises(RuntimeError):
@@ -268,26 +247,26 @@ async def test_replacements_retractions_and_rollback_are_atomic(project, monkeyp
     second = await Chapter.create(novel=project, number=2, name='纠正', content='前次电光并非电力。')
     payload = candidate(second.content, source='chapter.text', existing_id=subject.id)
     payload['facts'][0].update(operation='retract', replaces_id=new_fact.id)
-    retracted = await accept(project, await reviewed(project, second, payload))
+    retracted = await accept(project, await saved_candidate(project, second, payload))
     assert (await StorySnapshot.get(commit=retracted)).data['fact_ids'] == []
     assert await StoryFact.all().count() == 3  # Original and retraction evidence remain immutable.
 
 
 @pytest.mark.asyncio
-async def test_analysis_task_is_idempotent_and_review_is_a_separate_call(project, monkeypatch):
+async def test_analysis_task_is_idempotent_and_uses_one_strict_call(project, monkeypatch):
     from models.config import AiModelConfig
     from services.ai_task_executor import ai_task_executor
     from services.creation_agent.skill_execution import SkillExecution
     await AiModelConfig.create(name='strict', model='strict', task_type=7,
         base_url='https://model.invalid', api_key='test', supports_strict_output=True, is_active=True)
     seen = []
+    payload = candidate()
+    payload['facts'][0]['evidence'][0].update(quote='原文没有这句话', start=0, end=200)
+
     async def generate(self, facts):
         seen.append((self.params['output_contract']['name'], facts))
-        if len(seen) == 1:
-            payload = candidate()
-            payload['facts'][0]['evidence'][0]['end'] -= 1
-            return payload
-        return {'issues': [], 'summary': '原文依据核对通过'}
+        return payload
+
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     request = StoryAnalysisRequest(request_id=uuid4())
     task = await submit_analysis(project.id, request, AuthContext())
@@ -299,47 +278,40 @@ async def test_analysis_task_is_idempotent_and_review_is_a_separate_call(project
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     row = await StoryCommit.get(task=task)
-    assert row.status == 'ready' and not await StoryFact.all().exists()
-    assert row.review['task_id'] == str(task.id)
-    assert [name for name, _ in seen] == ['story_memory_extract', 'story_memory_review']
-    assert 'candidate' in seen[1][1] and seen[0][1]['source_snapshot']['project']['setting'] == project.project_setting
-    assert seen[1][1]['candidate']['facts'][0]['evidence'][0]['end'] == len(project.project_setting)
-    updated = await save_candidate(project.id, row.id, candidate(), row.revision)
-    review_task = await submit_review(project.id, row.id, StoryReviewRequest(expected_revision=updated.revision), AuthContext())
-    assert (await submit_review(project.id, row.id, StoryReviewRequest(expected_revision=updated.revision), AuthContext())).id == review_task.id
-    await ai_task_executor.run(review_task)
-    await review_task.refresh_from_db()
-    assert review_task.status == 3, review_task.error_message
-
+    assert row.status == 'ready' and row.review == {} and not await StoryFact.all().exists()
+    assert [name for name, _ in seen] == ['story_memory_extract']
+    assert seen[0][1]['source_snapshot']['project']['setting'] == project.project_setting
+    assert row.candidate == payload
+    accepted = await accept(project, row)
+    assert (await StoryFact.get(commit=accepted)).evidence == payload['facts'][0]['evidence']
 
 @pytest.mark.asyncio
-async def test_review_failure_keeps_editable_candidate_and_never_publishes(project, monkeypatch):
+async def test_extraction_failure_creates_no_candidate_or_snapshot(project, monkeypatch):
     from models.config import AiModelConfig
     from services.ai_task_executor import ai_task_executor
     from services.creation_agent.skill_execution import SkillExecution
     await AiModelConfig.create(name='strict', model='strict', task_type=7,
         base_url='https://model.invalid', api_key='test', supports_strict_output=True, is_active=True)
     async def generate(self, facts):
-        if self.params['output_contract']['name'].endswith('review'):
-            raise RuntimeError('review unavailable')
-        return candidate()
+        raise RuntimeError('model unavailable')
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     task = await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4()), AuthContext())
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     row = await StoryCommit.get(task=task)
-    assert task.status == 4 and row.status == 'draft'
-    assert row.candidate['facts'] and not await StoryFact.all().exists()
+    assert task.status == 4 and row.status == 'pending'
+    assert not row.candidate and not await StorySnapshot.all().exists()
 
 
 @pytest.mark.asyncio
-async def test_reanalysis_excludes_host_review_receipts_from_model_context(project, monkeypatch):
+async def test_reanalysis_keeps_old_review_as_history_only(project, monkeypatch):
     from models.config import AiModelConfig
     from services.ai_task_executor import ai_task_executor
     from services.creation_agent.skill_execution import SkillExecution
-    previous = await reviewed(project)
-    previous = await save_review(project.id, previous.id, previous.revision, fingerprint(previous.candidate),
-        {'issues': [], 'summary': '已核对'}, task_id=uuid4())
+    previous = await saved_candidate(project)
+    previous.review = {'issues': [], 'summary': '旧审核记录', 'task_id': str(uuid4())}
+    previous.package_hash = package_hash(previous)
+    await previous.save(update_fields=['review', 'package_hash'])
     previous = await accept(project, previous)
     subject = await StorySubject.get(novel=project)
     await AiModelConfig.create(name='strict', model='strict', task_type=7,
@@ -347,15 +319,15 @@ async def test_reanalysis_excludes_host_review_receipts_from_model_context(proje
     contexts = []
     async def generate(self, context):
         contexts.append(context)
-        return (candidate(existing_id=subject.id) if self.params['operation'] == 'story_memory_analyze'
-            and self.params['output_contract']['name'].endswith('extract') else {'issues': [], 'summary': '已核对'})
+        return candidate(existing_id=subject.id)
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     task = await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4()), AuthContext())
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
-    assert len(contexts) == 2
-    assert all(context['previous_commit']['review'] == {'issues': [], 'summary': '已核对'} for context in contexts)
+    assert len(contexts) == 1
+    assert contexts[0]['previous_commit']['candidate'] == previous.candidate
+    assert 'review' not in contexts[0]['previous_commit']
     assert (await StoryCommit.get(id=previous.id)).review['task_id'] == previous.review['task_id']
 
 
@@ -363,37 +335,30 @@ def test_prompt_language_and_strict_contracts():
     from prompts.story_memory import contract, method
     from prompts.text_tasks import render_text_task
     for language in ('zh', 'en'):
-        for stage in ('extract', 'review'):
-            system, content = render_text_task(language=language,
-                skill=method({'instructions': '自定义方法', 'references': []}, stage, language), context={})
-            assert f'language={language}' in system + content
-            assert ('不能登记为已发生事件' if stage == 'extract' else '不代用户批准') in content
-            if stage == 'extract':
-                assert 'plan 只能填在 nature' in content
-                assert 'category=outline、nature=plan' in content
-                assert 'facts.subject_ref 或 scope.world_ref 实际引用的对象' in content
-                assert '各场景的事实填写对应 scope.world_ref' in content
-                assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content
-            else:
-                assert 'chapter 为 null 代表全局故事底稿' in content
-                assert 'chapter 非 null 代表当前章' in content
-                assert '不因这些未知项阻断确认' in content
-                assert '场景世界范围或混淆回忆与当前世界时，标为 blocking' in content
-                assert '与前置正式记忆在同一对象的事实时序或规则上不可同时成立' in content
-                assert '把互斥事实写进 unresolved、标成 inference、并列两说或声明留待用户裁决，都不能解除阻断' in content
-            schema = contract(stage)
-            assert schema['name'] == f'story_memory_{stage}'
-            def check(value):
-                if isinstance(value, dict):
-                    assert 'default' not in value
-                    if value.get('type') == 'object':
-                        assert set(value['required']) == set(value['properties']) and value['additionalProperties'] is False
-                    for item in value.values():
-                        check(item)
-                if isinstance(value, list):
-                    for item in value:
-                        check(item)
-            check(schema['schema'])
+        system, content = render_text_task(language=language,
+            skill=method({'instructions': '自定义方法', 'references': []}, language), context={})
+        assert f'language={language}' in system + content
+        assert '不能登记为已发生事件' in content
+        assert 'plan 只能填在 nature' in content
+        assert 'category=outline、nature=plan' in content
+        assert 'facts.subject_ref 或 scope.world_ref 实际引用的对象' in content
+        assert '各场景的事实填写对应 scope.world_ref' in content
+        assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content
+    schema = contract()
+    assert schema['name'] == 'story_memory_extract'
+
+    def check(value):
+        if isinstance(value, dict):
+            assert 'default' not in value
+            if value.get('type') == 'object':
+                assert set(value['required']) == set(value['properties']) and value['additionalProperties'] is False
+            for item in value.values():
+                check(item)
+        if isinstance(value, list):
+            for item in value:
+                check(item)
+
+    check(schema['schema'])
 
 
 @pytest.mark.parametrize('mutation', ['unknown', 'duplicate', 'replacement', 'range', 'unused_subject'])
@@ -417,88 +382,34 @@ def test_candidate_contract_rejects_ambiguous_changes(mutation):
 async def test_exact_evidence_keeps_whitespace_and_unicode(project):
     project.project_setting = '\n  古城🏯，没有电力。\n'
     await project.save(update_fields=['project_setting'])
-    row = await reviewed(project, payload=candidate(project.project_setting))
+    row = await saved_candidate(project, payload=candidate(project.project_setting))
     row = await accept(project, row)
     fact = await StoryFact.get(commit=row)
     assert fact.evidence[0]['quote'] == project.project_setting
 
 
 @pytest.mark.asyncio
-async def test_model_evidence_anchors_unique_quotes_without_weakening_store_validation(project):
-    from services.story_memory.evidence import anchor_evidence
-    project.project_setting = '前文🏯。周砚停在门前，没有穿过去。\n后文。'
-    await project.save(update_fields=['project_setting'])
-    row = await pending(project)
-    quote = '周砚停在门前，没有穿过去。'
-    payload = candidate(quote)
-    payload['facts'][0]['evidence'][0].update(start=4, end=16)
-    anchored = anchor_evidence(payload, row.source_snapshot)
-    assert anchored['facts'][0]['evidence'][0] == {'source': 'project.setting',
-        'quote': quote, 'start': 4, 'end': 4 + len(quote)}
-    assert payload['facts'][0]['evidence'][0]['end'] == 16
-    with pytest.raises(HTTPException, match='逐字匹配'):
-        await save_candidate(project.id, row.id, payload, 1, initial=True)
-    await save_candidate(project.id, row.id, anchored, 1, initial=True)
-
-
-@pytest.mark.asyncio
-async def test_model_evidence_restores_a_unique_quote_with_collapsed_blank_lines(project):
-    from services.story_memory.evidence import anchor_evidence
-
-    original = '匾上刻着三个大字：\n\n“无极宗”'
-    project.project_setting = '前文。' + original + '\n后文。'
-    await project.save(update_fields=['project_setting'])
-    row = await pending(project)
-    payload = candidate(original.replace('\n\n', '\n'))
-    anchored = anchor_evidence(payload, row.source_snapshot)
-
-    with pytest.raises(HTTPException, match='逐字匹配'):
-        await save_candidate(project.id, row.id, payload, 1, initial=True)
-    saved = await save_candidate(project.id, row.id, anchored, 1, initial=True)
-    assert saved.candidate['facts'][0]['evidence'] == [
-        {'source': 'project.setting', 'quote': original, 'start': 3, 'end': 3 + len(original)},
-    ]
-
-
-@pytest.mark.parametrize('text,quote,start,end,expected', [
-    ('古城。古城。', '古城', 1, 3, (1, 3)),
-    ('古城。古城。', '古城', 3, 5, (3, 5)),
-    ('古城。', '未来城', 0, 3, (0, 3)),
-    ('\n  古城🏯。\n', '  古城🏯。', 0, 5, (1, 7)),
-    ('刻着：\n\n无极宗。又刻着：\n\n无极宗。', '刻着：\n无极宗', 0, 6, (0, 6)),
-    ('他说：\n\n也不打声招呼。', '他说：\n也不打个招呼。', 0, 6, (0, 6)),
-])
-def test_evidence_anchor_preserves_ambiguous_missing_and_exact_quotes(text, quote, start, end, expected):
-    from services.story_memory.evidence import anchor_evidence
-    payload = candidate(quote)
-    payload['facts'][0]['evidence'][0].update(start=start, end=end)
-    result = anchor_evidence(payload, {'project': {'setting': text}})
-    evidence = result['facts'][0]['evidence'][0]
-    assert (evidence['start'], evidence['end']) == expected and evidence['quote'] == quote
-
-
-@pytest.mark.asyncio
 async def test_same_name_requires_explicit_identity_and_old_aliases_are_preserved(project):
-    await accept(project, await reviewed(project))
+    await accept(project, await saved_candidate(project))
     subject = await StorySubject.get(novel=project)
     subject.aliases = ['旧称']
     await subject.save(update_fields=['aliases'])
     row = await pending(project)
-    for payload in (candidate(), candidate(existing_id=subject.id)):
-        with pytest.raises(HTTPException) as error:
-            await save_candidate(project.id, row.id, payload, 1, initial=True)
-        assert error.value.status_code == 422
+    with pytest.raises(HTTPException, match='同名'):
+        await save_candidate(project.id, row.id, candidate(), 1, initial=True)
     payload = candidate(existing_id=subject.id)
-    payload['subjects'][0]['aliases'] = ['旧称', '新称']
+    payload['subjects'][0]['aliases'] = ['新称']
     saved = await save_candidate(project.id, row.id, payload, 1, initial=True)
-    assert saved.status == 'draft'
     await subject.refresh_from_db()
-    assert subject.aliases == ['旧称']  # A candidate cannot change the official identity catalog.
+    assert subject.aliases == ['旧称']
+    await accept(project, saved)
+    await subject.refresh_from_db()
+    assert set(subject.aliases) == {'旧称', '新称'}
 
 
 @pytest.mark.asyncio
-async def test_invented_replacement_and_invalid_review_reference_are_rejected(project):
-    baseline = await accept(project, await reviewed(project))
+async def test_invented_replacement_is_rejected(project):
+    baseline = await accept(project, await saved_candidate(project))
     subject = await StorySubject.get(novel=project)
     chapter = await Chapter.create(novel=project, number=1, name='一', content='古城断水。')
     row = await pending(project, chapter)
@@ -507,10 +418,7 @@ async def test_invented_replacement_and_invalid_review_reference_are_rejected(pr
     with pytest.raises(HTTPException, match='有效事实'):
         await save_candidate(project.id, row.id, payload, 1, initial=True)
     payload['facts'][0].update(operation='add', replaces_id=None)
-    saved = await save_candidate(project.id, row.id, payload, 1, initial=True)
-    with pytest.raises(HTTPException, match='不存在'):
-        await save_review(project.id, saved.id, 1, fingerprint(saved.candidate), {
-            'issues': [{'severity': 'blocking', 'fact_index': 1, 'reason': '不存在的条目'}], 'summary': '核对'})
+    await save_candidate(project.id, row.id, payload, 1, initial=True)
     assert await StoryFact.filter(commit=baseline).count() == 1
 
 
@@ -518,7 +426,7 @@ async def test_invented_replacement_and_invalid_review_reference_are_rejected(pr
 async def test_story_evidence_prevents_chapter_deletion_and_renumbering(project):
     from controllers.chapter import chapter_controller
     from schemas.chapter import ChapterPatch
-    await accept(project, await reviewed(project))
+    await accept(project, await saved_candidate(project))
     chapter = await Chapter.create(novel=project, number=1, name='一', content='古城断水。')
     await pending(project, chapter)
     with pytest.raises(HTTPException, match='故事记忆'):

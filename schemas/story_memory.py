@@ -92,17 +92,6 @@ class StoryCandidate(StoryModel):
         return self
 
 
-class StoryReviewIssue(StoryModel):
-    severity: Literal['blocking', 'warning']
-    fact_index: int | None = Field(default=None, ge=0)
-    reason: str = Field(min_length=1, max_length=4000)
-
-
-class StoryReview(StoryModel):
-    issues: list[StoryReviewIssue] = Field(max_length=500)
-    summary: str = Field(min_length=1, max_length=8000)
-
-
 class StoryAnalysisRequest(StoryModel):
     request_id: UUID
     chapter_id: int | None = Field(default=None, gt=0)
@@ -113,15 +102,6 @@ class StoryAnalysisRequest(StoryModel):
 class StoryCandidateUpdate(StoryModel):
     expected_revision: int = Field(ge=1)
     candidate: StoryCandidate
-
-
-class StoryReviewRequest(StoryModel):
-    expected_revision: int = Field(ge=1)
-    assistant_model_config_id: int | None = Field(default=None, gt=0)
-
-
-class StoryRepairRequest(StoryReviewRequest):
-    expected_package_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
 class StoryDecision(StoryModel):

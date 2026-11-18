@@ -8,7 +8,7 @@ import { notice } from '@/shared/notice'
 import type { AiTask } from '@/types'
 import type { MemoryCandidate, MemoryDetail, MemoryStatus } from './types'
 
-vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), review: vi.fn(), repair: vi.fn(), decide: vi.fn() } }))
+vi.mock('./api', () => ({ storyMemoryApi: { status: vi.fn(), context: vi.fn(), history: vi.fn(), detail: vi.fn(), activity: vi.fn(), analyze: vi.fn(), recheck: vi.fn(), update: vi.fn(), decide: vi.fn() } }))
 vi.mock('@/api', async original => ({ ...await original<typeof import('@/api')>(), api: { task: vi.fn() } }))
 vi.mock('@/shared/notice', () => ({ notice: { error: vi.fn(), success: vi.fn() } }))
 const response = <T,>(data: T) => ({ code: 0, message: '', data })
@@ -52,11 +52,10 @@ beforeEach(() => {
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(structuredClone(ready)))
   vi.mocked(storyMemoryApi.activity).mockResolvedValue(response(null))
   vi.mocked(storyMemoryApi.context).mockResolvedValue(response({ enabled: true, current: { summary: '已确认的背景', ending_state: '', unresolved: [] }, facts: [] }))
-  vi.mocked(storyMemoryApi.update).mockResolvedValue(response({ ...structuredClone(ready), revision: 2, status: 'draft', review: {} }))
+  vi.mocked(storyMemoryApi.update).mockResolvedValue(response({ ...structuredClone(ready), revision: 2, status: 'ready', review: {} }))
   vi.mocked(storyMemoryApi.decide).mockResolvedValue(response({ ...structuredClone(ready), status: 'accepted' }))
   vi.mocked(storyMemoryApi.analyze).mockResolvedValue(response(task(3)))
   vi.mocked(storyMemoryApi.recheck).mockResolvedValue(response(task(3)))
-  vi.mocked(storyMemoryApi.review).mockResolvedValue(response(task(3)))
   vi.mocked(api.task).mockResolvedValue(response(task(3)))
 })
 afterEach(() => { reviewHost.remove(); vi.useRealTimers() })
@@ -66,8 +65,8 @@ it('separates confirmed memory from reviewable candidates and preserves source e
   await flushPromises()
   expect(wrapper.get('h2').text()).toContain('故事记忆')
   expect(wrapper.text()).toContain('当前有效记忆')
-  expect(wrapper.text()).not.toContain('候选与审核')
-  expect(review.text()).toContain('候选与审核')
+  expect(wrapper.text()).not.toContain('故事记忆候选')
+  expect(review.text()).toContain('故事记忆候选')
   expect(review.get('blockquote').text()).toBe('古代王朝，没有电力。')
   expect(review.find('details summary').text()).toBe('原文依据')
   expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
@@ -141,7 +140,7 @@ it('keeps the viewed chapter while offering direct access to the batch candidate
   await wrapper.findAll('button').find(button => button.text() === '查看待处理候选')!.trigger('click')
   await flushPromises()
   expect(wrapper.get('button[aria-label="查看范围"]').text()).toContain('全局故事底稿')
-  expect(review.text()).toContain('按审核意见补全')
+  expect(review.text()).toContain('确认并入库')
   expect(storyMemoryApi.detail).toHaveBeenLastCalledWith(9, 12, expect.any(AbortSignal))
   expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
   expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
@@ -168,17 +167,16 @@ it.each([['world', '未指定世界', null], [null, '故城世界', 'world']] as
   }), 1)
 })
 
-it('uses the reviewed package hash and records the human decision note', async () => {
+it('uses the selected package hash to confirm directly', async () => {
   render()
   await flushPromises()
-  await review.get('textarea[name="decision_note"]').setValue('已核对剧本，确认古代背景。')
   await review.findAll('button').find(button => button.text() === '确认并入库')!.trigger('click')
   await flushPromises()
-  expect(storyMemoryApi.decide).toHaveBeenCalledWith(9, 10, 'a'.repeat(64), 'accept', '已核对剧本，确认古代背景。')
+  expect(storyMemoryApi.decide).toHaveBeenCalledWith(9, 10, 'a'.repeat(64), 'accept', '')
   expect(notice.success).toHaveBeenCalledWith('记忆已正式提交')
 })
 
-it('edits a candidate without altering the evidence and invalidates its prior review', async () => {
+it('keeps the candidate confirmable after an edit and preserves the evidence', async () => {
   const wrapper = render()
   await flushPromises()
   await review.findAll('button').find(button => button.text() === '修改候选')!.trigger('click')
@@ -193,68 +191,29 @@ it('edits a candidate without altering the evidence and invalidates its prior re
     content: '古代城镇，以油灯照明。', nature: 'testimony', evidence: candidate.facts[0]!.evidence,
     scope: expect.objectContaining({ scene: '灾变前的回忆', from_chapter: 2, until_chapter: 3 }),
   })] }), 1)
-  expect(notice.success).toHaveBeenCalledWith('候选已保存，请重新审核后再确认')
-  expect(review.text()).toContain('候选尚未审核，请先重新审核。')
-  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeDefined()
+  expect(notice.success).toHaveBeenCalledWith('候选已保存，可以确认入库')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
 })
 
-it('offers repair or rejection while blocked and prevents editing stale editions', async () => {
-  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'needs_review',
-    review: { summary: '发现问题', issues: [{ severity: 'blocking', fact_index: 0, reason: '年代与正文冲突' }] } }))
+it.each(['draft', 'needs_review'] as const)('lets an existing %s candidate be confirmed and keeps stale candidates read-only', async status => {
+  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status,
+    review: { summary: '旧审核记录', issues: [{ severity: 'blocking', fact_index: 0, reason: '年代与正文冲突' }] } }))
   const wrapper = render()
   await flushPromises()
-  expect(review.text()).toContain('年代与正文冲突')
-  expect(review.text()).not.toContain('确认并入库')
-  expect(review.text()).toContain('按审核意见补全')
-  expect(review.text()).toContain('退回候选')
-  await review.findAll('button').find(button => button.text() === '查看审核意见')!.trigger('click')
-  expect(document.activeElement).toBe(review.get('[aria-label="审核意见"]').element)
+  const confirm = review.findAll('button').find(button => button.text() === '确认并入库')!
+  expect(confirm.attributes('disabled')).toBeUndefined()
+  expect(review.text()).not.toContain('重新审核')
+  expect(review.text()).not.toContain('按审核意见补全')
+  await confirm.trigger('click')
+  await flushPromises()
+  expect(storyMemoryApi.decide).toHaveBeenCalledExactlyOnceWith(9, 10, 'a'.repeat(64), 'accept', '')
+  expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
+
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...structuredClone(ready), status: 'stale', current: false, stale_reason: '剧本已变化' }))
   await wrapper.setProps({ projectId: 10 })
   await flushPromises()
   expect(review.text()).toContain('剧本已变化')
   expect(review.findAll('button').some(button => button.text() === '确认并入库')).toBe(false)
-  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
-})
-
-it('requests a repair for the reviewed version and presents the new result for human confirmation', async () => {
-  const blocked = { ...structuredClone(ready), status: 'needs_review' as const }
-  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(blocked))
-  const wrapper = render()
-  await flushPromises()
-  vi.mocked(storyMemoryApi.repair).mockResolvedValue(response(task(3)))
-  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({
-    ...ready, revision: 2, package_hash: 'b'.repeat(64),
-    candidate: { ...candidate, summary: '根据原文补齐了遗漏的事实。' },
-  }))
-  await review.findAll('button').find(button => button.text() === '按审核意见补全')!.trigger('click')
-  await flushPromises()
-  expect(storyMemoryApi.repair).toHaveBeenCalledWith(9, 10, 1, 'a'.repeat(64), 5)
-  expect(wrapper.emitted('showRun')).toBeDefined()
-  expect(review.text()).toContain('根据原文补齐了遗漏的事实。')
-  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
-  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
-})
-
-it('reviews an existing global candidate without starting extraction, repair, or confirmation', async () => {
-  const baseline = { ...ready, chapter_id: null }
-  vi.mocked(storyMemoryApi.history).mockResolvedValue(response([baseline, ready]))
-  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response({ ...baseline, status: 'needs_review' }))
-  const wrapper = render()
-  await wrapper.setProps({ modelId: '' })
-  await flushPromises()
-  await choose(wrapper, '查看范围', '全局故事底稿')
-  expect(review.text()).toContain('原文未交代的内容可保留为「尚未明确」')
-  expect(review.text()).not.toContain('确认并入库')
-  vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(baseline))
-  await review.findAll('button').find(button => button.text() === '按全局范围复审')!.trigger('click')
-  await flushPromises()
-  expect(storyMemoryApi.review).toHaveBeenCalledExactlyOnceWith(9, 10, 1, undefined)
-  expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
-  expect(storyMemoryApi.repair).not.toHaveBeenCalled()
-  expect(storyMemoryApi.decide).not.toHaveBeenCalled()
-  expect(review.text()).toContain('具体朝代未明确')
-  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
 })
 
 it('preserves a candidate when the server rejects an outdated confirmation', async () => {
@@ -281,8 +240,8 @@ it('starts sequential review explicitly and does not start work on load', async 
   await wrapper.findAll('button').find(button => button.text() === '顺序复核全部')!.trigger('click')
   await flushPromises()
   expect(storyMemoryApi.recheck).toHaveBeenCalledWith(9, 5, undefined)
-  expect(wrapper.text()).not.toContain('候选与审核')
-  expect(review.text()).toContain('候选与审核')
+  expect(wrapper.text()).not.toContain('故事记忆候选')
+  expect(review.text()).toContain('故事记忆候选')
 })
 
 it('omits history and failed run details from the main page while keeping the assistant link', async () => {
@@ -326,8 +285,8 @@ it('announces request failures and provides a read retry', async () => {
   expect(notice.error).toHaveBeenCalledWith('连接中断')
   await wrapper.findAll('button').find(button => button.text() === '刷新记忆')!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).not.toContain('候选与审核')
-  expect(review.text()).toContain('候选与审核')
+  expect(wrapper.text()).not.toContain('故事记忆候选')
+  expect(review.text()).toContain('故事记忆候选')
 })
 
 it('recovers the original chapter review after task and candidate reads fail', async () => {
@@ -357,7 +316,6 @@ it('recovers the original chapter review after task and candidate reads fail', a
     expect(confirm.attributes('disabled')).toBeUndefined()
     expect(storyMemoryApi.analyze).not.toHaveBeenCalled()
     expect(storyMemoryApi.recheck).not.toHaveBeenCalled()
-    expect(storyMemoryApi.repair).not.toHaveBeenCalled()
     expect(storyMemoryApi.decide).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
@@ -430,14 +388,14 @@ it('renders source markup as text rather than executable HTML', async () => {
   expect(review.find('script').exists()).toBe(false)
 })
 
-it('offers no confirmation for an empty global candidate', async () => {
+it('allows a global candidate with limited information to be confirmed', async () => {
   const empty = { ...ready, chapter_id: null, candidate: { ...candidate, facts: [], subjects: [] } }
   vi.mocked(storyMemoryApi.history).mockResolvedValue(response([empty]))
   vi.mocked(storyMemoryApi.detail).mockResolvedValue(response(empty))
   const wrapper = render()
   await flushPromises()
   await choose(wrapper, '查看范围', '全局故事底稿')
-  expect(review.text()).toContain('全局故事底稿没有可确认事实')
-  expect(review.text()).not.toContain('确认并入库')
+  expect(review.text()).toContain('具体朝代未明确')
+  expect(review.findAll('button').find(button => button.text() === '确认并入库')!.attributes('disabled')).toBeUndefined()
   expect(storyMemoryApi.decide).not.toHaveBeenCalled()
 })

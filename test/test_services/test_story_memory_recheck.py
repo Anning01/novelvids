@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from api.story_memory import router
 from auth.deps import AuthContext
 from controllers.chapter import chapter_controller
-from controllers.story_memory import submit_analysis, submit_repair
+from controllers.story_memory import submit_analysis
 from models.ai_task import AiTask
 from models.asset import Asset
 from models.chapter import Chapter
@@ -18,15 +18,15 @@ from models.novel import Novel
 from models.scene import Scene
 from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
 from schemas.chapter import ChapterPatch, EpisodePacing
-from schemas.story_memory import StoryAnalysisRequest, StoryDecision, StoryRecheckRequest, StoryRepairRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryDecision, StoryRecheckRequest
 from services.ai_task_executor import ai_task_executor
 from services.creation_agent.object_state import write_fields
 from services.creation_agent.skill_execution import SkillExecution
 from services.creation_objects import CreationObjects, project_write
 from services.story_memory.recheck import submit_recheck, resume_recheck
 from services.story_memory.status import memory_status
-from services.story_memory.store import commit_data, decide
-from test.test_services.test_story_memory import accept, candidate, reviewed
+from services.story_memory.store import commit_data, decide, save_candidate
+from test.test_services.test_story_memory import accept, candidate, saved_candidate
 
 
 @pytest.fixture(autouse=True)
@@ -37,12 +37,12 @@ def local_workspace(monkeypatch):
 async def chain(count=3):
     project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。', story_outline='邻居守护城门。')
     chapters = [await Chapter.create(novel=project, number=i, name=f'第{i}集', content=f'原文{i}', screenplay=f'古城第{i}夜断水。') for i in range(1, count + 1)]
-    baseline = await accept(project, await reviewed(project))
+    baseline = await accept(project, await saved_candidate(project))
     subject = await StorySubject.get(novel=project)
     commits = []
     for chapter in chapters:
         payload = candidate(chapter.screenplay, source='chapter.text', existing_id=subject.id, content=chapter.screenplay)
-        commits.append(await accept(project, await reviewed(project, chapter, payload)))
+        commits.append(await accept(project, await saved_candidate(project, chapter, payload)))
     return project, chapters, [baseline, *commits]
 
 
@@ -55,8 +55,6 @@ def generation(monkeypatch, calls):
     async def generate(self, facts):
         stage = self.params['output_contract']['name']
         calls.append((stage, deepcopy(facts)))
-        if stage == 'story_memory_review':
-            return {'issues': [], 'summary': '已核对前情、主体和原文证据。'}
         source = facts['source_snapshot']
         subject = next((s for s in facts['subjects'] if s['kind'] == 'world'), None)
         text = source['chapter']['text'] if source['chapter'] else source['project']['setting']
@@ -182,7 +180,7 @@ async def test_recheck_advances_in_order_and_pauses_for_each_human_decision(monk
     assert all(item['task_id'] != str(waiting.task_id) for item in history['items'])
     run = await creation_agent_controller.snapshot(batch.id, AuthContext())
     assert any(item['task_id'] == str(waiting.task_id) for item in run.production)
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert (await memory_status(project.id))['chapters'][2]['state'] == 'stale'
     await accept(project, waiting)
     resumed = await resume_recheck(waiting)
@@ -193,85 +191,45 @@ async def test_recheck_advances_in_order_and_pauses_for_each_human_decision(monk
     second = await StoryCommit.get(id=batch.response_data['waiting_commit_id'])
     assert second.chapter_id == chapters[2].id and second.parent_id == waiting.id
     assert await resume_recheck(waiting) is None  # An old decision cannot wake a later confirmation.
-    assert len(calls) == 4
+    assert len(calls) == 2
     await accept(project, second)
     await ai_task_executor.run(await resume_recheck(second))
     await batch.refresh_from_db()
     assert batch.status == 3 and batch.response_data['state'] == 'completed', batch.error_message
-    assert len(calls) == 4  # Resuming never repeats accepted model work.
+    assert len(calls) == 2  # Resuming never repeats accepted model work.
     assert all(item['state'] == 'current' for item in (await memory_status(project.id))['chapters'])
     assert (await StoryCommit.get(id=commits[3].id)).status == 'accepted'
 
 
 @pytest.mark.asyncio
-async def test_repair_uses_review_findings_and_resumes_the_same_batch_only_after_confirmation(monkeypatch):
+async def test_edited_candidate_stays_confirmable_and_continues_the_same_batch(monkeypatch):
     project, chapters, _ = await chain(count=1)
-    model = await strict_model()
+    await strict_model()
     source = '古城重新供水。水由新建水井供应。'
     await chapter_controller.patch(chapters[0].id, ChapterPatch(screenplay=source))
-    subject = await StorySubject.get(novel=project)
-    incomplete = candidate(source, source='chapter.text', existing_id=subject.id, content='古城重新供水。')
-    finding = {'severity': 'blocking', 'fact_index': None, 'reason': '遗漏供水来源'}
-    review_failure = True
     calls = []
-
-    async def generate(execution, context):
-        stage = execution.params['output_contract']['name']
-        calls.append(stage)
-        if stage == 'story_memory_extract':
-            return incomplete
-        if stage == 'story_memory_repair':
-            assert '原文支持' in execution.params['creative_method']['instructions']
-            assert context['source_snapshot']['chapter']['text'] == source
-            assert context['review_findings'] == [finding] and context['original_candidate'] == incomplete
-            replacement = deepcopy(incomplete)
-            replacement['facts'].append({**replacement['facts'][0], 'content': '水由新建水井供应。'})
-            return replacement
-        assert stage == 'story_memory_review'
-        if len(context['candidate']['facts']) == 1:
-            return {'summary': '发现遗漏', 'issues': [finding]}
-        return {'summary': '补全后已独立核对', 'issues': [{'severity': 'warning', 'fact_index': 99, 'reason': '索引非法'}] if review_failure else []}
-
-    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    generation(monkeypatch, calls)
     batch = await submit_recheck(project.id, StoryRecheckRequest(request_id=uuid4(), from_chapter_id=chapters[0].id), AuthContext())
     await ai_task_executor.run(batch)
     await batch.refresh_from_db()
     waiting = await StoryCommit.get(id=batch.response_data['waiting_commit_id'])
-    old_hash, old_revision = waiting.package_hash, waiting.revision
-    body = StoryRepairRequest(expected_revision=old_revision, expected_package_hash=old_hash)
-    with pytest.raises(HTTPException, match='候选或审核已变化'):
-        await submit_repair(project.id, waiting.id, body.model_copy(update={'expected_package_hash': '0' * 64}), AuthContext())
+    proposal = deepcopy(waiting.candidate)
+    proposal['facts'][0]['content'] = '水由新建水井供应。'
+    edited = await save_candidate(project.id, waiting.id, proposal, waiting.revision)
+    assert edited.status == 'ready' and edited.revision == waiting.revision + 1
+    assert edited.review == {} and not await StorySnapshot.filter(commit_id=waiting.id).exists()
 
-    task = await submit_repair(project.id, waiting.id, body, AuthContext())
-    assert task.request_params['assistant_model_config_id'] == model.id
-    assert (await submit_repair(project.id, waiting.id, body, AuthContext())).id == task.id
-    await ai_task_executor.run(task)
-    await task.refresh_from_db()
-    await waiting.refresh_from_db()
-    assert task.status == 4 and waiting.status == 'needs_review'
-    assert waiting.package_hash == old_hash and waiting.candidate == incomplete
-    assert not await StorySnapshot.filter(commit_id=waiting.id).exists()
-
-    review_failure = False
     app = FastAPI()
     app.include_router(router)
-    url = f'/novel/{project.id}/story-memory/commits/{waiting.id}'
+    url = f'/novel/{project.id}/story-memory/commits/{waiting.id}/decision'
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-        response = await client.post(url + '/repair', json=body.model_dump(mode='json'))
+        response = await client.post(url, json={'decision': 'accept', 'expected_package_hash': waiting.package_hash})
+        assert response.status_code == 409
+        response = await client.post(url, json={'decision': 'accept', 'expected_package_hash': edited.package_hash})
         assert response.status_code == 200, response.text
-        await waiting.refresh_from_db()
-        await batch.refresh_from_db()
-        assert waiting.status == 'ready' and waiting.revision == old_revision + 1
-        assert waiting.review['summary'] == '补全后已独立核对'
-        assert batch.stage == 'needs_review' and batch.response_data['waiting_commit_id'] == waiting.id
-        assert not await StorySnapshot.filter(commit_id=waiting.id).exists()
-        assert (await client.post(url + '/decision', json={'decision': 'accept', 'expected_package_hash': old_hash})).status_code == 409
-        response = await client.post(url + '/decision', json={'decision': 'accept', 'expected_package_hash': waiting.package_hash})
-        assert response.status_code == 200, response.text
-    assert calls == ['story_memory_extract', 'story_memory_review', 'story_memory_repair', 'story_memory_review', 'story_memory_repair', 'story_memory_review']
     await batch.refresh_from_db()
-    assert batch.status == 3
-    assert await StoryFact.filter(commit_id=waiting.id).count() == 2
+    assert batch.status == 3 and len(calls) == 1
+    assert (await StoryFact.get(commit_id=waiting.id)).content == '水由新建水井供应。'
 
 
 @pytest.mark.asyncio
@@ -289,7 +247,7 @@ async def test_rejection_stops_downstream_work_and_retains_all_old_records(monke
     await ai_task_executor.run(await resume_recheck(row))
     await batch.refresh_from_db()
     assert batch.status == 4 and '退回' in batch.error_message
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert await StoryCommit.filter(id__in=[c.id for c in commits], status='accepted').count() == 4
 
 
@@ -309,7 +267,7 @@ async def test_edits_while_waiting_stop_batch_without_replaying_paid_work(monkey
     await ai_task_executor.run(await resume_recheck(row))
     await batch.refresh_from_db()
     assert batch.status == 4 and '再次变化' in batch.error_message
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
@@ -353,12 +311,13 @@ async def test_status_endpoint_and_decision_resume_the_same_batch(monkeypatch):
 async def test_pending_approval_cannot_revive_after_edit_then_undo():
     project, chapters, _ = await chain()
     subject = await StorySubject.get(novel=project)
-    row = await reviewed(project, chapters[1], candidate(chapters[1].screenplay,
+    row = await saved_candidate(project, chapters[1], candidate(chapters[1].screenplay,
         source='chapter.text', existing_id=subject.id))
+    original_candidate = row.candidate
     await chapter_controller.patch(chapters[1].id, ChapterPatch(screenplay='改成未来世界。'))
     await chapter_controller.patch(chapters[1].id, ChapterPatch(screenplay=chapters[1].screenplay))
     row = await StoryCommit.get(id=row.id)
-    assert row.status == 'stale' and row.candidate and row.review
+    assert row.status == 'stale' and row.candidate == original_candidate
     with pytest.raises(HTTPException):
         await accept(project, row)
     assert not (await commit_data(row))['current']
@@ -371,7 +330,7 @@ async def test_new_chapter_inserted_before_existing_chapters_invalidates_the_suf
     chapters = []
     for number in (2, 3):
         chapter = await Chapter.create(novel=project, number=number, name=f'第{number}集', content=f'古城第{number}夜断水。')
-        await accept(project, await reviewed(project, chapter,
+        await accept(project, await saved_candidate(project, chapter,
             candidate(chapter.content, source='chapter.text', existing_id=subject.id)))
         chapters.append(chapter)
     # Inserting a newly imported earlier episode changes the required predecessor chain.
@@ -434,7 +393,7 @@ async def test_cancelled_batch_cannot_be_restarted_by_a_late_decision(monkeypatc
     await accept(project, row)
     assert await resume_recheck(row) is None
     assert (await AiTask.get(id=batch.id)).status == 5
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
@@ -475,7 +434,7 @@ async def test_recovery_reuses_awaiting_candidate_without_repeating_model_calls(
     await ai_task_executor.run(recovered)
     recovered = await AiTask.get(id=batch.id)
     assert recovered.stage == 'needs_review' and recovered.response_data['waiting_commit_id'] == waiting
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio

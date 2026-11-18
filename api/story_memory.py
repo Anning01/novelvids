@@ -1,12 +1,12 @@
 """Project-scoped candidate, review, decision and immutable history endpoints."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from auth.deps import AuthContext, require_team_access, require_roles
-from controllers.story_memory import submit_analysis, submit_repair, submit_review
+from controllers.story_memory import submit_analysis
 from models.story_memory import StoryCommit, StoryFact, StorySubject
 from models.ai_task import AiTask
 from schemas.ai_task import AiTaskOut
-from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryRepairRequest, StoryReviewRequest, StoryRecheckRequest
+from schemas.story_memory import StoryAnalysisRequest, StoryCandidateUpdate, StoryDecision, StoryRecheckRequest
 from services.ai_task_executor import ai_task_executor
 from services.story_memory.store import commit_data, decide, get_commit, save_candidate
 from utils.response_format import ResponseSchema
@@ -77,18 +77,11 @@ async def edit(novel_id: int, commit_id: int, body: StoryCandidateUpdate, _: Aut
     return ResponseSchema(data=await commit_data(commit))
 
 
-@router.post('/commits/{commit_id}/review', response_model=ResponseSchema[AiTaskOut])
-async def review(novel_id: int, commit_id: int, body: StoryReviewRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
-    task = await submit_review(novel_id, commit_id, body, ctx)
-    bg.add_task(ai_task_executor.run, task)
-    return ResponseSchema(data=task)
-
-
-@router.post('/commits/{commit_id}/repair', response_model=ResponseSchema[AiTaskOut])
-async def repair(novel_id: int, commit_id: int, body: StoryRepairRequest, bg: BackgroundTasks, ctx: AuthContext = _EDITOR):
-    task = await submit_repair(novel_id, commit_id, body, ctx)
-    bg.add_task(ai_task_executor.run, task)
-    return ResponseSchema(data=task)
+@router.post('/commits/{commit_id}/review', deprecated=True)
+@router.post('/commits/{commit_id}/repair', deprecated=True)
+async def retired_review(novel_id: int, commit_id: int, _: AuthContext = _EDITOR):
+    await get_commit(novel_id, commit_id)
+    raise HTTPException(410, '候选可以直接确认入库')
 
 
 @router.post('/commits/{commit_id}/decision', response_model=ResponseSchema)

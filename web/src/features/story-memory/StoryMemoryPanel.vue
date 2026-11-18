@@ -26,7 +26,6 @@ const draft = ref<MemoryCandidate | null>(null)
 const scope = ref('baseline')
 const loading = ref(false)
 const busy = ref(false)
-const decisionNote = ref('')
 const job = ref<AiTask | null>(null)
 const waitingCommitId = ref<number>()
 const trackingDelayed = ref(false)
@@ -61,13 +60,10 @@ const running = computed(() => job.value && [1, 2, 6].includes(job.value.status)
 const locked = computed(() => busy.value || Boolean(running.value) || props.disabled)
 const candidate = computed(() => detail.value && Array.isArray(detail.value.candidate.facts) ? detail.value.candidate as MemoryCandidate : null)
 const hasCandidate = computed(() => candidate.value !== null && detail.value?.status !== 'accepted')
-const emptyBaseline = computed(() => detail.value?.chapter_id === null && candidate.value?.facts.length === 0)
 const focusReview = ref(false)
 const editable = computed(() => props.canEdit && detail.value?.current && ['draft', 'ready', 'needs_review'].includes(detail.value.status))
 function scopeState(row?: MemoryChapter) {
-  if (row?.candidate_status === 'ready') return tr('待确认')
-  if (row?.candidate_status === 'needs_review') return tr('待处理')
-  if (row?.candidate_status === 'draft') return tr('尚未审核')
+  if (row?.candidate_status) return tr('待确认')
   return tr(row?.state === 'current' ? '已确认' : row?.state === 'stale' ? '需要复核' : '尚未建立')
 }
 const stateLabel = computed(() => scopeState(selected.value))
@@ -81,7 +77,7 @@ const scopeLabel = computed(() => scopeOptions.value.find(option => option.value
 const natureOptions = computed(() => Object.entries(natures).map(([value, label]) => ({ value, label: tr(label) })))
 const worldOptions = computed(() => [{ value: '', label: tr('未指定世界') },
   ...(draft.value?.subjects.filter(subject => subject.kind === 'world').map(world => ({ value: world.ref, label: world.name })) ?? [])])
-const commitLabels: Record<MemoryCommit['status'], string> = { pending: '分析中', draft: '尚未审核', ready: '待确认', needs_review: '审核有阻断问题', accepted: '已确认', rejected: '已退回', stale: '已失效' }
+const commitLabels: Record<MemoryCommit['status'], string> = { pending: '分析中', draft: '待确认', ready: '待确认', needs_review: '待确认', accepted: '已确认', rejected: '已退回', stale: '已失效' }
 function scopeText(value: MemoryScope | Record<string, string | number | null>) {
   const parts: string[] = []
   const worldId = 'world_id' in value ? value.world_id : null
@@ -102,7 +98,6 @@ async function selectCommit(commitId: number) {
   if (current !== epoch || request !== selection) return
   detail.value = response.data
   draft.value = null
-  decisionNote.value = ''
 }
 async function loadScope() {
   const current = epoch
@@ -228,9 +223,6 @@ function openMemory() {
   memoryDialog.value.showModal()
   memoryOpen.value = true
 }
-function focusReviewIssues() {
-  document.getElementById(`${id}-review-issues`)?.focus()
-}
 watch([focusReview, () => props.reviewTarget, hasCandidate], ([focus, target, available]) => {
   if (!focus || !target || !available) return
   target.querySelector<HTMLElement>(`[id="${id}-candidate"]`)?.focus()
@@ -260,7 +252,7 @@ async function decide(decision: 'accept' | 'reject') {
   if (!current) return
   const edition = epoch
   await action(async () => {
-    const response = await storyMemoryApi.decide(props.projectId, current.id, current.package_hash, decision, decisionNote.value)
+    const response = await storyMemoryApi.decide(props.projectId, current.id, current.package_hash, decision, '')
     if (edition !== epoch) return
     if (waitingCommitId.value === current.id) waitingCommitId.value = undefined
     detail.value = response.data
@@ -292,32 +284,7 @@ async function saveDraft() {
     if (current !== epoch) return
     detail.value = response.data
     draft.value = null
-    notice.success(tr('候选已保存，请重新审核后再确认'))
-  })
-}
-async function review() {
-  const commit = detail.value
-  if (!commit) return
-  const current = epoch
-  await action(async () => {
-    const response = await storyMemoryApi.review(props.projectId, commit.id, commit.revision, modelId.value ? Number(modelId.value) : undefined)
-    if (current !== epoch) return
-    job.value = response.data
-    showRun()
-    await track(response.data.id)
-  })
-}
-async function repair() {
-  const commit = detail.value
-  if (!commit?.current || commit.status !== 'needs_review') return
-  const current = epoch
-  await action(async () => {
-    const response = await storyMemoryApi.repair(props.projectId, commit.id, commit.revision, commit.package_hash,
-      modelId.value ? Number(modelId.value) : undefined)
-    if (current !== epoch) return
-    job.value = response.data
-    showRun()
-    await track(response.data.id)
+    notice.success(tr('候选已保存，可以确认入库'))
   })
 }
 async function editCandidate() {
@@ -422,7 +389,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="canEdit && !modelsLoading && !models.length" class="memory-hint">{{ tr('暂无可用的故事记忆模型，请在设置中配置或联系管理员。') }}</p>
       <p v-if="status.baseline.state === 'missing'" class="memory-hint">{{ tr('先建立全局故事底稿，再逐章确认。建立前，生成仍使用项目设定和当前剧本。') }}</p>
-      <p v-else-if="selected?.candidate_status" class="memory-hint">{{ tr('本范围已有候选，可在创作助手查看审核结果。') }}</p>
+      <p v-else-if="selected?.candidate_status" class="memory-hint">{{ tr('本范围已有候选，可在创作助手确认入库。') }}</p>
       <p v-else-if="selected?.state !== 'current'" class="memory-hint">{{ selected?.blocked_by || selected?.reason }} · {{ tr('复核确认后，才能使用这一范围的记忆生成。') }}</p>
     </template>
   </section>
@@ -452,12 +419,10 @@ onBeforeUnmount(() => {
   </Teleport>
   <Teleport v-if="reviewTarget && hasCandidate && detail && candidate" :to="reviewTarget">
       <section :id="`${id}-candidate-panel`" class="memory-candidate" :aria-labelledby="`${id}-candidate`">
-        <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('候选与审核') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
+        <div class="memory-section-heading"><h3 :id="`${id}-candidate`" tabindex="-1">{{ tr('故事记忆候选') }}</h3><AppBadge :tone="detail.status === 'ready' ? 'accent' : detail.status === 'needs_review' || detail.status === 'stale' ? 'warning' : 'neutral'">{{ tr(commitLabels[detail.status]) }}</AppBadge></div>
         <p class="memory-hint">{{ scopeOptions.find(option => option.value === (detail?.chapter_id ? String(detail.chapter_id) : 'baseline'))?.label }}</p>
         <p v-if="detail.source_snapshot?.opening_chapter" class="memory-hint">{{ tr('开篇依据：第 {p0} 集 · {p1}', { p0: detail.source_snapshot.opening_chapter.number, p1: detail.source_snapshot.opening_chapter.name }) }}</p>
         <p v-if="!detail.current" class="memory-hint">{{ detail.stale_reason }}</p>
-        <p v-if="detail.review.summary" class="memory-prose">{{ detail.review.summary }}</p>
-        <ul v-if="detail.review.issues?.length" :id="`${id}-review-issues`" tabindex="-1" :aria-label="tr('审核意见')" class="review-issues"><li v-for="(issue, index) in detail.review.issues" :key="index"><strong>{{ tr(issue.severity === 'blocking' ? '需处理' : '请留意') }}</strong> · {{ issue.reason }}</li></ul>
         <form v-if="draft" class="memory-editor" :aria-labelledby="`${id}-edit-heading`" @submit.prevent="saveDraft">
           <h4 :id="`${id}-edit-heading`">{{ tr('修改候选记忆') }}</h4>
           <div class="memory-field"><label :for="`${id}-summary`">{{ tr('故事摘要') }}</label><textarea :id="`${id}-summary`" v-model="draft.summary" name="summary" required maxlength="8000" rows="3" :disabled="locked"></textarea></div>
@@ -478,42 +443,18 @@ onBeforeUnmount(() => {
             <details><summary>{{ tr('原文依据') }}</summary><blockquote v-for="(evidence, item) in fact.evidence" :key="item">{{ evidence.quote }}</blockquote></details>
             <AppButton size="xs" :disabled="busy" @click="removeFact(index)">{{ tr('移除此条候选') }}</AppButton>
           </fieldset>
-          <p class="memory-hint">{{ tr('修改后需要重新审核；原文证据和旧正式提交会保留。') }}</p>
+          <p class="memory-hint">{{ tr('保存后可以确认入库。') }}</p>
           <div class="memory-actions"><AppButton type="submit" variant="primary" size="sm" :loading="busy" :disabled="props.disabled || Boolean(running)">{{ tr('保存候选') }}</AppButton><AppButton size="sm" :disabled="busy" @click="cancelEdit">{{ tr('取消修改') }}</AppButton></div>
         </form>
         <template v-else>
           <p class="memory-prose">{{ candidate.summary }}</p><p v-if="candidate.ending_state" class="memory-hint">{{ tr('章末状态') }}：{{ candidate.ending_state }}</p>
           <ul class="memory-facts" role="list"><li v-for="(fact, index) in candidate.facts" :key="index"><div class="fact-heading"><strong>{{ candidate.subjects.find(subject => subject.ref === fact.subject_ref)?.name }}</strong><span>{{ tr(labels[fact.category] || fact.category) }} · {{ tr(natures[fact.nature]) }}</span></div><p>{{ fact.content }}</p><p v-if="scopeText(fact.scope)" class="memory-hint">{{ scopeText(fact.scope) }}</p><p v-if="fact.replaces_id" class="memory-hint">{{ tr(fact.operation === 'retract' ? '将撤回' : '将替代') }}：{{ detail.replaced_facts?.[fact.replaces_id] || tr('原有同类事实') }}</p><details><summary>{{ tr('原文依据') }}</summary><blockquote v-for="(evidence, item) in fact.evidence" :key="item">{{ evidence.quote }}</blockquote></details></li></ul>
           <p v-if="candidate.unresolved.length" class="memory-hint">{{ tr('尚未明确') }}：{{ candidate.unresolved.join('；') }}</p>
-          <template v-if="editable && detail.status === 'needs_review'">
-            <p class="memory-hint">{{ tr(detail.chapter_id === null && !emptyBaseline
-              ? '原文未交代的内容可保留为「尚未明确」。复审会核对已有候选。'
-              : '助手会按审核意见和原文补全候选，并重新审核。退回则结束本轮。') }}</p>
-            <div class="memory-actions">
-              <AppButton v-if="detail.chapter_id === null && !emptyBaseline" size="sm" variant="primary" :disabled="locked" @click="review">{{ tr('按全局范围复审') }}</AppButton>
-              <AppButton size="sm" :variant="detail.chapter_id === null && !emptyBaseline ? 'soft' : 'primary'" :disabled="locked" @click="repair">{{ tr('按审核意见补全') }}</AppButton>
-              <AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
-              <AppButton v-if="detail.review.issues?.length" size="xs" variant="ghost" @click="focusReviewIssues">{{ tr('查看审核意见') }}</AppButton>
-            </div>
-          </template>
-          <template v-else-if="emptyBaseline">
-            <p v-if="detail.status === 'ready'" class="memory-hint">{{ tr('全局故事底稿没有可确认事实，请补充故事材料后重新分析') }}</p>
-            <AppButton v-if="editable" size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
-          </template>
-          <template v-else-if="editable">
-            <div class="memory-field"><label :for="`${id}-note`">{{ tr('核对说明（可选）') }}</label><textarea :id="`${id}-note`" v-model="decisionNote" name="decision_note" maxlength="4000" rows="2" :disabled="locked"></textarea></div>
-            <div v-if="detail.status !== 'ready'" class="memory-actions">
-              <p :id="`${id}-confirm-hint`" class="memory-hint">{{ tr('候选尚未审核，请先重新审核。') }}</p>
-            </div>
-            <div class="memory-actions">
-              <AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton>
-              <AppButton size="sm" variant="soft" :disabled="locked" @click="review">{{ tr('重新审核') }}</AppButton>
-              <AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
-              <AppButton size="sm" variant="primary" :disabled="locked || detail.status !== 'ready'"
-                :aria-describedby="detail.status !== 'ready' ? `${id}-confirm-hint` : undefined"
-                @click="decide('accept')">{{ tr('确认并入库') }}</AppButton>
-            </div>
-          </template>
+          <div v-if="editable" class="memory-actions">
+            <AppButton :id="`${id}-edit`" size="sm" :disabled="locked" @click="editCandidate">{{ tr('修改候选') }}</AppButton>
+            <AppButton size="sm" :disabled="locked" @click="decide('reject')">{{ tr('退回候选') }}</AppButton>
+            <AppButton size="sm" variant="primary" :disabled="locked" @click="decide('accept')">{{ tr('确认并入库') }}</AppButton>
+          </div>
         </template>
       </section>
   </Teleport>
@@ -562,8 +503,6 @@ summary { padding-block: 8px; min-height: 24px; box-sizing: border-box; color: v
 summary:hover { color: var(--app-accent); }
 blockquote { margin: 8px 0; padding: 12px 16px; border-inline-start: 1px solid var(--app-border); background: var(--app-surface-muted); color: var(--app-text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 fieldset { min-width: 0; border: 0; padding: 16px 0; margin: 16px 0; border-block-start: 1px solid var(--app-border); }
-.review-issues { padding-inline-start: 20px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.8; }
-.review-issues:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
 .memory-skeleton { display: grid; gap: 10px; padding-block: 24px; }
 .memory-skeleton span { height: 20px; width: 75%; border-radius: 5px; background: var(--app-surface-muted); }
 .memory-skeleton span:last-child { width: 45%; }

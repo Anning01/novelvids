@@ -6,6 +6,7 @@ from models.novel import Novel
 from models.story_memory import StoryCommit, StorySnapshot
 from services.creation_agent.plan_sources import fingerprint
 from services.story_memory.sources import needs_opening_source, opening_source, snapshot_data
+from services.story_memory.store import CANDIDATE_STATUSES
 
 
 async def memory_status(novel_id):
@@ -29,14 +30,12 @@ async def memory_status(novel_id):
         chapter_id = chapter.id if chapter else None
         commit = latest.get(chapter_id)
         attempt = attempts.get(chapter_id)
-        candidate = attempt if attempt and attempt.status in {'draft', 'ready', 'needs_review'} else None
+        candidate = attempt if attempt and attempt.status in CANDIDATE_STATUSES else None
         snapshot = snapshots.get(commit.id) if commit else None
         invalidation = snapshot.get('invalidation') if snapshot else None
         reason = None
         if commit is None:
             reason = '尚未建立正式记忆'
-        elif chapter is None and snapshot is not None and not snapshot.get('fact_ids'):
-            reason = '全局故事底稿没有可确认事实，请重新分析'
         elif fingerprint(snapshot_data(project, chapter, opening=opening if chapter is None else None)) != commit.source_hash:
             reason = '剧本或项目设定已变化'
         elif invalidation:
@@ -49,7 +48,7 @@ async def memory_status(novel_id):
             reason = '前置故事提交已变化'
         result.append({'chapter_id': chapter_id, 'number': chapter.number if chapter else None,
             'commit_id': commit.id if commit else None,
-            'candidate_id': candidate.id if candidate else None, 'candidate_status': candidate.status if candidate else None,
+            'candidate_id': candidate.id if candidate else None, 'candidate_status': 'ready' if candidate else None,
             'state': 'missing' if commit is None else 'stale' if reason else 'current',
             'reason': reason, 'can_analyze': blocked_by is None, 'blocked_by': blocked_by,
             'invalidation': invalidation})

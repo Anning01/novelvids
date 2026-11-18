@@ -24,7 +24,7 @@ from services.ai_task_executor import ai_task_executor
 from services.creation_agent.deep_tools import read_story_memory
 from services.creation_agent.skill_execution import SkillExecution
 from services.story_memory.context import story_context, capture_binding, verify_bindings
-from test.test_services.test_story_memory import candidate, reviewed, accept
+from test.test_services.test_story_memory import candidate, saved_candidate, accept
 from test.test_services.test_strict_text_tasks import mock_model
 
 
@@ -43,7 +43,7 @@ async def story():
     identity = deepcopy(base['facts'][0])
     identity.update(subject_ref='neighbor', category='identity', content='老周是一位古代守门人。')
     base['facts'].append(identity)
-    baseline = await accept(project, await reviewed(project, payload=base))
+    baseline = await accept(project, await saved_candidate(project, payload=base))
     world = await StorySubject.get(novel=project, kind='world')
     neighbor = await StorySubject.get(novel=project, kind='character')
     commits = []
@@ -52,7 +52,7 @@ async def story():
         payload['subjects'].append({'ref': 'neighbor', 'existing_id': neighbor.id, 'kind': 'character', 'name': neighbor.name,
             'aliases': ['周将军'] if chapter.number == 3 else []})
         payload['facts'][0].update(subject_ref='neighbor', category='state')
-        commits.append(await accept(project, await reviewed(project, chapter, payload)))
+        commits.append(await accept(project, await saved_candidate(project, chapter, payload)))
     await AiModelConfig.create(name='strict-memory', model='strict-model', task_type=7,
         base_url='https://model.invalid/v1', api_key='synthetic', supports_strict_output=True, is_active=True)
     return project, chapters, baseline, commits
@@ -128,15 +128,15 @@ async def test_episode_ranges_hide_future_worlds_and_expired_local_facts():
         scope={**planned['scope'], 'world_ref': 'future', 'from_chapter': 3},
         evidence=[{'source': 'project.outline', 'start': 0, 'end': len(project.story_outline), 'quote': project.story_outline}])
     base['facts'].append(planned)
-    await accept(project, await reviewed(project, payload=base))
+    await accept(project, await saved_candidate(project, payload=base))
     ancient = await StorySubject.get(novel=project, name='故城世界')
     future = await StorySubject.get(novel=project, name='未来城')
     local = candidate(first.content, source='chapter.text', existing_id=ancient.id, content=first.content)
     local['facts'][0]['scope'].update(from_chapter=1, until_chapter=1)
-    await accept(project, await reviewed(project, first, local))
+    await accept(project, await saved_candidate(project, first, local))
     later = candidate(third.content, source='chapter.text', existing_id=future.id, content=third.content)
     later['subjects'][0]['name'] = '未来城'
-    await accept(project, await reviewed(project, third, later))
+    await accept(project, await saved_candidate(project, third, later))
     before = await story_context(project.id, first.id)
     after = await story_context(project.id, third.id)
     assert '未来城' not in json.dumps(before, ensure_ascii=False)
@@ -162,7 +162,7 @@ async def test_binding_detects_newly_enabled_memory_for_legacy_requests():
     project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。')
     frozen = await capture_binding(project.id, None, 'assets')
     assert not next(iter(frozen.values()))['enabled']
-    await accept(project, await reviewed(project))
+    await accept(project, await saved_candidate(project))
     with pytest.raises(HTTPException, match='生成期间'):
         await verify_bindings({'novel_id': project.id, 'story_memory_bindings': frozen})
 
@@ -234,7 +234,7 @@ async def test_memory_change_after_model_output_prevents_persistence_and_keeps_c
     generate = SkillExecution.generate_strict
     async def concurrent_change(self, facts):
         result = await generate(self, facts)
-        await accept(project, await reviewed(project))  # Same script, different formally accepted story edition.
+        await accept(project, await saved_candidate(project))  # Same script, different formally accepted story edition.
         return result
     monkeypatch.setattr(SkillExecution, 'generate_strict', concurrent_change)
     mock_model(monkeypatch, {'persons': [], 'scenes': [], 'items': []})
