@@ -463,3 +463,45 @@ async def test_complete_episode_preserves_all_source_scene_numbers_in_one_call(p
     scenes = await Scene.filter(chapter=chapter).order_by('sequence')
     assert [scene.prompt_params['source_scene_number'] for scene in scenes] == numbers
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('short_name', ['玉华山坟前', '玉华山后山坟钱', '后山坟地'])
+async def test_storyboard_saves_all_shots_with_an_identifiable_scene_reference(project, monkeypatch, short_name):
+    novel, chapter, _ = project
+    location = await Asset.create(novel=novel, canonical_name='玉华山后山坟前', aliases=['后山坟地'],
+                                  asset_type=2, source_chapters=[1])
+    shot = shot_payload()['shots'][0]
+    correct = {**shot, 'environment': location.canonical_name, 'visible_asset_names': [location.canonical_name]}
+    abbreviated = {**correct, 'visible_asset_names': [short_name, location.canonical_name],
+                   'visual_prose': f'晨雾笼罩@{{{short_name}}}。'}
+    requests = mock_model(monkeypatch, {'shots': [correct, abbreviated]})
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    rows = await Scene.filter(chapter=chapter).order_by('sequence').prefetch_related('assets')
+    assert len(rows) == 2
+    for row in rows:
+        assert row.prompt_params['visible_asset_names'] == [location.canonical_name]
+        assert [a.id for a in row.assets] == [location.id]
+    assert f'@{{{short_name}}}' not in rows[1].prompt
+
+
+@pytest.mark.parametrize(('unknown', 'environment', 'other'), [
+    ('玉华山坟前', '玉华山后山坟前', '玉华山前山坟前'),
+    ('玉华山坟前', '庭院', None),
+    ('玉华山后山坟前#鬼影', '玉华山后山坟前', None),
+    ('铜铃', '玉华山后山坟前', None),
+])
+def test_storyboard_keeps_ambiguous_or_unsupported_names_unbound(unknown, environment, other):
+    from schemas.scene import SceneEntity
+    from services.storyboard.strict_result import storyboard_result
+    from services.storyboard.strategies import storyboard_strategy_factory
+    entities = [SceneEntity(name=name, asset_type='场景', description=name, aliases=[])
+                for name in ['玉华山后山坟前', other] if name]
+    payload = shot_payload()
+    payload['shots'][0].update(environment=environment, visible_asset_names=[unknown])
+    with pytest.raises(ValueError, match='未登记'):
+        storyboard_result(payload, 'zh', entities, storyboard_strategy_factory.resolve('cinematic'))
