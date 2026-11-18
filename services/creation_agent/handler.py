@@ -52,11 +52,13 @@ async def authorize_run(params: dict) -> AuthContext:
     return ctx
 
 
-def configured_model(config, limits: AgentConfiguration, *, structured_output=True, output_contract=None):
+def configured_model(config, limits: AgentConfiguration, *, structured_output=True, output_contract=None, http_client=None):
     from services.billing.platform import is_platform_model, platform_text_client
-    client_options = {"http_client": platform_text_client(config)} if is_platform_model(config) else {}
+    if http_client is None and is_platform_model(config):
+        http_client = platform_text_client(config)
+    client_options = {"http_client": http_client} if http_client is not None else {}
     client = AsyncOpenAI(base_url=config.base_url, api_key=config.api_key,
-                         max_retries=0, timeout=None, **client_options)
+                         max_retries=0, timeout=http_client.timeout if http_client is not None and http_client.timeout.read is not None else None, **client_options)
     text_api = getattr(config, "text_api", "chat_completions")
     extra_body = {}
     if structured_output and output_contract:

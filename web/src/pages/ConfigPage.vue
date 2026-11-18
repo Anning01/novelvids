@@ -34,7 +34,7 @@ import { appConfirm, appConfirmState } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
 import type { AiModelConfig, ConfigEnumItem, EnumItem, GenerationCapabilities, ImageApiProtocol, ImageModelType, ModelPricing, VideoGenerationModelType } from '@/types'
 
-type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement' | 'asr'
+type ModelCategoryId = 'llm' | 'image' | 'video' | 'enhancement' | 'asr' | 'voice_design'
 
 interface ModelCategory {
   id: ModelCategoryId
@@ -81,6 +81,16 @@ categories.push({
   get description() { return tr('负责视频原声转写、智能字幕与时间轴对齐（火山引擎 SeedASR 2.0 等）。') },
   taskTypes: [9], icon: Mic,
 })
+categories.push({
+  id: 'voice_design', get label() { return tr('音色设计') }, eyebrow: '',
+  get description() { return tr('按角色设定生成和绑定参考音色。') },
+  taskTypes: [12], icon: Mic,
+})
+const voiceProtocolOptions = [
+  { value: 'mimo_voice_design', label: 'MiMo VoiceDesign' },
+  { value: 'openai_compatible', get label() { return tr('OpenAI 兼容') } },
+  { value: 'novelvids', label: 'Cat API' },
+] as const
 const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; model: string; protocol: ImageApiProtocol }> = {
   seedance_2: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-260128', protocol: 'volcengine_ark' },
   seedance_2_fast: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-0-fast-260128', protocol: 'volcengine_ark' },
@@ -225,6 +235,7 @@ function toggleEnhancementResolution(value: string, shortSide: number, enabled: 
   }
 }
 const asrPrice = ref(0)
+const voiceDesignPrice = ref<number | string>('')
 const textPricing = ref({ input_price_per_1m: 0, cache_input_price_per_1m: '' as number | '', output_price_per_1m: 0 })
 const selectedTextPricingPreset = computed(() => generationCapabilities.value.text_pricing?.[form.value.model.trim().toLowerCase()])
 function applyTextPricingPreset() {
@@ -355,10 +366,12 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
   form.value = { task_types: [String(category.id === 'llm' ? 7 : category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
   const asrPreset = generationCapabilities.value.audio_recognition
+  voiceDesignPrice.value = ''
+  if (category.id === 'voice_design') form.value.api_protocol = 'mimo_voice_design'
   asrPrice.value = asrPreset?.pricing?.price_per_minute ?? 0
   if (category.id === 'asr' && asrPreset) Object.assign(form.value, { base_url: asrPreset.base_url, model: asrPreset.model, api_protocol: asrPreset.api_protocol })
   textPricing.value = { input_price_per_1m: 0, cache_input_price_per_1m: '', output_price_per_1m: 0 }
-  tierPrices.value = category.id === 'llm' || category.id === 'enhancement'
+  tierPrices.value = category.id === 'llm' || category.id === 'enhancement' || category.id === 'voice_design'
     ? {}
     : defaultPricing(category.id, pricingTierOptions.value).prices ?? {}
   inputImagePricing.value = { first_free: 1, price_per_image: 0 }
@@ -411,6 +424,7 @@ function openEdit(item: AiModelConfig) {
     ? { input_price_per_1m: item.pricing.input_price_per_1m ?? 0, cache_input_price_per_1m: item.pricing.cache_input_price_per_1m ?? '', output_price_per_1m: item.pricing.output_price_per_1m ?? 0 }
     : { input_price_per_1m: 0, cache_input_price_per_1m: '', output_price_per_1m: 0 }
   asrPrice.value = item.pricing?.price_per_minute ?? 0
+  voiceDesignPrice.value = item.pricing?.price_per_second ?? ''
   tierPrices.value = item.pricing?.prices ? { ...item.pricing.prices } : {}
   inputImagePricing.value = item.pricing?.input_image
     ? { first_free: item.pricing.input_image.first_free, price_per_image: item.pricing.input_image.price_per_image }
@@ -503,6 +517,11 @@ async function saveConfig() {
     notice.error(tr('请选择受支持的视频模型'))
     return
   }
+  if (selectedCategoryId.value === 'voice_design'
+    && (typeof voiceDesignPrice.value !== 'number' || !Number.isFinite(voiceDesignPrice.value) || voiceDesignPrice.value < 0)) {
+    notice.error(tr('请填写有效的音色设计每秒价格'))
+    return
+  }
   creating.value = true
   try {
     const taskTypes = form.value.task_types.map(Number)
@@ -517,6 +536,8 @@ async function saveConfig() {
       pricing = { type: 'media_processing', currency: 'CNY', billing_unit: 'minute', tiers: enhancementPricing.value }
     } else if (selectedCategoryId.value === 'asr') {
       pricing = { type: 'asr', currency: 'CNY', billing_unit: 'minute', price_per_minute: asrPrice.value }
+    } else if (selectedCategoryId.value === 'voice_design') {
+      pricing = { type: 'voice_design', currency: 'CNY', billing_unit: 'second', price_per_second: Number(voiceDesignPrice.value) }
     } else if (selectedCategoryId.value === 'llm') {
       pricing = {
         type: 'text',
@@ -719,7 +740,7 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
         @click="selectedCategoryId = category.id"
       >
         <AppIconTile :tone="iconTone(category.id)" size="lg"><component :is="category.icon" :size="22" /></AppIconTile>
-        <span class="category-copy"><small>{{ category.eyebrow }}</small><strong>{{ category.label }}</strong><p>{{ category.description }}</p></span>
+        <span class="category-copy"><small v-if="category.eyebrow">{{ category.eyebrow }}</small><strong>{{ category.label }}</strong><p>{{ category.description }}</p></span>
         <span class="category-status"><i :class="{ 'is-ready': activeCount(category) }" />{{ activeCount(category) ? tr('{p0} 个模型运行中', { p0: activeCount(category) }) : tr('尚未启用') }}</span>
       </AppButton>
     </section>
@@ -838,6 +859,15 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             />
             <small>{{ tr('支持 Seedance 系列与 MiniMax H3；分辨率、比例、时长和请求格式由后台能力与适配器定义。') }}</small>
           </label>
+          <label v-if="selectedCategory.id === 'voice_design'" class="is-full">
+            <span>{{ tr('接口协议') }}</span>
+            <AppSelect
+              :model-value="form.api_protocol"
+              :options="[...voiceProtocolOptions]"
+              :ariaLabel="tr('接口协议')"
+              @update:model-value="form.api_protocol = $event as ImageApiProtocol"
+            />
+          </label>
           <label v-if="selectedCategory.id === 'video'" class="is-full">
             <span>{{ tr('接口协议') }}</span>
             <AppSelect
@@ -948,6 +978,12 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
               <span>{{ tier.short_side_max }}p · {{ tr('最高帧率') }} {{ tier.fps_max }} fps</span>
               <input v-model.number="tier.price" type="number" min="0" step="0.01" />
             </label>
+          </div>
+        </section>
+        <section v-if="selectedCategoryId === 'voice_design'" class="pricing-editor">
+          <span class="pricing-title">{{ tr('音色设计费用（元 / 输出秒）') }}</span>
+          <div class="pricing-grid">
+            <label><span>{{ tr('每秒单价') }}</span><input v-model.number="voiceDesignPrice" name="voice-design-price" type="number" required min="0" step="any" /></label>
           </div>
         </section>
         <section v-if="selectedCategoryId === 'asr'" class="pricing-editor"><span class="pricing-title">{{ tr('语音识别费用（元 / 分钟）') }}</span><div class="pricing-grid"><label><span>{{ tr('每分钟单价') }}</span><input v-model.number="asrPrice" aria-label="ASR price per minute" type="number" min="0" step="0.001" /></label></div></section>

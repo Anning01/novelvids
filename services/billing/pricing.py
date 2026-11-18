@@ -1,6 +1,7 @@
 """计费规则：token 归一化与三种维度的成本计算。"""
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from math import isfinite
 
 MONEY_QUANT = Decimal("0.000001")
 _TOKEN_DIVISOR = Decimal("1_000_000")
@@ -195,3 +196,21 @@ def compute_asr_cost(seconds: float, pricing: dict | None) -> Decimal:
     minutes = _as_decimal(seconds) / Decimal("60")
     cost = minutes * price_per_minute
     return _money(cost * _discount(pricing))
+
+
+def validate_voice_design_pricing(pricing: dict | None) -> dict:
+    price = pricing.get("price_per_second") if isinstance(pricing, dict) else None
+    if (type(price) not in {int, float} or not isfinite(price) or price < 0
+            or pricing.get("type") != "voice_design" or pricing.get("billing_unit") != "second"):
+        raise ValueError("Invalid voice design pricing")
+    discount = pricing.get("discount", 1)
+    if type(discount) not in {int, float} or not isfinite(discount) or discount <= 0:
+        raise ValueError("Invalid voice design discount")
+    return pricing
+
+
+def compute_voice_design_cost(seconds: float, pricing: dict) -> Decimal:
+    validate_voice_design_pricing(pricing)
+    if type(seconds) not in {int, float} or not isfinite(seconds) or seconds <= 0:
+        raise ValueError("Invalid voice design duration")
+    return _money(_as_decimal(seconds) * _as_decimal(pricing["price_per_second"]) * _discount(pricing))

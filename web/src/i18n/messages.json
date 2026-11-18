@@ -1,4 +1,18 @@
 {
+  "voice_design": {
+    "音色设计": "Voice design",
+    "按角色设定生成和绑定参考音色。": "Generate and bind a reference voice from a character profile.",
+    "请填写有效的音色设计每秒价格": "Enter a valid per-second voice design rate",
+    "音色设计费用（元 / 输出秒）": "Voice design pricing (CNY / output second)",
+    "每秒单价": "Price per second",
+    "替换“{p0}”的音色？": "Replace the voice for “{p0}”?",
+    "生成成功后将绑定新音色。原音色仍可在音色库中选用。": "Once generated, the new voice will be bound to this character or form. The previous voice remains in the library.",
+    "生成并替换": "Generate and replace",
+    "已为“{p0}”设计并绑定音色": "Voice designed and bound for “{p0}”",
+    "音色设计失败，请重试": "Voice design failed. Try again.",
+    "正在设计音色…": "Designing voice…",
+    "AI 设计音色": "AI voice design"
+  },
   "model_reasoning": {
     "本地设置": "Local settings",
       "文本接口": "Text API",

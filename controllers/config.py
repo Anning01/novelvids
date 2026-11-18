@@ -202,6 +202,18 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
     @classmethod
     def _validate_generation_payload(cls, data: dict, instance: AiModelConfig | None = None) -> None:
         tasks = data.get('task_types', (instance.task_types or [instance.task_type]) if instance else [])
+        if AiTaskTypeEnum.voice_design.value in tasks:
+            from services.billing.pricing import validate_voice_design_pricing
+            from services.voice_design_protocol import VOICE_PROTOCOLS
+
+            protocol = data.get("api_protocol", instance.api_protocol if instance else "openai_compatible")
+            if list(tasks) != [AiTaskTypeEnum.voice_design.value] or str(protocol) not in VOICE_PROTOCOLS:
+                raise HTTPException(400, localized_message("请选择独立的音色设计协议"))
+            try:
+                validate_voice_design_pricing(data.get("pricing", instance.pricing if instance else None))
+            except ValueError:
+                raise HTTPException(400, localized_message("请填写有效的音色设计每秒价格")) from None
+            return
         if AiTaskTypeEnum.video_enhancement.value in tasks:
             from pydantic import ValidationError
             from services.video_enhancement.contract import EnhancementOptions, EnhancementPricing, enhancement_cost, RESOLUTION_SHORT_SIDE

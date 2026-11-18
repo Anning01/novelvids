@@ -33,8 +33,8 @@ const view = ref(auth.isSuperAdmin ? 'statements' : 'costs')
 const views = computed(() => [{ value: 'statements', label: tr('消费账单') }, { value: 'costs', label: tr('调用成本') }])
 const showSourceColumn = computed(() => auth.enabled === true)
 
-const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') }, get asr() { return tr('语音识别') } }[value] || value)
-const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') }, get 9() { return tr('语音识别') } }[value] || tr('任务 {p0}', { p0: value }))
+const billingTypeLabel = (value: string) => ({ get text() { return tr('文本') }, get image() { return tr('生图') }, get video() { return tr('视频') }, get media_processing() { return tr('画质增强') }, get asr() { return tr('语音识别') }, get voice_design() { return tr('音色设计') } }[value] || value)
+const taskTypeLabel = (value: number) => ({ get 1() { return tr('提取') }, get 2() { return tr('参考图') }, get 3() { return tr('分镜') }, get 4() { return tr('视频') }, get 5() { return tr('项目分析') }, get 6() { return tr('重制') }, get 7() { return tr('创作助手') }, get 8() { return tr('画质增强') }, get 9() { return tr('语音识别') }, get 12() { return tr('音色设计') } }[value] || tr('任务 {p0}', { p0: value }))
 
 function recordDiscount(item: BillingRecord): number {
   if (item.settlement_status && item.settlement_status !== 'legacy') return 1
