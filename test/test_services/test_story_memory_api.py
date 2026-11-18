@@ -66,10 +66,7 @@ async def test_http_task_uses_one_strict_extraction_and_confirms_directly(monkey
     project = await Novel.create(name='故城', project_setting=None if opening else text)
     if opening:
         await Chapter.create(novel=project, number=1, name='开篇', content=text)
-    proposed = candidate(source='opening_chapter.text' if opening else 'project.setting')
-    if opening:
-        proposed['unresolved'] = ['原文未写明具体朝代。']
-        proposed['facts'][0]['evidence'][0].update(quote='古代王朝，\n没有电力。', end=200)
+    proposed = {'summary': text}
     seen = []
     def respond(request):
         body = json.loads(request.content)
@@ -95,22 +92,22 @@ async def test_http_task_uses_one_strict_extraction_and_confirms_directly(monkey
         assert '古代王朝' in json.dumps(seen, ensure_ascii=False)
         if opening:
             assert row.source_snapshot['opening_chapter']['text'] == text
-            assert row.candidate == proposed
+            assert row.candidate['summary'] == text
         for endpoint in ('review', 'repair'):
             response = await client.post(url + f'/commits/{row.id}/{endpoint}', json={})
             assert response.status_code == 410
         assert len(seen) == 1
         result = await client.post(url + f'/commits/{row.id}/decision', json={
             'expected_package_hash': row.package_hash, 'decision': 'accept'})
-        assert result.json()['data']['snapshot']['fact_ids']
-        assert await StoryFact.all().count() == await StorySnapshot.all().count() == 1
+        assert result.json()['data']['snapshot']['summary'] == text
+        assert await StorySnapshot.all().count() == 1 and not await StoryFact.all().exists()
         from models.creation_agent import AgentMessage
         messages = await AgentMessage.filter(task__request_params__not_isnull=True).all()
         assert len([m for m in messages if m.usage.get('requests')]) == 1
 
 
 @pytest.mark.asyncio
-async def test_invalid_responses_enum_never_publishes_and_has_a_readable_assistant_error(monkeypatch):
+async def test_missing_summary_never_publishes_and_has_a_readable_assistant_error(monkeypatch):
     from api.creation_agent import router as assistant_router
     from models.config import AiModelConfig
     from test.test_services.test_strict_text_tasks import mock_model
@@ -120,9 +117,7 @@ async def test_invalid_responses_enum_never_publishes_and_has_a_readable_assista
         base_url='https://model.invalid/v1', api_key='synthetic', is_active=True, text_api='responses')
     project = await Novel.create(name='故城', project_setting='古代王朝，没有电力。')
     previous = await accept(project, await saved_candidate(project))
-    payload = candidate()
-    payload['facts'][0].update(category='plan', nature='plan')
-    seen = mock_model(monkeypatch, payload)
+    seen = mock_model(monkeypatch, {})
     app = FastAPI()
     app.include_router(router)
     app.include_router(assistant_router)
@@ -132,13 +127,11 @@ async def test_invalid_responses_enum_never_publishes_and_has_a_readable_assista
         from controllers.novel import novel_controller
         from models.ai_task import AiTask
         task = await AiTask.get(id=submitted['id'])
-        assert task.status == 4 and 'facts.0.category' in task.error_message
+        assert task.status == 4 and 'summary' in task.error_message
         assert len(seen) == 1
         form = seen[0]['text']['format']
         assert form['type'] == 'json_schema' and form['strict'] is True
-        props = form['schema']['$defs']['StoryFactProposal']['properties']
-        assert 'plan' not in props['category']['enum'] and 'plan' in props['nature']['enum']
-        assert 'plan 只能填在 nature' in json.dumps(seen[0]['input'], ensure_ascii=False)
+        assert list(form['schema']['properties']) == ['summary']
         run = (await client.get(f"/runs/{submitted['id']}")).json()['data']
         assert '结果未入库' in run['error_message']
         assert run['production'][0]['error'] == run['error_message']

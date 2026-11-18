@@ -197,8 +197,9 @@ async def test_legacy_cached_output_is_not_relabelled_as_using_new_story_memory(
 
 
 @pytest.mark.asyncio
-async def test_asset_model_request_gets_confirmed_context_and_saved_asset_provenance(automatic_story, monkeypatch):
-    project, chapters, _, commits = automatic_story
+@pytest.mark.parametrize('automatic', [True, False])
+async def test_asset_model_request_gets_confirmed_context_and_saved_asset_provenance(automatic, monkeypatch):
+    project, chapters, _, commits = await make_story(automatic)
     from prompts.skill_pack import read_skill
     from services.language import generation_language
     language = await generation_language()
@@ -292,14 +293,20 @@ async def test_read_tool_is_scoped_paged_and_does_not_approve_memory(story):
 
 
 @pytest.mark.asyncio
-async def test_conversation_catalog_does_not_receive_memory(automatic_story):
+async def test_conversation_starts_with_confirmed_memory_as_of_selected_chapter(automatic_story):
     from services.creation_agent.project_facts import load_project_facts
     project, chapters, _, _ = automatic_story
     authorize = AsyncMock()
     summary, _ = await load_project_facts(novel_id=project.id, chapter_id=chapters[0].id,
         page_size=10, character_budget=4000, authorize=authorize)
-    assert 'story_memory' not in summary
+    memory = summary['story_memory']
+    assert memory['current']['summary'] == chapters[0].screenplay
+    assert '古代王朝' in memory['baseline_summary'] and '灾变后' not in str(memory)
     authorize.assert_awaited_once()
+    global_facts, _ = await load_project_facts(novel_id=project.id, chapter_id=None,
+        page_size=10, character_budget=4000, authorize=authorize)
+    base = global_facts['story_memory']
+    assert base['current']['summary'] == base['baseline_summary']
 
 
 @pytest.mark.asyncio
@@ -340,3 +347,41 @@ def test_story_memory_data_leaves_system_and_skill_instructions_unchanged():
             context={'input': {'story_memory': {'enabled': True}}})
         assert f'language={language}' in with_memory and with_memory == without
         assert json.loads(original)['creative_method'] == json.loads(projected)['creative_method']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['assets', 'storyboard'])
+async def test_note_only_world_transition_reaches_production_and_chat(operation, monkeypatch):
+    from controllers.scene import scene_controller
+    from services.creation_agent.project_facts import load_project_facts
+
+    project = await Novel.create(name='两城', project_setting='古城没有电力。')
+    first = await Chapter.create(novel=project, number=1, name='门', content='邻居在城门点灯。')
+    target = await Chapter.create(novel=project, number=2, name='穿越', content='邻居穿过城门来到未来城。')
+    later = await Chapter.create(novel=project, number=3, name='后文', content='未来城断电。')
+    for chapter, summary in [(None, project.project_setting), (first, first.content),
+                             (target, target.content), (later, later.content)]:
+        note = {'subjects': [], 'facts': [], 'summary': summary, 'ending_state': '', 'unresolved': []}
+        await accept(project, await saved_candidate(project, chapter, note))
+    await AiModelConfig.create(name='memory', model='strict-model', task_type=7, supports_strict_output=True,
+        base_url='https://model.invalid/v1', api_key='synthetic', is_active=True)
+    from test.test_services.test_prompt_language import _shot
+    shot = _shot().model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
+    shot.update(duration=4, visible_asset_names=[], actions=[{'start': 0, 'end': 4, 'text': target.content}],
+               visual_prose=target.content, dialogue=[], narration=[], blocking_map=None)
+    reply = {'persons': [], 'scenes': [], 'items': []} if operation == 'assets' else {'shots': [shot]}
+    requests = mock_model(monkeypatch, reply)
+    task = await (chapter_controller.extract(target.id) if operation == 'assets' else scene_controller.generate(target.id))
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    payload = json.loads(requests[0]['messages'][-1]['content'])
+    memory = payload['task_context']['input']['story_memory']
+    assert memory['baseline_summary'] == project.project_setting
+    assert memory['previous']['summary'] == first.content
+    assert memory['current']['summary'] == target.content
+    assert later.content not in str(memory)
+    facts, _ = await load_project_facts(novel_id=project.id, chapter_id=target.id, page_size=5,
+        character_budget=4000, authorize=AsyncMock())
+    assert facts['story_memory']['current'] == memory['current']
+    assert later.content not in str(facts['story_memory'])

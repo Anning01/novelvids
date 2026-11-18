@@ -25,6 +25,8 @@ async def get_commit(novel_id, commit_id):
 
 async def validate_candidate(commit, candidate):
     candidate = StoryCandidate.model_validate(candidate)
+    if not candidate.facts:
+        return candidate
     for subject in candidate.subjects:
         if subject.existing_id:
             existing = await StorySubject.get_or_none(id=subject.existing_id, novel_id=commit.novel_id)

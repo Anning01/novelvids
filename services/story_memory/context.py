@@ -16,31 +16,9 @@ from services.story_memory.status import memory_status
 MAX_GENERATION_MEMORY_CHARACTERS = 8000
 
 
-async def story_context(novel_id, chapter_id=None, *, purpose='generation', supplemental=False):
-    unavailable = {'enabled': False, 'chapter_id': chapter_id, 'purpose': purpose}
-    baseline = await latest_commit(novel_id, None)
-    if baseline is None:
-        return unavailable
-    states = await memory_status(novel_id)
-    state = states['baseline'] if chapter_id is None else next(
-        (item for item in states['chapters'] if item['chapter_id'] == chapter_id), None)
-    if state is None:
-        raise HTTPException(404, '章节不属于当前作品')
-    if supplemental:
-        if states['baseline']['state'] != 'current':
-            return unavailable
-        past = [row for row in states['chapters'] if row['number'] <= state['number'] and row['state'] == 'current']
-        commit_id = past[-1]['commit_id'] if past else baseline.id
-    elif purpose == 'screenplay' and chapter_id is not None:
-        commit_id = await predecessor(novel_id, chapter_id)
-    else:
-        if state['state'] != 'current':
-            raise HTTPException(409, '故事记忆缺失或已过期，请先在项目页的故事记忆中复核并确认')
-        commit_id = state['commit_id']
-    commit = await StoryCommit.get(id=commit_id, novel_id=novel_id)
-    snapshot = await StorySnapshot.get(commit_id=commit_id)
-    root = await StorySnapshot.get(commit_id=baseline.id)
-    chapter = await Chapter.get(id=chapter_id, novel_id=novel_id) if chapter_id else None
+async def edition_facts(novel_id, commit, snapshot, root, chapter):
+    if not snapshot.data['fact_ids']:
+        return [], []
     number = chapter.number if chapter else None
     facts = await StoryFact.filter(novel_id=novel_id, id__in=snapshot.data['fact_ids']).order_by('id')
     subject_ids = {fact.subject_id for fact in facts} | {fact.scope.get('world_id') for fact in facts if fact.scope.get('world_id')}
@@ -80,16 +58,49 @@ async def story_context(novel_id, chapter_id=None, *, purpose='generation', supp
                         'aliases': sorted(aliases.get(subject.id, []))},
             'category': fact.category, 'nature': fact.nature, 'content': fact.content,
             'scope': scope, 'evidence': fact.evidence})
-    prior = await StorySnapshot.get(commit_id=commit.parent_id) if commit.parent_id else None
     world_ids = {fact['scope'].get('world_id') for fact in selected} | {
         fact['subject']['id'] for fact in selected if fact['subject']['kind'] == 'world'}
+    worlds = [{'id': subject.id, 'name': subject.name} for subject in subjects.values()
+              if subject.kind == 'world' and subject.id in world_ids]
+    return selected, worlds
+
+
+async def story_context(novel_id, chapter_id=None, *, purpose='generation', supplemental=False):
+    unavailable = {'enabled': False, 'chapter_id': chapter_id, 'purpose': purpose}
+    baseline = await latest_commit(novel_id, None)
+    if baseline is None:
+        return unavailable
+    states = await memory_status(novel_id)
+    state = states['baseline'] if chapter_id is None else next(
+        (item for item in states['chapters'] if item['chapter_id'] == chapter_id), None)
+    if state is None:
+        raise HTTPException(404, '章节不属于当前作品')
+    if supplemental:
+        if states['baseline']['state'] != 'current':
+            return unavailable
+        commit_id = baseline.id
+        if chapter_id is not None:
+            commit_id = next((row['commit_id'] for row in reversed(states['chapters'])
+                              if row['number'] <= state['number'] and row['state'] == 'current'), baseline.id)
+    elif purpose == 'screenplay' and chapter_id is not None:
+        commit_id = await predecessor(novel_id, chapter_id)
+    else:
+        if state['state'] != 'current':
+            raise HTTPException(409, '故事记忆缺失或已过期，请先在项目页的故事记忆中复核并确认')
+        commit_id = state['commit_id']
+    commit = await StoryCommit.get(id=commit_id, novel_id=novel_id)
+    snapshot = await StorySnapshot.get(commit_id=commit_id)
+    root = snapshot if commit.id == baseline.id else await StorySnapshot.get(commit_id=baseline.id)
+    chapter = await Chapter.get(id=chapter_id, novel_id=novel_id) if chapter_id else None
+    number = chapter.number if chapter else None
+    selected, worlds = await edition_facts(novel_id, commit, snapshot, root, chapter)
+    prior = await StorySnapshot.get(commit_id=commit.parent_id) if commit.parent_id else None
     return {'enabled': True, 'chapter_id': chapter_id, 'chapter_number': number, 'purpose': purpose,
         'context_position': 'before_chapter' if (supplemental and commit.chapter_id != chapter_id)
             or (not supplemental and purpose == 'screenplay') else 'through_chapter',
         'baseline_commit_id': baseline.id, 'commit_id': commit.id,
         'baseline_summary': root.data['summary'],
-        'worlds': [{'id': subject.id, 'name': subject.name} for subject in subjects.values()
-                   if subject.kind == 'world' and subject.id in world_ids],
+        'worlds': worlds,
         'previous': {key: prior.data.get(key) for key in ('summary', 'ending_state')} if prior else None,
         'current': {key: snapshot.data.get(key) for key in ('summary', 'ending_state', 'unresolved')},
         'facts': selected}
@@ -132,7 +143,7 @@ def fit_context(context, budget):
     result['facts'] = []
     if not fits(result):
         return None
-    for key in ('baseline_summary', 'previous', 'current', 'worlds'):
+    for key in ('current', 'baseline_summary', 'previous', 'worlds'):
         if context[key] and fits({**result, key: context[key]}):
             result[key] = context[key]
     for fact in sorted(context['facts'], key=lambda fact: fact['commit_id'], reverse=True):
@@ -155,11 +166,15 @@ async def generation_memory(execution, operation, budget):
     saved = await AgentOperation.get_or_none(task_id=task_id, key=key, state='completed')
     if saved is not None:
         return saved.result['context']
-    if not await enabled(novel_id):
+    if budget <= 0:
+        return None
+    automatic = await enabled(novel_id)
+    if not automatic and not await StoryCommit.filter(novel_id=novel_id, chapter_id=None, status='accepted').exists():
         return None
     if await AgentOperation.filter(task_id=task_id, key=f'model:strict:{operation}', state='completed').exists():
         return None
-    await prepare_for_generation(execution, chapter_id)
+    if automatic:
+        await prepare_for_generation(execution, chapter_id)
 
     async def freeze():
         async with project_write(novel_id):

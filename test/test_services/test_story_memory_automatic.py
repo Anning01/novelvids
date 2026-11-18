@@ -21,7 +21,6 @@ from services.chapter_screenplay import submit_screenplay
 from services.story_memory.automatic import queue_memory
 from services.story_memory.status import memory_status
 from test.agent_stream_fixtures import completion_stream_response
-from test.test_services.test_story_memory import candidate
 
 
 MANUSCRIPT = '第1章 古城\n老周在古城守门。\n\n第2章 石桥\n老周从石桥进入隧道。\n\n第3章 新世界\n老周穿过隧道来到未来城。'
@@ -50,15 +49,11 @@ def model_transport(monkeypatch, *, invalid_memory=False):
             source = context['source_snapshot']
             chapter = source['chapter']
             if chapter:
-                reply = candidate(chapter['text'], source='chapter.text', content='老周进入未来城。')
-                reply['subjects'][0]['name'] = '未来城'
+                reply = {'summary': '老周从古城穿过隧道，来到未来城。'}
             else:
-                reply = candidate(source['opening_chapter']['text'], source='opening_chapter.text', content='老周最初住在古城。')
-                reply['facts'][0]['evidence'][0]['quote'] = '模型的摘录略有出入。'
-            subject = reply['subjects'][0]
-            subject['existing_id'] = next((item['id'] for item in context['subjects'] if item['name'] == subject['name']), None)
+                reply = {'summary': '老周最初住在古城。'}
             if invalid_memory:
-                reply['facts'][0]['subject_ref'] = '不存在的对象'
+                reply = {'summary': '   '}
         elif contract['name'] == 'screenplay':
             reply = {'screenplay': '3-1 未来城 外 日\n△ 老周走出隧道。'}
         else:
@@ -107,7 +102,8 @@ async def test_multi_chapter_split_queues_one_global_task_and_target_episode_aut
     prompt = json.loads(requests[2]['messages'][-1]['content'])
     memory = prompt['task_context']['input']['story_memory']
     assert memory['commit_id'] == saved.id and memory['baseline_commit_id'] == baseline.id
-    assert {item['name'] for item in memory['worlds']} == {'故城世界', '未来城'}
+    assert memory['baseline_summary'] == '老周最初住在古城。'
+    assert memory['current']['summary'] == '老周从古城穿过隧道，来到未来城。'
     assert '老周穿过隧道来到未来城' in prompt['task_context']['input']['source_text']
     assert 'story_memory' not in json.dumps(prompt['creative_method'])
     assert 'Story memory language' not in requests[2]['messages'][0]['content']
@@ -199,3 +195,27 @@ async def test_missing_or_failed_optional_memory_does_not_stop_creation(monkeypa
     body = json.loads(requests[1]['messages'][-1]['content'])
     assert 'story_memory' not in body['task_context']['input']
     assert not await StorySnapshot.filter(novel=project).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('old_status', [4, 5])
+async def test_upgrade_retries_failed_legacy_extraction_once_and_respects_cancellation(old_status):
+    from uuid import NAMESPACE_URL, uuid5
+    from services.creation_agent.plan_sources import fingerprint
+
+    await model_config()
+    project = await Novel.create(name='故城', content=MANUSCRIPT)
+    await novel_controller.split(project.id, ctx=AuthContext())
+    row = await StoryCommit.get(novel=project)
+    edition = fingerprint([project.id, None, row.source_hash, None, None, None])
+    row.request_id = uuid5(NAMESPACE_URL, f'novelvids:story-memory:{edition}')
+    await row.save(update_fields=['request_id'])
+    await AiTask.filter(id=row.task_id).update(status=old_status)
+    retry = await queue_memory(project.id, None, AuthContext())
+    if old_status == 5:
+        assert retry is None and await StoryCommit.filter(novel=project).count() == 1
+    else:
+        assert retry and retry.id != row.task_id
+        await AiTask.filter(id=retry.id).update(status=4)
+        assert await queue_memory(project.id, None, AuthContext()) is None
+        assert await StoryCommit.filter(novel=project).count() == 2

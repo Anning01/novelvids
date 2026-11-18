@@ -260,8 +260,7 @@ async def test_analysis_task_is_idempotent_and_uses_one_strict_call(project, mon
     await AiModelConfig.create(name='strict', model='strict', task_type=7,
         base_url='https://model.invalid', api_key='test', supports_strict_output=True, is_active=True)
     seen = []
-    payload = candidate()
-    payload['facts'][0]['evidence'][0].update(quote='原文没有这句话', start=0, end=200)
+    payload = {'summary': '古代王朝，没有电力。邻居的职业未明。'}
 
     async def generate(self, facts):
         seen.append((self.params['output_contract']['name'], facts))
@@ -281,9 +280,10 @@ async def test_analysis_task_is_idempotent_and_uses_one_strict_call(project, mon
     assert row.status == 'ready' and row.review == {} and not await StoryFact.all().exists()
     assert [name for name, _ in seen] == ['story_memory_extract']
     assert seen[0][1]['source_snapshot']['project']['setting'] == project.project_setting
-    assert row.candidate == payload
+    assert row.candidate['summary'] == payload['summary'] and row.candidate['facts'] == []
     accepted = await accept(project, row)
-    assert (await StoryFact.get(commit=accepted)).evidence == payload['facts'][0]['evidence']
+    assert (await StorySnapshot.get(commit=accepted)).data['summary'] == payload['summary']
+    assert not await StoryFact.all().exists()
 
 @pytest.mark.asyncio
 async def test_extraction_failure_creates_no_candidate_or_snapshot(project, monkeypatch):
@@ -313,21 +313,19 @@ async def test_reanalysis_keeps_old_review_as_history_only(project, monkeypatch)
     previous.package_hash = package_hash(previous)
     await previous.save(update_fields=['review', 'package_hash'])
     previous = await accept(project, previous)
-    subject = await StorySubject.get(novel=project)
     await AiModelConfig.create(name='strict', model='strict', task_type=7,
         base_url='https://model.invalid', api_key='test', supports_strict_output=True, is_active=True)
     contexts = []
     async def generate(self, context):
         contexts.append(context)
-        return candidate(existing_id=subject.id)
+        return {'summary': '古代王朝，无电力。'}
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
     task = await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4()), AuthContext())
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
     assert len(contexts) == 1
-    assert contexts[0]['previous_commit']['candidate'] == previous.candidate
-    assert 'review' not in contexts[0]['previous_commit']
+    assert contexts[0] == {'source_snapshot': previous.source_snapshot}
     assert (await StoryCommit.get(id=previous.id)).review['task_id'] == previous.review['task_id']
 
 
@@ -338,14 +336,11 @@ def test_prompt_language_and_strict_contracts():
         system, content = render_text_task(language=language,
             skill=method({'instructions': '自定义方法', 'references': []}, language), context={})
         assert f'language={language}' in system + content
-        assert '不能登记为已发生事件' in content
-        assert 'plan 只能填在 nature' in content
-        assert 'category=outline、nature=plan' in content
-        assert 'facts.subject_ref 或 scope.world_ref 实际引用的对象' in content
-        assert '各场景的事实填写对应 scope.world_ref' in content
-        assert '不把同一世界的断电、灾变等状态变化另建成新世界' in content
+        assert '大纲计划' in content and '场景' in content and '前一世界' in content
+        assert '自定义方法' in content
     schema = contract()
-    assert schema['name'] == 'story_memory_extract'
+    assert schema['name'] == 'story_memory_extract' and schema['version'] == 2
+    assert list(schema['schema']['properties']) == ['summary']
 
     def check(value):
         if isinstance(value, dict):
@@ -434,3 +429,22 @@ async def test_story_evidence_prevents_chapter_deletion_and_renumbering(project)
     with pytest.raises(HTTPException, match='故事记忆'):
         await chapter_controller.patch(chapter.id, ChapterPatch(number=2))
     assert await Chapter.filter(id=chapter.id, number=1, content='古城断水。').exists()
+
+
+@pytest.mark.asyncio
+async def test_queued_v1_task_still_uses_its_original_candidate_format(project, monkeypatch):
+    from models.config import AiModelConfig
+    from services.ai_task_executor import ai_task_executor
+    from services.creation_agent.skill_execution import SkillExecution
+
+    await AiModelConfig.create(name='legacy', model='strict', task_type=7, supports_strict_output=True,
+        base_url='https://model.invalid', api_key='synthetic', is_active=True)
+    task = await submit_analysis(project.id, StoryAnalysisRequest(request_id=uuid4()), AuthContext())
+    task.request_params['output_contract'].update(version=1, schema=StoryCandidate.model_json_schema())
+    await task.save(update_fields=['request_params'])
+    generate = AsyncMock(return_value=candidate())
+    monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
+    await ai_task_executor.run(task)
+    row = await StoryCommit.get(task=task)
+    assert row.status == 'ready' and row.candidate == candidate()
+    assert 'prior_facts' in generate.await_args.args[0]

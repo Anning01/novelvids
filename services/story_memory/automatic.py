@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from models.agent_operation import AgentOperation
 from models.ai_task import AiTask
 from models.story_memory import StoryCommit, StoryMemoryProject
+from prompts.story_memory import CONTRACT_VERSION
 from schemas.story_memory import StoryAnalysisRequest, StoryDecision
 from services.ai_task_executor import WaitingForDependencies, ai_task_executor
 from services.creation_agent.plan_sources import fingerprint
@@ -54,9 +55,13 @@ async def queue_memory(novel_id, chapter_id, ctx, *, model_id=None):
                         return child
             invalidated_id = next((commit.id for commit in commits if commit.status == 'stale'), None)
             edition = fingerprint([novel_id, chapter_id, source_hash, parent_id, replaced_id, invalidated_id])
-            request_id = uuid5(NAMESPACE_URL, f'novelvids:story-memory:{edition}')
-            prior_attempt = next((commit for commit in commits if commit.request_id == request_id), None)
-            if prior_attempt:
+            # Retry a failed v1 extraction once with the shorter contract. Keep prior decisions and cancellations.
+            legacy_id = uuid5(NAMESPACE_URL, f'novelvids:story-memory:{edition}')
+            legacy = next((commit for commit in commits if commit.request_id == legacy_id), None)
+            if legacy and (legacy.status != 'pending' or not await AiTask.filter(id=legacy.task_id, status=4).exists()):
+                return None
+            request_id = uuid5(NAMESPACE_URL, f'novelvids:story-memory:v{CONTRACT_VERSION}:{edition}')
+            if any(commit.request_id == request_id for commit in commits):
                 return None
             request = StoryAnalysisRequest(request_id=request_id, chapter_id=chapter_id,
                 assistant_model_config_id=model_id, skill_id=0)

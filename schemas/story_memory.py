@@ -9,6 +9,10 @@ class StoryModel(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
 
+class StoryMemoryNote(StoryModel):
+    summary: str = Field(min_length=1, max_length=8000)
+
+
 class StoryEvidence(StoryModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
     source: Literal['project.setting', 'project.outline', 'project.description', 'chapter.text', 'opening_chapter.text']

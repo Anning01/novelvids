@@ -56,10 +56,8 @@ def generation(monkeypatch, calls):
         stage = self.params['output_contract']['name']
         calls.append((stage, deepcopy(facts)))
         source = facts['source_snapshot']
-        subject = next((s for s in facts['subjects'] if s['kind'] == 'world'), None)
         text = source['chapter']['text'] if source['chapter'] else source['project']['setting']
-        return candidate(text, source='chapter.text' if source['chapter'] else 'project.setting',
-            existing_id=subject['id'] if subject else None, content=text)
+        return {'summary': text}
     monkeypatch.setattr(SkillExecution, 'generate_strict', generate)
 
 
@@ -145,7 +143,10 @@ async def test_reanalysis_supersedes_only_its_chapter_and_carries_previous_editi
     assert task.status == 3, task.error_message
     row = await StoryCommit.get(task=task)
     assert row.replaces_id == commits[2].id and row.parent_id == commits[1].id
-    assert calls[0][1]['previous_commit']['source_snapshot']['chapter']['text'] == '古城第2夜断水。'
+    assert calls[0][1]['previous']['summary'] == commits[1].candidate['summary']
+    assert calls[0][1]['baseline_summary'] == commits[0].candidate['summary']
+    assert calls[0][1]['source_snapshot']['chapter']['text'] == '古城重新供水。'
+    assert '古城第2夜断水' not in str(calls[0][1])
     await accept(project, row)
     state = await memory_status(project.id)
     assert [item['state'] for item in state['chapters']] == ['current', 'current', 'stale']
@@ -214,7 +215,7 @@ async def test_edited_candidate_stays_confirmable_and_continues_the_same_batch(m
     await batch.refresh_from_db()
     waiting = await StoryCommit.get(id=batch.response_data['waiting_commit_id'])
     proposal = deepcopy(waiting.candidate)
-    proposal['facts'][0]['content'] = '水由新建水井供应。'
+    proposal['summary'] = '水由新建水井供应。'
     edited = await save_candidate(project.id, waiting.id, proposal, waiting.revision)
     assert edited.status == 'ready' and edited.revision == waiting.revision + 1
     assert edited.review == {} and not await StorySnapshot.filter(commit_id=waiting.id).exists()
@@ -229,7 +230,7 @@ async def test_edited_candidate_stays_confirmable_and_continues_the_same_batch(m
         assert response.status_code == 200, response.text
     await batch.refresh_from_db()
     assert batch.status == 3 and len(calls) == 1
-    assert (await StoryFact.get(commit_id=waiting.id)).content == '水由新建水井供应。'
+    assert (await StorySnapshot.get(commit_id=waiting.id)).data['summary'] == '水由新建水井供应。'
 
 
 @pytest.mark.asyncio
