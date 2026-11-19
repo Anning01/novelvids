@@ -187,6 +187,53 @@ async def test_extraction_reports_removed_settings_together_and_reuses_them_afte
 
 
 @pytest.mark.asyncio
+async def test_extraction_ignores_removed_prop_duplicates_of_known_characters(project, monkeypatch):
+    import json
+    from prompts.skill_pack import read_skill
+    from services.creation_objects import CreationObjects, project_write
+    from utils.enums import AssetTypeEnum
+
+    novel, chapter, _ = project
+    person_type = AssetTypeEnum.person.value
+    item_type = AssetTypeEnum.item.value
+    person = await Asset.create(novel=novel, asset_type=person_type, canonical_name='阿岚',
+        aliases=['小岚'], base_traits='人工定稿', source_chapters=[2])
+    await Asset.create(novel=novel, asset_type=person_type, canonical_name='铜铃')
+    same_name_prop = await Asset.create(novel=novel, asset_type=item_type, canonical_name='铜铃',
+        base_traits='真正的铜铃道具')
+    removed = [await Asset.create(novel=novel, asset_type=item_type, canonical_name=name)
+        for name in ('阿岚', '小岚', '旅客')]
+    objects = CreationObjects(novel.id)
+    async with project_write(novel.id):
+        for prop in removed:
+            await objects.archive('asset', prop.id)
+
+    payload = asset_payload()
+    fields = json.loads(read_skill('asset_contract'))['zh']['item']['fields']
+    payload['items'] = [
+        {'name': name, 'aliases': aliases, 'description': '', 'design': '具体设定',
+            'visual_fields': dict.fromkeys(fields, '具体设计'), 'variant': None}
+        for name, aliases in [('阿岚', []), ('小岚', []), ('旅客', ['阿岚']), ('铜铃', []), ('小水盆', [])]
+    ]
+    requests = mock_model(monkeypatch, payload)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    assert [row['name'] for row in task.response_data['items']] == ['铜铃', '小水盆']
+    assert task.response_data['persons'][0]['asset_id'] == person.id
+    await person.refresh_from_db()
+    await same_name_prop.refresh_from_db()
+    assert person.source_chapters == [1, 2] and person.base_traits == '人工定稿'
+    assert same_name_prop.source_chapters == [1] and same_name_prop.base_traits == '真正的铜铃道具'
+    assert await Asset.with_deleted().filter(
+        id__in=[prop.id for prop in removed], deleted_at__not_isnull=True,
+    ).count() == len(removed)
+
+
+@pytest.mark.asyncio
 async def test_foreign_variant_rolls_back_the_whole_asset_write(project, monkeypatch):
     from models.asset_variant import AssetVariant
     novel, chapter, _ = project
