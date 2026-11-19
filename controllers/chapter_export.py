@@ -157,6 +157,8 @@ class ChapterExports:
         from models.ai_task import AiTask
         from services.ai_task_executor import ai_task_executor
         async with project_write(source.novel_id) as db:
+            if not await ChapterExport.filter(id=source.id).using_db(db).exists():
+                raise HTTPException(409, localized_message('原片来源已变化，请重新准备成片'))
             if origin_task_id is not None:
                 parent = await AiTask.filter(id=origin_task_id).using_db(db).select_for_update().get()
                 if parent.status in {4, 5} or parent.request_params.get('novel_id') != source.novel_id:

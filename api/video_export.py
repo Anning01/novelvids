@@ -71,6 +71,15 @@ async def get_export(export_id:int,ctx:AuthContext=Depends(get_auth_context)):
     return ResponseSchema(data=await chapter_exports.describe(await chapter_exports.get(export_id,ctx)))
 
 
+@router.delete('/{export_id}', summary='永久删除导出版本', response_model=ResponseSchema)
+async def delete_export(export_id: int, ctx: AuthContext = EDITOR):
+    from services.creative_deletion import delete_export as remove_export
+
+    export = await chapter_exports.get(export_id, ctx)
+    await remove_export(export.id, export.novel_id)
+    return ResponseSchema()
+
+
 @router.get('/{export_id}/download')
 async def download_export(export_id:int, source:bool=False,ctx:AuthContext=Depends(get_auth_context)):
     export = await chapter_exports.get(export_id,ctx)

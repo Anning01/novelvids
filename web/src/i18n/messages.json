@@ -1,4 +1,19 @@
 {
+  "permanent_deletion": {
+    "永久删除视频": "Permanently delete video",
+    "永久删除成片": "Permanently delete finished video",
+    "删除视频版本 {p0}": "Delete video version {p0}",
+    "删除成片版本 {p0}": "Delete finished video version {p0}",
+    "视频已删除": "Video deleted",
+    "视频删除失败": "Could not delete the video",
+    "该版本将从作品展示中移除，删除后无法恢复。": "This version will be removed from the showcase. This cannot be undone.",
+    "永久删除「{p0}」？": "Permanently delete “{p0}”?",
+    "本集正文、剧本、分镜、剪辑和成片将永久删除。跨集资产会保留。": "This permanently deletes the episode text, script, shots, edits, and finished videos. Shared assets will be kept.",
+    "永久删除选中的 {p0} 项资产？": "Permanently delete the {p0} selected assets?",
+    "第 {p0} 集 · 分镜 {p1}": "Episode {p0} · Shot {p1}",
+    "删除后无法恢复。以下 {p0} 个分镜将解除引用，已生成的视频会保留。": "This cannot be undone. The references in the following {p0} shots will be removed. Generated videos will be kept.",
+    "删除后无法恢复。": "This cannot be undone."
+  },
   "voice_design": {
     "音色设计": "Voice design",
     "按角色设定生成和绑定参考音色。": "Generate and bind a reference voice from a character profile.",

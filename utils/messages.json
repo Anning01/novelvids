@@ -1,4 +1,6 @@
 {
+  "视频任务已提交，完成处理后即可删除": "This video job has been submitted. You can delete it when processing finishes.",
+  "本集有已提交的生成任务，请等待处理完成后再永久删除": "This episode has submitted generation jobs. Wait until they finish before permanently deleting it.",
   "音色设计": "Voice design",
   "音色模型返回了无效的 WAV 音频": "The voice design model returned invalid WAV audio",
   "模型账户可用额度不足": "The model account has insufficient credit",

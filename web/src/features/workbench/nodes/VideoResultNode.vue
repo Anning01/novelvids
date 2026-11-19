@@ -2,10 +2,14 @@
 import { tr } from '@/i18n'
 
 import type { NodeProps } from '@vue-flow/core'
-import { Download, LoaderCircle, RefreshCw } from 'lucide-vue-next'
+import { Download, LoaderCircle, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { statusLabel } from '@/api'
 import { downloadFile } from '@/shared/downloadFile'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { notice } from '@/shared/notice'
+import { useAuthStore } from '@/features/auth/authStore'
+import AppButton from '@/components/AppButton.vue'
 import type { Video } from '@/types'
 import { TaskStatusEnum } from '@/types'
 import SaveVideoToLibrary from '@/features/resource-library/SaveVideoToLibrary.vue'
@@ -16,6 +20,8 @@ import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
+const auth = useAuthStore()
+const canDelete = computed(() => !auth.enabled || ['admin', 'creator', 'super'].includes(auth.role || ''))
 const video = computed(() => props.data.video as Video)
 const processing = computed(() => ![TaskStatusEnum.COMPLETED, TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED].includes(video.value.status))
 const failed = computed(() => [TaskStatusEnum.FAILED, TaskStatusEnum.CANCELLED].includes(video.value.status))
@@ -29,6 +35,7 @@ const failureMessage = computed(() => {
 const title = computed(() => tr('视频结果 · #{p0}', { p0: video.value.id }))
 const filename = computed(() => videoDownloadFilename(video.value, title.value))
 const downloading = ref(false)
+const removing = ref(false)
 const downloadError = ref('')
 const measuredVideoSize = ref<{ width: number; height: number } | null>(null)
 const displayedRatio = computed(() => measuredVideoSize.value
@@ -52,6 +59,21 @@ async function downloadVideo() {
     downloading.value = false
   }
 }
+
+async function removeVideo() {
+  if (removing.value) return
+  const target = video.value
+  removing.value = true
+  try {
+    if (!await confirmVideoDeletion(title.value)) return
+    await store.deleteVideoResult(target)
+    notice.success(tr('视频已删除'))
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('视频删除失败'))
+  } finally {
+    removing.value = false
+  }
+}
 </script>
 
 <template>
@@ -63,6 +85,10 @@ async function downloadVideo() {
       <span class="workbench-node-frame__media-size">{{ mediaSizeLabel }}</span>
     </template>
     <template #toolbar-actions>
+      <button v-if="canDelete" type="button" :disabled="removing" :aria-label="tr('永久删除视频')"
+        :title="tr('永久删除视频')" @click.stop="removeVideo">
+        <Trash2 :size="16" aria-hidden="true" />
+      </button>
       <button
         type="button"
         :disabled="!video.url || downloading"

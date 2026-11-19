@@ -1,6 +1,8 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
 import SceneVideoGenerationHistory from './SceneVideoGenerationHistory.vue'
+import { api } from '@/api'
+import { appConfirmState, resolveAppConfirm } from '@/shared/confirmDialog'
 import { TaskStatusEnum } from '@/types'
 import type { Video } from '@/types'
 
@@ -25,6 +27,33 @@ function record(overrides: Partial<Video>): Video {
 }
 
 describe('SceneVideoGenerationHistory', () => {
+  it('permanently deletes only the selected version after confirmation', async () => {
+    const current = record({ id: 3 })
+    const previous = record({ id: 2 })
+    const remove = vi.spyOn(api, 'deleteVideo').mockResolvedValue({ code: 0, data: null, message: '' })
+    const wrapper = mount(SceneVideoGenerationHistory, {
+      props: { records: [current, previous], currentId: current.id, canDelete: true },
+    })
+    try {
+      const button = wrapper.get('button[aria-label="删除视频版本 1"]')
+      await button.trigger('click')
+      expect(appConfirmState.title).toContain('视频版本 1')
+      expect(remove).not.toHaveBeenCalled()
+      resolveAppConfirm(false)
+      await flushPromises()
+      expect(remove).not.toHaveBeenCalled()
+      await button.trigger('click')
+      resolveAppConfirm(true)
+      await flushPromises()
+      expect(remove).toHaveBeenCalledExactlyOnceWith(previous.id)
+      expect(wrapper.emitted('deleted')).toEqual([[previous]])
+    } finally {
+      resolveAppConfirm(false)
+      remove.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
   it('renders a compact version rail and allows switching to an older completed result', async () => {
     const current = record({ id: 3, created_at: '2026-08-14T10:30:00' })
     const previous = record({ id: 2, created_at: '2026-08-14T10:10:00', url: '/media/videos/2.mp4' })

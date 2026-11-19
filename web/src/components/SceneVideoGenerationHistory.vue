@@ -2,7 +2,11 @@
 import { tr } from '@/i18n'
 
 import { computed, ref } from 'vue'
-import { LoaderCircle, RotateCcw, Sparkles, TriangleAlert, Video as VideoIcon, X } from 'lucide-vue-next'
+import { LoaderCircle, RotateCcw, Sparkles, Trash2, TriangleAlert, Video as VideoIcon, X } from 'lucide-vue-next'
+import AppButton from '@/components/AppButton.vue'
+import { api } from '@/api'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { notice } from '@/shared/notice'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { videoPosterUrl } from '@/shared/mediaDerivatives'
 import { TaskStatusEnum } from '@/types'
@@ -12,15 +16,18 @@ const props = defineProps<{
   records: Video[]
   currentId?: number
   busy?: boolean
+  canDelete?: boolean
 }>()
 
 const emit = defineEmits<{
   refresh: []
   select: [record: Video]
   retry: []
+  deleted: [record: Video]
 }>()
 
 const errorRecord = ref<Video | null>(null)
+const removing = ref<number>()
 
 const sortedRecords = computed(() => [...props.records].sort((left, right) => right.id - left.id))
 
@@ -78,14 +85,32 @@ function retryFailedRecord() {
   closeError()
   emit('retry')
 }
+
+async function remove(record: Video, position: number) {
+  if (removing.value !== undefined) return
+  removing.value = record.id
+  try {
+    if (!await confirmVideoDeletion(tr('视频版本 {p0}', { p0: position }))) return
+    await api.deleteVideo(record.id)
+    emit('deleted', record)
+    notice.success(tr('视频已删除'))
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('视频删除失败'))
+  } finally {
+    removing.value = undefined
+  }
+}
 </script>
 
 <template>
   <section class="video-history" :aria-label="tr('视频生成版本')">
     <div v-if="sortedRecords.length" class="video-history__rail">
-      <button
+      <div
         v-for="(record, index) in sortedRecords"
         :key="record.id"
+        class="video-history__entry"
+      >
+      <button
         type="button"
         class="video-history__version"
         :class="{
@@ -115,6 +140,13 @@ function retryFailedRecord() {
           {{ versionLabel(record, index) }}
         </span>
       </button>
+      <AppButton v-if="canDelete" variant="ghost" icon-only size="xs"
+        :loading="removing === record.id" :disabled="removing !== undefined"
+        :aria-label="tr('删除视频版本 {p0}', { p0: sortedRecords.length - index })"
+        :title="tr('永久删除')" @click="remove(record, sortedRecords.length - index)">
+        <Trash2 :size="13" aria-hidden="true" />
+      </AppButton>
+      </div>
     </div>
     <p v-else class="video-history__empty"><VideoIcon :size="15" />{{ tr('生成后会在这里保留视频版本') }}</p>
 
@@ -143,8 +175,8 @@ function retryFailedRecord() {
 
 <style scoped>
 .video-history { min-width: 0; min-height: 76px; padding: 8px 12px 10px; border-top: 1px solid var(--app-border,#e7e9f0); background: var(--app-surface,#fff); }
-.video-history__rail { display: flex; min-width: 0; align-items: flex-start; justify-content: center; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-.video-history__rail::-webkit-scrollbar { display: none; }
+.video-history__rail { display: flex; min-width: 0; align-items: flex-start; justify-content: flex-start; justify-content: safe center; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.video-history__entry { display: grid; flex: 0 0 72px; justify-items: center; gap: 2px; }
 .video-history__version { display: grid; flex: 0 0 72px; width: 72px; min-width: 0; justify-items: center; padding: 0; border: 0; color: var(--app-text-secondary,#5f6574); background: transparent; cursor: pointer; }
 .video-history__version:disabled { cursor: default; opacity: 1; }
 .video-history__version:focus-visible { outline: 2px solid color-mix(in srgb,var(--app-accent,#5b5cf6) 38%,transparent); outline-offset: 3px; border-radius: 8px; }

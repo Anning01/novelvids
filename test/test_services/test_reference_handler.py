@@ -114,6 +114,29 @@ async def test_参考图base64返回会落盘并更新资产(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_reference_image_finishing_after_permanent_deletion_is_cleaned(tmp_path, monkeypatch):
+    from controllers.asset import asset_controller
+    from services.deleted_media import drain_media_deletions
+
+    asset = await _asset()
+    monkeypatch.setattr("services.reference.handler.settings.MEDIA_PATH", str(tmp_path))
+
+    async def finish_after_deletion(_asset_data, **_options):
+        await asset_controller.remove(asset.id)
+        return [SimpleNamespace(url=None, b64_json=base64.b64encode(b"\x89PNG\r\n\x1a\nimage").decode())]
+
+    with patch("services.reference.handler.generate_for_sora_consistency", new=finish_after_deletion):
+        result = await AssetReferenceHandler().execute(_request(asset))
+
+    assert result == {"image_count": 1}
+    assert not await Asset.with_deleted().filter(id=asset.id).exists()
+    path = tmp_path / "assets" / f"{asset.id}.png"
+    assert path.exists()
+    await drain_media_deletions()
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
 async def test_有效参考图同时生成列表与预览派生图(tmp_path, monkeypatch):
     asset = await _asset()
     success, encoded = cv2.imencode(

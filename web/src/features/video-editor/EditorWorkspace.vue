@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Download, GripHorizontal, LoaderCircle, Maximize2, Pause, Play, Save, SkipBack, SkipForward, Upload, Volume2, VolumeX, X, SlidersHorizontal } from 'lucide-vue-next'
+import { Download, GripHorizontal, LoaderCircle, Maximize2, Pause, Play, Save, SkipBack, SkipForward, Trash2, Upload, Volume2, VolumeX, X, SlidersHorizontal } from 'lucide-vue-next'
 import { API_BASE, authHeaders } from '@/api'
 import { tr } from '@/i18n'
 import { notice } from '@/shared/notice'
 import { downloadFile } from '@/shared/downloadFile'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { exportApi } from '@/features/video-export/api'
 import { useAuthStore } from '@/features/auth/authStore'
 import { catalogApi } from '@/features/resource-library/catalog'
 import ResourceLibraryPicker from '@/features/resource-library/ResourceLibraryPicker.vue'
+import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import type { VideoResource } from '@/features/resource-library/types'
 import EditorLibrary from './EditorLibrary.vue'
@@ -45,6 +48,7 @@ const preview = ref<InstanceType<typeof EditorPreview> | null>(null), timeline =
 const uploadInput = ref<HTMLInputElement | null>(null), srtInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false), uploadProgress = ref(0), capabilities = ref<EditorCapabilities | null>(null), recognizingSubtitles = ref(false), splittingSubtitles = ref(false)
 const exports = ref<EditorExport[]>([]), exportOpen = ref(false), exporting = ref(false), exportError = ref('')
+const removingExport = ref<number>()
 const timelineHeight = ref(310), downloading = ref(false)
 let uploadKind: Exclude<ClipKind, 'subtitle'> = 'video', scope = 0, disposed = false, polling: ReturnType<typeof setTimeout> | undefined
 let resizeCleanup: (() => void) | null = null
@@ -305,6 +309,24 @@ async function download(row: EditorExport) {
   finally { downloading.value = false }
 }
 async function cancelExport(row: EditorExport) { try { await editorApi.cancel(row.task_id); await refreshExports() } catch (reason) { showError(reason) } }
+async function removeExport(row: EditorExport) {
+  if (readOnly.value || removingExport.value !== undefined) return
+  const version = scope
+  removingExport.value = row.id
+  try {
+    if (!await confirmVideoDeletion(tr('剪辑版本 {p0}', { p0: row.revision }), row.status === 3)) return
+    if (version !== scope || disposed) return
+    await exportApi.remove(row.id)
+    if (version !== scope || disposed) return
+    exports.value = exports.value.filter(item => item.id !== row.id)
+    notice.success(tr('视频已删除'))
+    await refreshExports(version)
+  } catch (reason) {
+    if (version === scope && !disposed) exportError.value = reason instanceof Error ? reason.message : tr('视频删除失败')
+  } finally {
+    removingExport.value = undefined
+  }
+}
 function toggle() { if (!editDocument.value) return; if (previewTime.value >= previewDuration.value) previewTime.value = 0; playing.value = !playing.value }
 function adjacent(delta: number) { const videos = editDocument.value ? orderedVideos(editDocument.value) : []; const i = videos.findIndex(clip => activeAt(clip, time.value)); const next = videos[Math.min(videos.length - 1, Math.max(0, i + delta))]; if (next) void seekTo(next.start) }
 function keys(event: KeyboardEvent) {
@@ -368,6 +390,9 @@ function format(value: number) { return `${String(Math.floor(value / 60)).padSta
     </template>
     <input ref="uploadInput" type="file" multiple class="editor-hidden" @change="uploaded" /><input ref="srtInput" type="file" accept=".srt" class="editor-hidden" @change="srtChanged" />
     <ResourceLibraryPicker :open="libraryOpen" @close="libraryOpen = false" @choose="libraryChosen" />
-    <Teleport to="body"><div v-if="exportOpen" class="editor-modal-backdrop" @click.self="exportOpen = false"><section class="editor-export-dialog" role="dialog" aria-modal="true" :aria-label="tr('合成成片')" @keydown.esc="exportOpen = false" @keydown="modalKeys"><header><h2>{{ tr('合成成片') }}</h2><button class="editor-icon-btn" :aria-label="tr('关闭')" @click="exportOpen = false"><X :size="18" /></button></header><p>{{ editDocument?.width }}×{{ editDocument?.height }} · {{ editDocument?.fps }}fps · {{ format(duration) }}</p><p class="editor-panel-note">{{ tr('按照已保存的时间线合成视频、BGM、字幕和贴纸；不调用生成模型。') }}</p><p v-if="missingClips.length" role="alert" class="danger">{{ tr('仍有 {p0} 个片段缺少素材，需先补全或从时间线移除', { p0: missingClips.length }) }}</p><p v-if="exportError" role="alert" class="danger">{{ exportError }}</p><button class="editor-btn primary full-width" :disabled="readOnly || !!missingClips.length || exporting || !!pendingExport || !duration" @click="beginExport"><LoaderCircle v-if="exporting || pendingExport" :size="15" class="is-spinning" /><Upload v-else :size="15" />{{ pendingExport ? tr('导出中 {p0}%', { p0: pendingExport.progress }) : tr('合成成片') }}</button><div class="editor-export-history"><article v-for="row in exports" :key="row.id"><div><strong>{{ tr('剪辑版本 {p0}', { p0: row.revision }) }}</strong><small>{{ row.status === 3 ? tr('已完成') : [1,2,6].includes(row.status) ? tr('处理中 {p0}%', { p0: row.progress }) : row.status === 5 ? tr('已取消') : row.error || tr('导出失败') }}</small></div><RouterLink v-if="row.status===3 && row.url" class="editor-btn secondary" :to="{path:`/finished-library/${projectId}`,query:{chapter:String(chapterId),version:String(row.id)}}">{{ tr('查看作品') }}</RouterLink><button v-if="row.status === 3 && row.url" class="editor-btn secondary" :disabled="downloading" @click="download(row)"><Download :size="14" />{{ tr('下载') }}</button><button v-else-if="[1,2,6].includes(row.status)" class="editor-link" :disabled="readOnly" @click="cancelExport(row)">{{ tr('取消') }}</button></article></div></section></div></Teleport>
+    <Teleport to="body"><div v-if="exportOpen" class="editor-modal-backdrop" @click.self="exportOpen = false"><section class="editor-export-dialog" role="dialog" aria-modal="true" :aria-label="tr('合成成片')" @keydown.esc="exportOpen = false" @keydown="modalKeys"><header><h2>{{ tr('合成成片') }}</h2><button class="editor-icon-btn" :aria-label="tr('关闭')" @click="exportOpen = false"><X :size="18" /></button></header><p>{{ editDocument?.width }}×{{ editDocument?.height }} · {{ editDocument?.fps }}fps · {{ format(duration) }}</p><p class="editor-panel-note">{{ tr('按照已保存的时间线合成视频、BGM、字幕和贴纸；不调用生成模型。') }}</p><p v-if="missingClips.length" role="alert" class="danger">{{ tr('仍有 {p0} 个片段缺少素材，需先补全或从时间线移除', { p0: missingClips.length }) }}</p><p v-if="exportError" role="alert" class="danger">{{ exportError }}</p><button class="editor-btn primary full-width" :disabled="readOnly || !!missingClips.length || exporting || !!pendingExport || !duration" @click="beginExport"><LoaderCircle v-if="exporting || pendingExport" :size="15" class="is-spinning" /><Upload v-else :size="15" />{{ pendingExport ? tr('导出中 {p0}%', { p0: pendingExport.progress }) : tr('合成成片') }}</button><div class="editor-export-history"><article v-for="row in exports" :key="row.id"><div><strong>{{ tr('剪辑版本 {p0}', { p0: row.revision }) }}</strong><small>{{ row.status === 3 ? tr('已完成') : [1,2,6].includes(row.status) ? tr('处理中 {p0}%', { p0: row.progress }) : row.status === 5 ? tr('已取消') : row.error || tr('导出失败') }}</small></div><RouterLink v-if="row.status===3 && row.url" class="editor-btn secondary" :to="{path:`/finished-library/${projectId}`,query:{chapter:String(chapterId),version:String(row.id)}}">{{ tr('查看作品') }}</RouterLink><button v-if="row.status === 3 && row.url" class="editor-btn secondary" :disabled="downloading" @click="download(row)"><Download :size="14" />{{ tr('下载') }}</button><button v-else-if="[1,2,6].includes(row.status)" class="editor-link" :disabled="readOnly" @click="cancelExport(row)">{{ tr('取消') }}</button>
+      <AppButton v-if="!readOnly" variant="ghost" icon-only size="sm" :loading="removingExport === row.id" :disabled="removingExport !== undefined"
+        :aria-label="tr('删除成片版本 {p0}', { p0: row.revision })" :title="tr('永久删除成片')" @click="removeExport(row)"><Trash2 :size="15" aria-hidden="true" /></AppButton>
+      </article></div></section></div></Teleport>
   </section>
 </template>

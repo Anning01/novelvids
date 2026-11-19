@@ -75,6 +75,9 @@ onBeforeUnmount(() => resolveAppConfirm(false))
           <div class="app-confirm-copy">
             <h2 id="app-confirm-title">{{ appConfirmState.title }}</h2>
             <p v-if="appConfirmState.message" id="app-confirm-message">{{ appConfirmState.message }}</p>
+            <ul v-if="appConfirmState.details.length" class="app-confirm-details" tabindex="0">
+              <li v-for="detail in appConfirmState.details" :key="detail">{{ detail }}</li>
+            </ul>
           </div>
           <footer class="app-confirm-actions">
             <AppButton variant="secondary" @click="close(false)">{{ appConfirmState.cancelLabel }}</AppButton>
@@ -87,10 +90,23 @@ onBeforeUnmount(() => resolveAppConfirm(false))
 </template>
 
 <style scoped>
+.app-confirm-details {
+  max-block-size: 9rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-inline-start: 1.25rem;
+  margin-block: 0.5rem 0;
+  font-size: 0.875rem;
+}
+.app-confirm-details:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .app-confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 3000;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -121,8 +137,8 @@ onBeforeUnmount(() => resolveAppConfirm(false))
 .app-confirm-dialog.is-danger .app-confirm-icon { color: #c45461; background: #fff0f2; }
 .app-confirm-dialog.is-warning .app-confirm-icon { color: #b7733d; background: #fff3e9; }
 .app-confirm-copy { min-width: 0; align-self: center; }
-.app-confirm-copy h2 { margin: 0; color: #292d3a; font-size: 17px; line-height: 1.3; }
-.app-confirm-copy p { margin: 7px 0 0; color: #777e8f; font-size: 12px; line-height: 1.65; }
+.app-confirm-copy h2 { margin: 0; color: #292d3a; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+.app-confirm-copy p { margin: 7px 0 0; color: #626a7a; font-size: 12px; line-height: 1.65; }
 .app-confirm-actions { display: flex; grid-column: 1/-1; justify-content: flex-end; gap: 9px; margin-top: 7px; }
 .app-confirm-actions :deep(.app-button--danger) {
   color: #fff;

@@ -190,6 +190,25 @@ async def active_asset_generations(
 
 
 @router.get(
+    "/{asset_id}/deletion-impact", summary="查看永久删除资产影响的分镜",
+    response_model=ResponseSchema[list[dict[str, int]]],
+)
+async def get_asset_deletion_impact(
+    asset_id: int,
+    variant_id: int | None = Query(None, gt=0),
+    _: AuthContext = Depends(require_asset_access),
+):
+    from models.asset_variant import AssetVariant
+    from services.creative_deletion import affected_asset_scenes
+
+    asset = await asset_controller.get(asset_id)
+    variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
+    if variant_id is not None and variant is None:
+        raise HTTPException(404, localized_message("资产形态不存在"))
+    return ResponseSchema(data=await affected_asset_scenes(asset, variant))
+
+
+@router.get(
     "/{asset_id}", summary="获取资产详情", response_model=ResponseSchema[AssetWithVariantsOut]
 )
 async def get_asset(

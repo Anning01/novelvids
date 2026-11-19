@@ -15,6 +15,7 @@ describe('AppConfirmDialog', () => {
     const result = appConfirm({
       title: '删除分镜 16？',
       message: '删除后无法恢复。',
+      details: ['第 2 集 · 分镜 8', '第 3 集 · 分镜 1'],
       confirmLabel: '删除分镜',
       tone: 'danger',
     })
@@ -23,6 +24,8 @@ describe('AppConfirmDialog', () => {
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull()
     expect(document.body.textContent).toContain('删除分镜 16？')
     expect(document.body.textContent).toContain('删除后无法恢复。')
+    expect(Array.from(document.querySelectorAll('li'), row => row.textContent))
+      .toEqual(['第 2 集 · 分镜 8', '第 3 集 · 分镜 1'])
     expect(document.activeElement?.textContent).toContain('取消')
 
     await wrapper.findComponent({ name: 'AppButton' }).trigger('click')

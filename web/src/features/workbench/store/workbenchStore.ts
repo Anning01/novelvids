@@ -12,6 +12,7 @@ import { readSceneVariantBindings, selectedVariantIds, compactVariantSelection }
 import { disambiguateMaterialMentionNames } from '../components/materialMentionTypes'
 import type { VideoReferenceMedia } from '@/types'
 import { notice } from '@/shared/notice'
+import { confirmAssetDeletion } from '@/shared/confirmCreativeDeletion'
 import type { AiTask, Asset, AssetVariant, AudioReference, Chapter, DigitalHuman, EnumItem, ImageGenerationModel, Scene, Video, VideoGenerationModel, WorkbenchBootstrap, WorkbenchProjectConfig, WorkbenchRemakeSource, WorkbenchRemakeTask } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
 import type { ImageAnnotation, NodeSize, Point, UploadedMediaData, WorkbenchEdge, WorkbenchNode, WorkbenchViewport } from '../types/workbenchTypes'
@@ -490,7 +491,32 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       if (affectedKeys.size) notice.success(tr('已删除 {p0} 个节点', { p0: affectedKeys.size }))
       return affectedKeys.size
     },
-    async deleteSelection() { return this.deleteNodeKeys([...this.selectedNodeKeys]) },
+    async deleteSelection() {
+      const { novelId, chapterId } = this
+      const keys = [...this.selectedNodeKeys]
+      const nodes = keys.map(key => this.nodeByKey(key))
+        .filter((node): node is WorkbenchNode => node?.kind === 'asset')
+      const baseIds = new Set(nodes.filter(node => node.data.variant_id === undefined).map(node => node.id))
+      const targets = nodes.flatMap(node => {
+        const variantId = typeof node.data.variant_id === 'number' ? node.data.variant_id : undefined
+        return variantId !== undefined && baseIds.has(node.id) ? [] : [{ id: node.id, variantId, name: node.title }]
+      })
+      if (targets.length && !await confirmAssetDeletion(targets)) return 0
+      if (this.novelId !== novelId || this.chapterId !== chapterId) return 0
+      const deleted = await this.deleteNodeKeys(keys)
+      if (targets.length && deleted) {
+        try {
+          const { data } = await api.workbenchBootstrap(novelId, chapterId)
+          if (this.novelId === novelId && this.chapterId === chapterId) {
+            this.scenes = data.scenes
+            this.rebuildGraph()
+          }
+        } catch (error) {
+          notice.error(error instanceof Error ? error.message : tr('工作区加载失败'))
+        }
+      }
+      return deleted
+    },
     addMediaNode(kind: 'audio_reference' | 'digital_human') {
       this.checkpoint()
       let stamp = Date.now()
@@ -776,6 +802,19 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       } finally {
         this.busyComposerKeys = this.busyComposerKeys.filter(itemKey => itemKey !== key)
       }
+    },
+    async deleteComposedVideo() {
+      const chapter = this.chapterId
+      const epoch = this.loadEpoch.snapshot()
+      await api.deleteComposedVideo(chapter)
+      if (chapter !== this.chapterId || !this.loadEpoch.isCurrent(epoch)) return
+      for (const node of this.nodes) {
+        if (node.kind !== 'video_composer') continue
+        node.data = { ...node.data, result: null }
+        node.status = 'ready'
+      }
+      this.manualNodes = this.nodes.filter(item => isManualNodeKind(item.kind))
+      this.persistLayout()
     },
     moveComposerInput(composerKey: string, inputKey: string, direction: ComposerMoveDirection) {
       const current = orderedComposerInputs(composerKey, this.nodes, this.edges).map(item => item.key)
@@ -1477,6 +1516,18 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async refreshVideo(videoId: number) {
       const updated = (await api.queryVideo(videoId)).data
       this.videos[updated.scene_id] = (this.videos[updated.scene_id] || []).map(item => item.id === updated.id ? updated : item); this.rebuildGraph()
+    },
+    async deleteVideoResult(video: Video) {
+      const epoch = this.loadEpoch.snapshot()
+      await api.deleteVideo(video.id)
+      if (!this.loadEpoch.isCurrent(epoch)) return
+      this.videos[video.scene_id] = (this.videos[video.scene_id] || []).filter(row => row.id !== video.id)
+      this.rebuildGraph()
+      const { data: scene } = await api.scene(video.scene_id)
+      if (!this.loadEpoch.isCurrent(epoch)) return
+      this.scenes = this.scenes.map(item => item.id === scene.id ? scene : item)
+      this.rebuildGraph()
+      this.persistLayout()
     },
     async refreshEnhancedVideo(videoId: number) {
       const chapterId = this.chapterId

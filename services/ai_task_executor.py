@@ -340,15 +340,34 @@ class AiTaskExecutor:
         await task.refresh_from_db()
         if task.request_params.get('operation') != 'creation_plan':
             await task_signals.publish(str(task.id))
+        retry_result = result
         if task.status == TaskStatusEnum.cancelled.value and task.request_params.get('workflow_version') == 'agent-skills-v1':
-            await AiTask.filter(id=task.id).update(response_data=result)
+            params = task.request_params
+            if params.get('asset_id') and result.get('images'):
+                from models.asset import Asset
+                from models.asset_variant import AssetVariant
+                target_exists = await Asset.with_deleted().filter(id=params['asset_id']).exists()
+                if target_exists and params.get('variant_id'):
+                    target_exists = await AssetVariant.with_deleted().filter(id=params['variant_id'], asset_id=params['asset_id']).exists()
+                if not target_exists:
+                    from services.deleted_media import enqueue_media
+                    await enqueue_media(result['images'], params.get('team_id'), asset_id=params['asset_id'])
+                    retry_result = {key: value for key, value in result.items() if key != 'images'}
+                    retry_result.setdefault('image_count', len(result['images']))
+            elif params.get('operation') == 'compose':
+                from models.chapter import Chapter
+                if not await Chapter.filter(id=params['chapter_id']).exists():
+                    from services.deleted_media import enqueue_media
+                    await enqueue_media(result, params.get('team_id'))
+                    retry_result = {}
+            await AiTask.filter(id=task.id).update(response_data=retry_result)
         versioned = task.request_params.get('workflow_version') == 'agent-skills-v1'
         try:
             await record_ai_task_usage(task, result=result, error=None)
         except Exception as error:
             if not versioned:
                 raise
-            await self._defer_billing(task, result)
+            await self._defer_billing(task, retry_result)
             logger.warning("Task usage settlement deferred: task_id=%s error_type=%s", task.id, type(error).__name__)
         else:
             await task.refresh_from_db()

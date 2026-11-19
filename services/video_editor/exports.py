@@ -201,15 +201,14 @@ class EditorExportWorker:
                 ref = export_media.ref(row, 'edited')
                 sha = await asyncio.to_thread(file_digest, output)
                 probe = await asyncio.to_thread(inspect_media, output)
-                if await cancelled():
-                    raise asyncio.CancelledError
-                await save_cover(row.id, output, Path(directory))
-                if await cancelled():
-                    raise asyncio.CancelledError
-                await export_media.store(ref, output)
-                row.media_ref, row.media_sha256, row.output_probe = ref, sha, probe.model_dump(mode='json')
-                row.collection_complete = True
-                await row.save(update_fields=['media_ref', 'media_sha256', 'output_probe', 'collection_complete', 'updated_at'])
+                async with project_write(row.novel_id):
+                    if await cancelled() or not await ChapterExport.filter(id=row.id).exists():
+                        raise asyncio.CancelledError
+                    await save_cover(row.id, output, Path(directory))
+                    await export_media.store(ref, output)
+                    row.media_ref, row.media_sha256, row.output_probe = ref, sha, probe.model_dump(mode='json')
+                    row.collection_complete = True
+                    await row.save(update_fields=['media_ref', 'media_sha256', 'output_probe', 'collection_complete', 'updated_at'])
         return {'export_id': row.id, 'duration': float(probe.duration)}
 
 

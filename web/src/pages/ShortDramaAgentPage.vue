@@ -35,6 +35,7 @@ import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { appConfirm } from '@/shared/confirmDialog'
+import { confirmChapterDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
 import EpisodeScreenplay from '@/components/EpisodeScreenplay.vue'
@@ -701,7 +702,7 @@ async function removeEpisode() {
   if (!target || episodeBusy.value || editing.value || !canEdit.value) return
   episodeBusy.value = true
   try {
-    if (!await appConfirm({title: tr('删除本集'), message: episodeDisplayLabel(target), confirmLabel: tr('删除')})) return
+    if (!await confirmChapterDeletion(episodeDisplayLabel(target))) return
     await api.deleteChapter(target.id)
     delete chapterDetails.value[target.id]
     delete chapterAssets.value[target.id]

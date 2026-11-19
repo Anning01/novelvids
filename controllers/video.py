@@ -926,22 +926,11 @@ class VideoController(CRUDBase[Video, dict, dict]):
         await _consume_team_balance(record, team_id, user_id)
 
     async def remove(self, video_id: int) -> None:
+        from services.creative_deletion import delete_video
+
         instance = await self.get(video_id)
-        scene = await Scene.get_or_none(id=instance.scene_id)
-        await super().remove(instance)
-        if scene is None:
-            return
-        metadata = scene.metadata if isinstance(scene.metadata, dict) else {}
-        if metadata.get("current_video_id") != video_id:
-            return
-        fallback = await Video.filter(scene_id=scene.id).order_by("-id").first()
-        next_metadata = {**metadata}
-        if fallback:
-            next_metadata["current_video_id"] = fallback.id
-        else:
-            next_metadata.pop("current_video_id", None)
-        scene.metadata = next_metadata
-        await scene.save(update_fields=["metadata", "updated_at"])
+        scene = await Scene.with_deleted().filter(id=instance.scene_id).select_related("chapter").get()
+        await delete_video(video_id, scene.chapter.novel_id)
 
     async def get_chapter_videos(self, chapter_id: int) -> list[dict]:
         """获取章节下所有分镜的视频，按 scene.sequence 排序。
@@ -1108,11 +1097,15 @@ class VideoController(CRUDBase[Video, dict, dict]):
             )
 
         # 调用合并服务
+        from services.ai_task_executor import current_task_id
+
+        run_id = current_task_id.get()
         try:
             merged_url = await video_merger.merge_videos_from_storage(
                 videos_to_merge,
                 chapter_id,
                 team_id=chapter.novel.team_id,
+                **({"output_filename": f"chapter_{chapter_id}_merged_{run_id}.mp4"} if run_id else {}),
             )
         except ValueError as e:
             raise HTTPException(400, detail=str(e))
@@ -1120,6 +1113,13 @@ class VideoController(CRUDBase[Video, dict, dict]):
             raise HTTPException(500, detail=str(e))
 
         posters = await _ensure_video_posters(merged_url, chapter_id)
+        async with creation_write(chapter.novel_id):
+            chapter_exists = await Chapter.filter(id=chapter_id).exists()
+            if not chapter_exists:
+                from services.deleted_media import enqueue_media
+                await enqueue_media([merged_url, posters], chapter.novel.team_id)
+        if not chapter_exists:
+            raise HTTPException(404, localized_message("章节不存在"))
         return {
             "chapter_id": chapter_id,
             "merged_url": merged_url,
@@ -1137,8 +1137,18 @@ class VideoController(CRUDBase[Video, dict, dict]):
         Returns:
             如果存在返回合并信息，否则返回 None
         """
+        from models.media_deletion import MediaDeletion
+        from services.creative_deletion import composition_tasks
+
+        for task in await composition_tasks(chapter_id):
+            if task.request_params.get("composition_deleted"):
+                return None
+            if task.status == TaskStatusEnum.completed.value and (task.response_data or {}).get("merged_url"):
+                return task.response_data
         merged_dir = os.path.join(settings.MEDIA_PATH, "videos", "merged")
         filename = f"chapter_{chapter_id}_merged.mp4"
+        if await MediaDeletion.filter(reference=f"/media/videos/merged/{filename}").exists():
+            return None
         file_path = os.path.join(merged_dir, filename)
 
         if not os.path.exists(file_path):

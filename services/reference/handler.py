@@ -349,6 +349,14 @@ class AssetReferenceHandler(BaseTaskHandler):
 
                 from services.creation_objects import project_write
                 async with project_write(asset.novel_id):
+                    if not await Asset.with_deleted().filter(id=asset.id).exists() or (
+                        variant and not await AssetVariant.with_deleted().filter(id=variant.id, asset_id=asset.id).exists()
+                    ):
+                        from models.novel import Novel
+                        from services.deleted_media import enqueue_media
+                        project = await Novel.get(id=asset.novel_id)
+                        await enqueue_media(result_urls, project.team_id, asset_id=asset.id)
+                        return {"image_count": len(image_list)}
                     if execution and execution.params.get('creation_plan_id'):
                         from services.creation_agent.media_preparation import validate_prepared_media
                         try:

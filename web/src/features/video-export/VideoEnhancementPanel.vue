@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from 'vue'
-import { ArrowRight, Check, ChevronDown, CircleCheck, Download, History, Info, LoaderCircle, Play, Sparkles, X } from 'lucide-vue-next'
+import { ArrowRight, Check, ChevronDown, CircleCheck, Download, History, Info, LoaderCircle, Play, Sparkles, Trash2, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import VideoThumbnail from '@/components/VideoThumbnail.vue'
@@ -9,7 +9,9 @@ import { tr } from '@/i18n'
 import { money } from '@/features/billing/recordDisplay'
 import { videoCoverUrl } from '@/features/workbench/graph/videoMedia'
 import type { Video } from '@/types'
-import type { ChapterExport } from './api'
+import { exportApi, type ChapterExport } from './api'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { notice } from '@/shared/notice'
 import { useVideoEnhancement } from './useVideoEnhancement'
 
 const props = defineProps<{ video: Video; visible: boolean; titleId: string; sceneSequence?: number; pixelSize?: { width: number; height: number } | null }>()
@@ -20,6 +22,7 @@ const {
   canWrite, resultVideo, sourceReady, submittedQuote, fetchQuote, refresh, retry, submit, apply, restoreOriginal, download,
 } = useVideoEnhancement(toRef(props, 'video'), toRef(props, 'visible'), id => emit('applied', id), toRef(props, 'pixelSize'))
 const playing = ref(false), playbackError = ref(false)
+const removing = ref<number>()
 const preview = computed(() => resultVideo.value || props.video)
 watch(() => props.visible, value => { if (!value) playing.value = false })
 watch(() => preview.value.id, () => { playing.value = false; playbackError.value = false })
@@ -72,6 +75,21 @@ const amount = computed(() => {
 const modelOptions = computed(() => models.value.map(item => ({ value: String(item.id), label: item.name })))
 function historyLabel(row: ChapterExport) {
   return row.parent_export_id ? tr('{p0} 高清版', { p0: String(row.recipe.resolution || '').toUpperCase() }) : tr('原视频')
+}
+async function removeExport(row: ChapterExport) {
+  if (!canWrite.value || removing.value !== undefined) return
+  removing.value = row.id
+  try {
+    if (!await confirmVideoDeletion(historyLabel(row))) return
+    await exportApi.remove(row.id)
+    notice.success(tr('视频已删除'))
+    if (row.result_video_id) emit('applied', row.source_video_id || props.video.id)
+    emit('close')
+  } catch (reason) {
+    notice.error(reason instanceof Error ? reason.message : tr('视频删除失败'))
+  } finally {
+    removing.value = undefined
+  }
 }
 async function primary() {
   if (phase.value === 'ready') await submit()
@@ -128,7 +146,10 @@ function moveTarget(event: KeyboardEvent) {
   </div>
   <details class="enhancement-history"><summary><span><History :size="14" aria-hidden="true" />{{ tr('版本记录') }}</span><span>{{ tr('{p0} 个版本', { p0: rows.length }) }}<ChevronDown :size="14" aria-hidden="true" /></span></summary>
     <div v-if="!rows.length" class="enhancement-history-empty">{{ loadingHistory ? tr('正在读取…') : tr('暂无版本记录') }}</div>
-    <div v-for="row in rows" :key="row.id" class="enhancement-version"><div><strong>{{ historyLabel(row) }}</strong><small>{{ row.applied_to_scene ? tr('当前使用') : row.status === 3 ? tr('已完成') : row.status === 4 ? tr('增强未完成') : tr('处理中') }}</small></div><div><AppButton v-if="row.parent_export_id && row.status === 3 && !row.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="apply(row)">{{ tr('使用此版本') }}</AppButton><AppButton v-if="!row.parent_export_id && phase === 'completed' && run?.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="restoreOriginal">{{ tr('恢复原视频') }}</AppButton><AppButton v-if="row.url && row.status === 3" variant="ghost" icon-only size="sm" :aria-label="tr('下载{p0}', { p0: historyLabel(row) })" @click="download(row)"><Download :size="14" aria-hidden="true" /></AppButton></div></div>
+    <div v-for="row in rows" :key="row.id" class="enhancement-version"><div><strong>{{ historyLabel(row) }}</strong><small>{{ row.applied_to_scene ? tr('当前使用') : row.status === 3 ? tr('已完成') : row.status === 4 ? tr('增强未完成') : tr('处理中') }}</small></div><div><AppButton v-if="row.parent_export_id && row.status === 3 && !row.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="apply(row)">{{ tr('使用此版本') }}</AppButton><AppButton v-if="!row.parent_export_id && phase === 'completed' && run?.applied_to_scene && canWrite" variant="ghost" size="xs" :disabled="submitting" @click="restoreOriginal">{{ tr('恢复原视频') }}</AppButton><AppButton v-if="row.url && row.status === 3" variant="ghost" icon-only size="sm" :aria-label="tr('下载{p0}', { p0: historyLabel(row) })" @click="download(row)"><Download :size="14" aria-hidden="true" /></AppButton>
+      <AppButton v-if="canWrite && row.parent_export_id" variant="ghost" icon-only size="sm" :loading="removing === row.id" :disabled="removing !== undefined"
+        :aria-label="tr('删除{p0}', { p0: historyLabel(row) })" :title="tr('永久删除')" @click="removeExport(row)"><Trash2 :size="14" aria-hidden="true" /></AppButton>
+    </div></div>
   </details>
   <footer class="enhancement-footer"><div class="enhancement-cost"><p><span>{{ tr('预计费用') }}</span><strong>{{ phase === 'checking' ? tr('准备中') : amount }}</strong></p><small>{{ quote?.reused_export_id && phase === 'ready' ? tr('使用已有结果，不产生新增增强费用') : phase === 'ready' ? tr('确认后开始计费') : ['processing', 'completed', 'review', 'failed'].includes(phase) ? tr('实际费用以账单记录为准') : tr('获取有效报价后才可确认') }}</small></div>
     <AppButton class="enhancement-primary" variant="primary" :disabled="['checking', 'unavailable', 'max', 'unsupported'].includes(phase) || !canWrite || submitting" @click="primary"><Download v-if="phase === 'completed' && run?.applied_to_scene" :size="16" aria-hidden="true" /><ArrowRight v-else-if="['processing', 'review', 'failed'].includes(phase)" :size="16" aria-hidden="true" /><Sparkles v-else :size="16" aria-hidden="true" />{{ primaryLabel }}</AppButton>

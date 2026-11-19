@@ -145,15 +145,16 @@ class VideoMerger:
         chapter_id: int,
         *,
         team_id: int | None = None,
+        output_filename: str | None = None,
     ) -> str:
         """合并本地或 OSS 视频；OSS 读写始终使用 Provider 的服务端端点。"""
         if not videos:
             raise ValueError(localized_message('当前没有可合并的视频'))
 
         if not oss.enabled:
-            return await asyncio.to_thread(self.merge_videos, videos, chapter_id)
+            return await asyncio.to_thread(self.merge_videos, videos, chapter_id, output_filename)
 
-        output_filename = f"chapter_{chapter_id}_merged.mp4"
+        output_filename = output_filename or f"chapter_{chapter_id}_merged.mp4"
         # /tmp may be tmpfs on small servers; large source videos belong on the media volume.
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(dir=self.output_dir, prefix=f".storage-merge-{chapter_id}-") as directory:
