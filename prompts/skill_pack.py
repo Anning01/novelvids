@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 ROOT = Path(__file__).with_name("skills")
 FILES = {
     'strict_assets': 'runtime/strict_assets.md',
-    'strict_storyboard': 'runtime/strict_storyboard.md',
+    'storyboard_continuity': 'novelvids-storyboard/references/continuity.md',
     "asset_contract": "novelvids-assets/references/asset_contract.json",
     "asset_lifecycle": "novelvids-assets/references/asset_lifecycle.md",
     "asset_templates": "novelvids-assets/references/asset_templates.json",
@@ -33,6 +33,7 @@ FILES = {
     "screenplay": "novelvids-screenplay/SKILL.md",
     "source_reading": "runtime/source_reading.md",
     "story": "runtime/story.md",
+    "story_memory_guide": "novelvids-story/references/story_memory.md",
     "storyboard": "novelvids-storyboard/references/storyboard.md",
     "storyboard_sheets": "novelvids-storyboard/references/storyboard_sheets.md",
     "storyboard_sheet_templates": "novelvids-storyboard/references/storyboard_sheet_templates.json",

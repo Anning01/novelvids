@@ -24,6 +24,8 @@ def skill_activity_label(skill, language):
         'planning_request': '梳理创作需求', 'creation_planning': '制定创作方案',
         'source_reading': '阅读原文素材', 'creative_check': '检查生成内容与创作要求',
         'structured': '整理创作内容', 'scene_prompt_edit': '修改分镜提示词',
+        'story_memory_extract': '整理世界观与剧情进展', 'story_memory_review': '审核故事事实候选',
+        'story_memory_repair': '按审核意见补全',
     }.get(skill, '生成创作内容'), _language=language)
 
 

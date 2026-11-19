@@ -51,3 +51,15 @@ class Chapter(AbstractBaseModel):
 
     def __str__(self):
         return self.name
+
+    async def save(self, using_db=None, update_fields=None, force_create=False, force_update=False):
+        watched = {'name', 'number', 'content', 'screenplay'}
+        if update_fields is not None and not watched.intersection(update_fields):
+            return await super().save(using_db, update_fields, force_create, force_update)
+        from services.creation_objects import project_write
+        from services.story_memory.invalidation import chapter_changed
+        async with project_write(self.novel_id) as connection:
+            before = await Chapter.get_or_none(id=self.id).using_db(connection) if self._saved_in_db else None
+            await super().save(connection, update_fields, force_create, force_update)
+            after = await Chapter.get(id=self.id).using_db(connection)
+            await chapter_changed(before, after)

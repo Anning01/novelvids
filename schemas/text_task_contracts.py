@@ -28,12 +28,13 @@ def asset_contract(specifications):
     def asset(kind, labels=None):
         return _object({'name': {'type': 'string', 'pattern': r'^[\s\S]{1,100}$'},
             'aliases': _STRINGS, 'description': _STRING, **design(kind),
-            **({'label': {'type': 'string', 'enum': labels}} if labels else {}),
-            'variant': _nullable(_object({
+            **({'label': {'type': 'string', 'enum': labels,
+                'description': '必填，按实体填写人物、动物或群像，不能省略。'}} if labels else {}),
+            'variant': {**_nullable(_object({
                 'existing_variant_id': {'type': ['integer', 'null']},
                 'name': {'type': 'string', 'pattern': r'^[\s\S]{1,100}$'},
                 'description': _STRING, 'change_reason': _STRING, **design(kind),
-            }))})
+            })), 'description': '必填；没有本次形态变化时明确返回 null，不能省略。重大造型变化或复用形态时填写完整对象。'}})
     return _object({'persons': _array({'anyOf': [asset('person', ['人物', '动物']), asset('group', ['群像'])]}),
                     'scenes': _array(asset('scene')), 'items': _array(asset('item'))})
 
@@ -59,16 +60,18 @@ def storyboard_contract(duration_range, blocking_maps):
             'frame': _nullable(_object({'left': point, 'right': point})), 'framing': _STRING, 'beat': _STRING}))})
     text_fields = ('description', 'shot_size_and_camera', 'visual_style', 'time_setting', 'environment',
         'spatial_relationships', 'visual_prose', 'format_and_look', 'lenses_and_filtration',
-        'lighting_and_atmosphere', 'grade_and_palette', 'camera_movement', 'sound_design', 'transition')
-    shot = _object({**{key: _STRING for key in text_fields}, 'duration': duration,
+        'lighting_and_atmosphere', 'grade_and_palette', 'camera_movement', 'sound_design')
+    segment = _object({'duration': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': duration_range[1]},
+        'description': _STRING, 'shot_size_and_camera': _STRING, 'visual_prose': _STRING,
+        'actions': _STRINGS, 'camera_movement': _STRING})
+    shot = _object({'duration': duration, **{key: _STRING for key in text_fields},
+        'transition': {**_STRING, 'description': '本段收尾画面或声音、具体剪辑点与下一段的承接；末段写收束。'},
         'effect_restrictions': _STRINGS, 'allowed_effects': _STRINGS,
         'visible_asset_names': {**_STRINGS, 'description': '本镜引用的全部角色、场景和道具，包含发声角色；名单不强制角色出现在画面中。'},
         'actions': _array(action), 'dialogue': _array(speech), 'narration': _array(speech),
         'source_scene_number': {'type': ['string', 'null']},
         'duration_split_part': {'type': ['integer', 'null'], 'minimum': 2},
-        'segments': _array(_object({'duration': {'type': 'number', 'exclusiveMinimum': 0, 'maximum': duration_range[1]},
-            'description': _STRING, 'shot_size_and_camera': _STRING, 'visual_prose': _STRING,
-            'actions': _STRINGS, 'camera_movement': _STRING})),
+        'segments': {**_array(segment), 'description': '同一次生成内的机位序列。观看重点改变并切机位时，依次写全各机位与切点动机，秒数合计为本段时长；连续单机位留空。'},
         'blocking_map': blocking if blocking_maps else {'type': 'null'}})
     return _object({'shots': {'type': 'array', 'items': shot, 'minItems': 1, 'maxItems': 200}})
 

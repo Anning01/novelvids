@@ -9,12 +9,12 @@ from prompts.skill_pack import FILES, ROOT, SkillSnapshot, instructions, snapsho
 from scripts.export_skill import LINK, entrypoints, export_skill
 
 
-STAGES = ("screenplay", "assets", "storyboard")
+STAGES = ("story", "screenplay", "assets", "storyboard")
 
 
 def test_only_professional_stages_are_publishable(tmp_path):
     assert set(entrypoints()) == {f"novelvids-{stage}" for stage in STAGES}
-    for retired in ("novelvids-image", "novelvids-video", "novelvids-remake", "novelvids-story", "novelvids-planning", "novelvids-editing"):
+    for retired in ("novelvids-image", "novelvids-video", "novelvids-remake", "novelvids-planning", "novelvids-editing"):
         with pytest.raises(ValueError, match="Unknown skill"):
             export_skill(retired, tmp_path)
     assert not list(tmp_path.iterdir())

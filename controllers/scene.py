@@ -227,7 +227,8 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                     if assistant_model_config_id is not None and t.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
                     from services.user_skills import snapshot_method
-                    selected_method = await snapshot_method(user_id or 0, 'storyboard', skill_id)
+                    selected_method = await snapshot_method(user_id or 0, 'storyboard', skill_id,
+                        blocking_maps=t.request_params.get('generate_blocking_maps', False))
                     previous_method = t.request_params.get('creative_method')
                     if (previous_method and previous_method != selected_method) or (not previous_method and selected_method['id'] != 0):
                         raise HTTPException(409, localized_message('已有任务正在运行，请等待完成后再切换技能'))

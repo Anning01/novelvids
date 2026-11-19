@@ -672,6 +672,16 @@ async def submit_production(ctx: RunContext[CreationAgentDeps], intent_index: in
 
 
 @creation_agent.tool
+async def read_story_memory(ctx: RunContext[CreationAgentDeps],
+    chapter_id: Annotated[int | None, Field(gt=0)] = None,
+    query: Annotated[str | None, Field(max_length=100)] = None,
+    page: Annotated[int, Field(ge=1)] = 1) -> dict:
+    """分页读取已确认的世界观、人物与前情；不写入或批准候选记忆。"""
+    from services.creation_agent.deep_tools import read_story_memory as read
+    return await read(ctx, chapter_id, query, page)
+
+
+@creation_agent.tool
 async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
     """读取当前可用媒体模型能力及本轮生产任务的真实状态，不触发生成。"""
     from services.creation_agent.skill_execution import current_execution

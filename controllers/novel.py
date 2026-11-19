@@ -250,7 +250,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         from services.project_deletion import remove_project
         await remove_project(instance)
 
-    async def split(self, novel_id: int):
+    async def split(self, novel_id: int, *, ctx=None, assistant_model_config_id=None):
         """使用nlp拆分章节"""
         # 使用 NLP 服务识别章节
         novel = await self.get(novel_id)
@@ -291,6 +291,12 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
                 }
             )
             await novel.save(update_fields=["total_chapters", "updated_at"])
+            if len(parsed_chapters) > 1 and novel.workflow_kind == 'script':
+                from models.story_memory import StoryMemoryProject
+                await StoryMemoryProject.get_or_create(novel_id=novel_id, using_db=connection)
+                if ctx is not None:
+                    from services.story_memory.automatic import queue_memory
+                    await queue_memory(novel_id, None, ctx, model_id=assistant_model_config_id)
         return novel
 
     @staticmethod
@@ -376,7 +382,8 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
             if previous:
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.project_analysis.value, status__in=[1,2,6]).using_db(connection):
-                if (existing.request_params.get('novel_id') == novel_id
+                if (existing.request_params.get('operation') in {None, 'story', 'project_cover'}
+                    and existing.request_params.get('novel_id') == novel_id
                     and (existing.request_params.get('operation') == 'project_cover') == cover_only):
                     if assistant_model_config_id is not None and existing.request_params.get('assistant_model_config_id') != assistant_model_config_id:
                         raise HTTPException(409, localized_message('已有分析任务正在运行，请等待完成后再切换分析模型'))
@@ -396,7 +403,7 @@ class NovelController(CRUDBase[Novel, NovelCreate, NovelUpdate]):
         from services.project_analysis.results import expose_saved_analysis
         return await expose_saved_analysis(next(
             (task for task in tasks if task.request_params.get("novel_id") == novel_id
-             and task.request_params.get("operation") != "project_cover"),
+             and task.request_params.get("operation") in {None, 'story'}),
             None,
         ))
 

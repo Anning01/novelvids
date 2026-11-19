@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { applyActivityEvent } from './activity'
+import { applyActivityEvent, mergeActivity } from './activity'
 import type { AgentActivityStep } from './types'
 
 it('appends batched Unicode deltas once and tolerates an overlapping snapshot', () => {
@@ -53,10 +53,17 @@ it('replays without duplicating reasoning and updates real child model progress 
   expect(steps[1]?.status).toBe('completed')
 })
 
-it('does not lose a child step or rewind a completed step when snapshots arrive late', async () => {
-  const { mergeActivity } = await import('./activity')
+it('does not lose a child step or rewind a completed step when snapshots arrive late', () => {
   const completed: AgentActivityStep = { id: 'thinking:1', kind: 'thinking', label: '思考', status: 'completed', detail: '完整的思考摘要', finished_at: '2026-11-07T00:00:03Z' }
   const child: AgentActivityStep = { id: 'model:child:1', kind: 'status', label: '提取资产', status: 'running' }
   const merged = mergeActivity([completed, child], [{ ...completed, status: 'running', detail: '完整', finished_at: undefined }])
   expect(merged).toEqual([completed, child])
+})
+
+it('keeps late memory events ahead of the later screenplay call on reconnect', () => {
+  const script = { id: 'script', kind: 'status' as const, status: 'running' as const,
+    label: '编写本集剧本', started_at: '2026-11-18T09:57:30Z' }
+  const memory = { ...script, id: 'memory', status: 'completed' as const,
+    label: '整理世界观与剧情进展', started_at: '2026-11-18T09:57:21Z' }
+  expect(mergeActivity([script], [memory]).map(step => step.id)).toEqual(['memory', 'script'])
 })

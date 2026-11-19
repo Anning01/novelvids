@@ -160,10 +160,10 @@ async def delete_novel(
 @router.get("/{novel_id}/split", summary="使用nlp智能拆分章节（兼容）", response_model=ResponseSchema[NovelBriefOut])
 async def split_novel(
     novel_id: int,
-    _: AuthContext = Depends(require_team_access),
+    ctx: AuthContext = Depends(require_team_access),
     __: AuthContext = _EDITOR,
 ):
-    novel = await novel_controller.split(novel_id)
+    novel = await novel_controller.split(novel_id, ctx=ctx)
     return ResponseSchema(data=novel)
 
 

@@ -109,6 +109,8 @@ async def _initialize_database_schema() -> None:
     await ensure_agent_operation_schema()
     from services.schema_compat import ensure_video_editor_schema
     await ensure_video_editor_schema()
+    from services.schema_compat import ensure_story_memory_schema
+    await ensure_story_memory_schema()
     from services.schema_compat import ensure_recharge_order_schema
     await ensure_recharge_order_schema()
 

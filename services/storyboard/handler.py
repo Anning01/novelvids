@@ -196,6 +196,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
         scenes_created = []
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy)
         await chapter.fetch_related("novel")
+        from services.story_memory.context import saved_binding
+        provenance = await saved_binding(execution.params) if execution else {}
         for shot in storyboard.shots:
             normalized = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities or []))
             bindings = shot_variant_bindings(normalized, entities or [])
@@ -269,6 +271,8 @@ class StoryboardTaskHandler(BaseTaskHandler):
                 "storyboard_strategy": strategy.key,
                 "storyboard_strategy_name": strategy.name,
             }
+            if provenance:
+                scene_metadata['story_memory'] = provenance
 
             # 如果有拒绝信息，添加到 metadata
             if "refusal" in api_metadata:

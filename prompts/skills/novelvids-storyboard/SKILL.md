@@ -8,7 +8,7 @@ license: MIT
 
 ## 分镜创作
 
-每次创作或修订先读 [分镜写作](references/storyboard.md)，按其中的任务范围读取输出协议、叙事策略、风格和资产接戏规则。
+每次创作或修订先读[分场与动作连续性](references/continuity.md)，判断一条表演要在哪个动作落点收住，再读 [分镜写作](references/storyboard.md)，按其中的任务范围读取输出协议、叙事策略、风格和资产接戏规则。
 
 ## 声音与表演
 

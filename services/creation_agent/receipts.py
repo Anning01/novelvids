@@ -7,11 +7,19 @@ from models.agent_operation import AgentOperation
 
 def receipt_of(task) -> dict:
     """Project one task the way production receipts have always reported it."""
+    operation = task.request_params.get("operation")
+    data = task.response_data or {}
+    story_progress = {}
+    if operation == 'story_memory_recheck' and isinstance(data.get('completed'), list):
+        total = data.get('total')
+        if isinstance(total, int) and total > 0:
+            story_progress['story_review_progress'] = {'completed': len(data['completed']), 'total': total}
     return {
         "task_id": str(task.id),
+        **story_progress,
         **({"scene_id": task.request_params.get("scene_id"), "saved": (task.response_data or {}).get("saved")}
            if task.request_params.get("operation") in {"storyboard_sheet", "storyboard_sheet_edit"} else {}),
-        "operation": task.request_params.get("operation")
+        "operation": operation
         or {
             1: "assets",
             2: "image",

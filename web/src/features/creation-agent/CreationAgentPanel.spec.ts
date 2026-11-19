@@ -4,13 +4,13 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CreationAgentPanel from './CreationAgentPanel.vue'
-import { agentApi } from './api'
+import { agentApi, runSubscription } from './api'
 import { api } from '@/api'
 import { useCreationAgentStore } from './store'
 
 const { push, scrollToBottom } = vi.hoisted(() => ({ push: vi.fn(), scrollToBottom: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
-vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn() }, runSubscription: vi.fn() }))
+vi.mock('./api', () => ({ agentApi: { promptStatus: vi.fn(), capabilities: vi.fn(), conversations: vi.fn(), history: vi.fn(), snapshot: vi.fn() }, runSubscription: vi.fn() }))
 vi.mock('@/api', () => ({ api: { assets: vi.fn(), scenes: vi.fn() }, getAuthToken: () => null, getActiveTeamId: () => null }))
 vi.mock('element-plus', () => ({ ElPopover: defineComponent({ props: ['visible'], emits: ['update:visible'], template: `<div><div @click="$emit('update:visible', !visible)"><slot name="reference" /></div><slot v-if="visible" /></div>` }) }))
 vi.mock('vue-element-plus-x', () => ({
@@ -391,6 +391,37 @@ it('preserves draft and model choice after closing and reopening the assistant',
   reopened.unmount()
 })
 
+it('opens the exact story review and keeps its batch progress and pause state in the assistant', async () => {
+  const { useCreationAgentWorkspace } = await import('./workspace')
+  const pinia = createPinia()
+  const workspace = useCreationAgentWorkspace(pinia)
+  const production = [{ task_id: 'review', operation: 'story_memory_recheck', status: 2, stage: 'needs_review',
+    story_review_progress: { completed: 1, total: 185 } }]
+  const activity = [{ id: 'extract', kind: 'status' as const, status: 'completed' as const, label: '提取故事事实候选' }]
+  vi.mocked(agentApi.conversations).mockResolvedValue({ code: 0, message: '', data: [
+    { id: 41, novel_id: 7, active_task_id: null, created_at: '', updated_at: '' },
+    { id: 42, novel_id: 7, active_task_id: 'another-task', created_at: '', updated_at: '' },
+  ] })
+  vi.mocked(agentApi.history).mockResolvedValue({ code: 0, message: '', data: { next_before: 1, items: [] } })
+  vi.mocked(agentApi.snapshot).mockResolvedValue({ code: 0, message: '', data: { task_id: 'review',
+    conversation_id: 42, status: 2, content: '', error_message: null, event_count: 2, changes: [], usage: {}, production, activity } })
+  vi.mocked(runSubscription).mockResolvedValue({ runAgent: vi.fn().mockResolvedValue({}), abortRun: vi.fn() } as unknown as Awaited<ReturnType<typeof runSubscription>>)
+  workspace.showProductionRun(7, { taskId: 'review', conversationId: 42 })
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  expect(workspace.isOpen).toBe(true)
+  expect(agentApi.history).toHaveBeenCalledWith(42, undefined)
+  expect(agentApi.snapshot).toHaveBeenCalledWith('review')
+  expect(agentApi.snapshot).not.toHaveBeenCalledWith('another-task')
+  expect(wrapper.get('progress').attributes()).toMatchObject({ value: '1', max: '185' })
+  expect(wrapper.text()).toContain('等待确认故事记忆')
+  expect(wrapper.get('[aria-label="执行过程"]').text()).not.toContain('用时')
+  workspace.showProductionRun(7, { taskId: 'review', conversationId: 42 })
+  await flushPromises()
+  expect(agentApi.history).toHaveBeenCalledTimes(1)
+  expect(runSubscription).not.toHaveBeenCalled()
+})
+
 it('sends an explicit page selection even beyond the first catalog page', async () => {
   const { useCreationAgentWorkspace } = await import('./workspace')
   const pinia = createPinia()
@@ -582,4 +613,51 @@ it.each([
     wrapper.unmount()
     applySavedLocale('zh')
   }
+})
+
+it.each(['light', 'dark'])('shows memory before the screenplay and keeps the saved-script refresh after it (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  const memory = { task_id: 'memory', operation: 'story_memory_analyze', status: 2 }
+  const screenplay = { task_id: 'script', operation: 'screenplay', status: 2 }
+  const first = { id: 'model:memory', kind: 'status' as const, label: '整理世界观与剧情进展', status: 'running' as const }
+  const second = { id: 'model:script', kind: 'status' as const, label: '编写本集剧本', status: 'running' as const }
+  const base = { changes: [], usage: {}, created_at: '', status: 2, content: '' }
+  store.messages = [
+    { ...base, id: 1, role: 'user', task_id: 'script', content: '生成本集剧本' },
+    { ...base, id: 2, role: 'assistant', task_id: 'script', production: [screenplay, memory], activity: [first] },
+    { ...base, id: 3, role: 'user', task_id: 'memory', content: '分析故事记忆候选' },
+    { ...base, id: 4, role: 'assistant', task_id: 'memory', production: [memory], activity: [first] },
+  ]
+  await flushPromises()
+  const groups = () => wrapper.findAll('.creation-agent-panel__message-group')
+  expect(groups()[2]!.text()).toContain('整理世界观与剧情进展')
+  expect(groups()[3]!.text()).toContain('等待故事记忆')
+  expect(groups()[3]!.text()).not.toContain('整理世界观与剧情进展')
+  store.messages[1]!.activity = [{ ...first, status: 'completed' }, second]
+  store.messages[1]!.production = [screenplay, { ...memory, status: 3 }]
+  Object.assign(store.messages[3]!, { status: 3, activity: [{ ...first, status: 'completed' }], production: [{ ...memory, status: 3 }] })
+  store.messages.push({ ...base, id: 5, role: 'user', task_id: 'after-save', content: '更新成稿记忆' })
+  await flushPromises()
+  expect(groups()[3]!.text()).toContain('编写本集剧本')
+  expect(groups()[4]!.text()).toContain('更新成稿记忆')
+  wrapper.unmount()
+})
+
+it('orders receipt-only progress before history has loaded its child messages', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const store = useCreationAgentStore(pinia)
+  store.messages = [{ id: 1, task_id: 'script', role: 'assistant', status: 2, content: '', usage: {}, changes: [], created_at: '',
+    production: [{ task_id: 'script', operation: 'screenplay', status: 2 },
+      { task_id: 'memory', operation: 'story_memory_analyze', status: 2 }] }]
+  await flushPromises()
+  expect(wrapper.findAll('.creation-agent-panel__production li').map(el => el.text())).toEqual([
+    '分析故事记忆候选 · 处理中', '剧本改编 · 等待故事记忆',
+  ])
+  wrapper.unmount()
 })

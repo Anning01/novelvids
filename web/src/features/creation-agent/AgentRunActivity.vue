@@ -12,9 +12,10 @@ const props = defineProps<{
   startedAt?: string | null
   finishedAt?: string | null
   statusText?: string
+  waitingText?: string
   operationLabel?: string
 }>()
-const active = computed(() => [1, 2, 6].includes(props.status))
+const active = computed(() => [1, 2, 6].includes(props.status) && !props.waitingText)
 const emit = defineEmits<{ 'stream-update': [] }>()
 const detailBodies = ref<HTMLParagraphElement[]>([])
 const expanded = ref(active.value)
@@ -56,9 +57,9 @@ const activeStepLabel = computed(() => {
 })
 const stateText = computed(() => active.value ? (activeStepLabel.value || props.statusText || tr('正在处理你的创作要求'))
   : tr(({ 3: '已完成', 4: '本轮未完成', 5: '本轮已停止' } as Record<number, string>)[props.status] || '等待中'))
-const summaryText = computed(() => props.operationLabel && active.value && !activeStepLabel.value
+const summaryText = computed(() => props.waitingText || (props.operationLabel && active.value && !activeStepLabel.value
   ? tr('{p0}中', { p0: props.operationLabel })
-  : props.operationLabel && !active.value ? `${props.operationLabel} · ${stateText.value}` : stateText.value)
+  : props.operationLabel && !active.value ? `${props.operationLabel} · ${stateText.value}` : stateText.value))
 function stepState(step: AgentActivityStep): string {
   return tr(step.status === 'completed' ? '已完成' : step.status === 'failed' ? '失败' : active.value ? '处理中' : '已结束')
 }

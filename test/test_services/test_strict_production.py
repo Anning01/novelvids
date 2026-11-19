@@ -274,6 +274,27 @@ async def test_source_conflict_keeps_saved_results(project, monkeypatch, operati
 
 
 @pytest.mark.asyncio
+async def test_asset_extraction_saves_when_only_episode_pacing_changes(project, monkeypatch):
+    novel, chapter, _ = project
+    requests = mock_model(monkeypatch, asset_payload())
+    generate = SkillExecution.generate_strict
+
+    async def change_pacing(self, facts):
+        result = await generate(self, facts)
+        await Chapter.filter(id=chapter.id).update(episode_pacing={'preset': 'compact', 'max_seconds': None})
+        return result
+
+    monkeypatch.setattr(SkillExecution, 'generate_strict', change_pacing)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    assert await Asset.filter(novel=novel, canonical_name='阿岚').exists()
+
+
+@pytest.mark.asyncio
 async def test_storyboard_includes_blocking_and_segments_without_extra_model_calls(project, monkeypatch):
     novel, chapter, _ = project
     await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, source_chapters=[1])
@@ -289,6 +310,7 @@ async def test_storyboard_includes_blocking_and_segments_without_extra_model_cal
     requests = mock_model(monkeypatch, payload)
     monkeypatch.setattr('services.storyboard.blocking_plans.place_shot', AsyncMock(side_effect=AssertionError('no second model request')))
     task = await scene_controller.generate(chapter.id, generate_blocking_maps=True)
+    assert 'references/blocking.md' in {ref['name'] for ref in task.request_params['creative_method']['references']}
     await ai_task_executor.run(task)
     await task.refresh_from_db()
     assert task.status == 3, task.error_message
@@ -393,7 +415,7 @@ async def test_speaking_character_uses_normal_asset_binding_without_another_mode
     assert '@{王叔}（画外呼喊）: 阿岚！' in scene.prompt
     assert (await scene.assets.all().get(id=speaker.id)).metadata['voice_reference_id'] == 12
     assert len(requests) == 1
-    assert '发声角色也属于角色引用' in str(requests[0]['messages'])
+    assert '发声角色也统一列入角色名单' in str(requests[0]['messages'])
 
 
 @pytest.mark.parametrize('language', ['zh', 'en'])
@@ -510,3 +532,45 @@ async def test_complete_episode_preserves_all_source_scene_numbers_in_one_call(p
     scenes = await Scene.filter(chapter=chapter).order_by('sequence')
     assert [scene.prompt_params['source_scene_number'] for scene in scenes] == numbers
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('short_name', ['玉华山坟前', '玉华山后山坟钱', '后山坟地'])
+async def test_storyboard_saves_all_shots_with_an_identifiable_scene_reference(project, monkeypatch, short_name):
+    novel, chapter, _ = project
+    location = await Asset.create(novel=novel, canonical_name='玉华山后山坟前', aliases=['后山坟地'],
+                                  asset_type=2, source_chapters=[1])
+    shot = shot_payload()['shots'][0]
+    correct = {**shot, 'environment': location.canonical_name, 'visible_asset_names': [location.canonical_name]}
+    abbreviated = {**correct, 'visible_asset_names': [short_name, location.canonical_name],
+                   'visual_prose': f'晨雾笼罩@{{{short_name}}}。'}
+    requests = mock_model(monkeypatch, {'shots': [correct, abbreviated]})
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    rows = await Scene.filter(chapter=chapter).order_by('sequence').prefetch_related('assets')
+    assert len(rows) == 2
+    for row in rows:
+        assert row.prompt_params['visible_asset_names'] == [location.canonical_name]
+        assert [a.id for a in row.assets] == [location.id]
+    assert f'@{{{short_name}}}' not in rows[1].prompt
+
+
+@pytest.mark.parametrize(('unknown', 'environment', 'other'), [
+    ('玉华山坟前', '玉华山后山坟前', '玉华山前山坟前'),
+    ('玉华山坟前', '庭院', None),
+    ('玉华山后山坟前#鬼影', '玉华山后山坟前', None),
+    ('铜铃', '玉华山后山坟前', None),
+])
+def test_storyboard_keeps_ambiguous_or_unsupported_names_unbound(unknown, environment, other):
+    from schemas.scene import SceneEntity
+    from services.storyboard.strict_result import storyboard_result
+    from services.storyboard.strategies import storyboard_strategy_factory
+    entities = [SceneEntity(name=name, asset_type='场景', description=name, aliases=[])
+                for name in ['玉华山后山坟前', other] if name]
+    payload = shot_payload()
+    payload['shots'][0].update(environment=environment, visible_asset_names=[unknown])
+    with pytest.raises(ValueError, match='未登记'):
+        storyboard_result(payload, 'zh', entities, storyboard_strategy_factory.resolve('cinematic'))

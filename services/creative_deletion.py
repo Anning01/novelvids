@@ -20,6 +20,7 @@ from models.remake_source import RemakeSource
 from models.remake_upload import RemakeUpload
 from models.resource_library import ResourcePlacement
 from models.scene import Scene
+from models.story_memory import StoryCommit
 from models.video import Video
 from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft
 from models.work_sync import WorkSyncObject
@@ -59,6 +60,10 @@ def _chapter_task(params, chapter, scene_ids, video_ids, export_ids):
         params.get("chapter_id") == chapter.id
         or any(isinstance(params.get(key), int) and params[key] in ids
                for key, ids in (("scene_id", scene_ids), ("video_id", video_ids), ("export_id", export_ids)))
+        or (params.get("novel_id") == chapter.novel_id and any(
+            isinstance(step, dict) and step.get("chapter_id") == chapter.id
+            for step in params.get("story_recheck_sources") or []
+        ))
     )
 
 
@@ -199,10 +204,13 @@ async def delete_chapter(chapter_id, novel_id):
         video_ids = {row.id for row in videos}
         export_ids = {row.id for row in exports}
         task_ids = {row.task_id for row in exports}
+        task_ids.update(await StoryCommit.filter(chapter_id=chapter_id).values_list("task_id", flat=True))
         tasks = [task for task in await AiTask.all()
                  if task.id in task_ids or _chapter_task(task.request_params or {}, chapter, scene_ids, video_ids, export_ids)]
         await _stop_tasks(tasks)
 
+        from services.story_memory.invalidation import chapter_removed
+        await chapter_removed(chapter)
         for task in tasks:
             if task.request_params.get("operation") == "compose":
                 result = (await AiTask.get(id=task.id)).response_data or {}

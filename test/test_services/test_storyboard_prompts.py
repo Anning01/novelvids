@@ -27,6 +27,15 @@ def _entity() -> SceneEntity:
     )
 
 
+def test_empty_model_reference_is_removed_without_changing_literal_text_or_speech():
+    from prompts.storyboard import normalize_storyboard_reference_text
+    entity = SceneEntity(name='木杖', aliases=[], description='古代木杖', asset_type='物品')
+    text = '他停在那里，@{} @{木杖}没有抬起。牌上写“@{}”。\n0s-2s: 周砚: 原文@{}保留。'
+    result = normalize_storyboard_reference_text(text, [entity])
+    assert result == '他停在那里， @{木杖}没有抬起。牌上写“@{}”。\n0s-2s: 周砚: 原文@{}保留。'
+    assert normalize_storyboard_reference_text(result, [entity]) == result
+
+
 def _shot(sequence: int, title: str = "夜访小楼") -> SoraScenePromptConfig:
     return SoraScenePromptConfig(
         sequence=sequence,

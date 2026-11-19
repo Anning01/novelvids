@@ -19,7 +19,9 @@ def localized_message(source: str, *, _language: str | None = None, **parameters
 
 
 def public_generation_error(value: str | None) -> str | None:
-    """Old failure records are readable without exposing a retired manual workflow."""
+    """Present known generation failures without exposing internal details."""
+    if value and re.match(r'^\d+ validation errors? for Story(?:Candidate|Review|Evidence|MemoryNote)(?:\r?\n|$)', value):
+        return localized_message('模型返回的故事记忆格式不符合要求，结果未入库。请重试当前操作或更换模型。')
     if value and ('核对' in value or re.search(r'\b(?:needs?|pending|awaiting|manual) review\b', value, re.I)):
         return localized_message('生成未完成，可以重新生成。已完成结果会保留。')
     return value

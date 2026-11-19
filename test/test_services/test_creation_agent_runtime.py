@@ -57,7 +57,7 @@ async def test_framework_tool_loop_saves_before_reporting_completion():
 
     def model(messages, info):
         calls.append(messages)
-        assert {t.name for t in info.function_tools} == {'get_creation_context', 'update_image_prompt', 'update_storyboard_prompt'}
+        assert {t.name for t in info.function_tools} == {'get_creation_context', 'read_story_memory', 'update_image_prompt', 'update_storyboard_prompt'}
         if len(calls) == 1:
             image_tool = next(t for t in info.function_tools if t.name == 'update_image_prompt')
             assert 'expected_version' not in json.dumps(image_tool.parameters_json_schema)

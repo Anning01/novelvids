@@ -24,6 +24,7 @@ import {
 import { api } from '@/api'
 import { skillsApi } from '@/features/creation-agent/skillsApi'
 import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
+import StoryMemoryPanel from '@/features/story-memory/StoryMemoryPanel.vue'
 import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
 import type { EpisodePacing } from '@/types'
 import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
@@ -136,6 +137,9 @@ const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
+const memoryRefreshKey = ref(0)
+const memoryChapterSelection = ref(0)
+const assistantWorkspace = useCreationAgentWorkspace()
 const pendingStoryboard = ref<boolean | null>(null)
 const savingStoryboard = computed(() => pendingStoryboard.value !== null)
 const savingDuration = ref(false)
@@ -220,6 +224,7 @@ async function generateScreenplay(id: number, existingTask = sessionStorage.getI
     if (!chapter.screenplay) throw new Error(tr('未读取到本集导演剧本'))
     chapterDetails.value[id] = chapter
     episodeViews.value[id] = 'screenplay'
+    ++memoryRefreshKey.value
   } catch (error) {
     if (!scriptRequests.signal.aborted) notice.error((error as Error).message)
   } finally {
@@ -664,6 +669,7 @@ async function saveEdits() {
         : chapter)
     }
     cancelEditing(false)
+    ++memoryRefreshKey.value
     notice.success(tr('修改已保存{p0}', { p0: changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : '' }))
   } catch (error) {
     notice.error((error as Error).message)
@@ -673,6 +679,7 @@ async function saveEdits() {
 }
 
 async function refreshAgentEpisodes() {
+  ++memoryRefreshKey.value
   if (editing.value) {
     notice.info(tr('助手修改已保存，当前编辑草稿已保留'))
     return
@@ -687,6 +694,7 @@ async function addEpisode() {
   episodeBusy.value = true
   try {
     const {data} = await api.createChapter({novel_id: projectId.value, content: ''})
+    ++memoryRefreshKey.value
     await loadChapters(data.id)
     await selectEpisode(data.number)
     beginEditing()
@@ -704,6 +712,7 @@ async function removeEpisode() {
   try {
     if (!await confirmChapterDeletion(episodeDisplayLabel(target))) return
     await api.deleteChapter(target.id)
+    ++memoryRefreshKey.value
     delete chapterDetails.value[target.id]
     delete chapterAssets.value[target.id]
     const neighbor = chapters.value.find(item => item.id !== target.id)
@@ -727,13 +736,14 @@ function continueToSettings() {
 }
 
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
+  const button = event?.currentTarget as HTMLElement | null
   activeEpisode.value = chapterNumber
+  memoryChapterSelection.value += 1
   const chapter = chapters.value.find(item => item.number === chapterNumber)
   if (chapter) void router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapterContent(chapter)
   if (editing.value && selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   await nextTick()
-  const button = event?.currentTarget as HTMLElement | null
   if (!button || !episodeTabs.value) return
   const left = button.offsetLeft - (episodeTabs.value.clientWidth - button.offsetWidth) / 2
   episodeTabs.value.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
@@ -782,6 +792,7 @@ onBeforeUnmount(() => {
       :chapters="chapters"
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
+      <template #default="{ reviewTarget }">
       <section class="agent-content">
       <div class="analysis-hero">
         <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover"
@@ -927,6 +938,10 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </div>
+      <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
+        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey" :chapter-selection-key="memoryChapterSelection" :review-target="reviewTarget"
+        v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" @show-run="assistantWorkspace.showProductionRun(projectId, $event)" />
+
       <section class="episode-section">
         <div class="episode-navigation">
           <header>
@@ -1003,6 +1018,7 @@ onBeforeUnmount(() => {
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />
     <ImageLightbox :open="Boolean(coverPreviewSrc)" :src="coverPreviewSrc" :alt="coverAlt" animated @close="coverPreviewSrc = ''" />
+    </template>
   </ShortDramaWorkspaceShell>
   </main>
 </template>

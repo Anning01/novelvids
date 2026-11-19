@@ -65,10 +65,17 @@ class ScreenplayHandler(BaseTaskHandler):
         async def save():
             async with project_write(chapter.novel_id) as db:
                 await execution.before_request()
+                from services.story_memory.context import verify_bindings
+                await verify_bindings(params)
                 await chapter.refresh_from_db(using_db=db)
                 verify_source()
                 chapter.screenplay = screenplay
                 await chapter.save(using_db=db, update_fields=["screenplay", "updated_at"])
+                from services.story_memory.automatic import enabled, queue_memory
+                if await enabled(chapter.novel_id):
+                    from services.creation_agent.handler import authorize_run
+                    await queue_memory(chapter.novel_id, chapter.id, await authorize_run(params),
+                        model_id=params.get('assistant_model_config_id'))
                 return {"chapter_id": chapter.id, "screenplay_saved": True}
 
         return await execute_step(params["task_id"], "persist:screenplay", save, atomic=True)

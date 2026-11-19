@@ -121,6 +121,8 @@ class ExtractionContextLoader:
             asset_type__in=EXTRACTABLE_ASSET_TYPE_VALUES,
         ).order_by("asset_type", "id").prefetch_related("variants")
 
+        snapshots = [self._asset_snapshot(asset, asset.variants) for asset in assets]
+
         return ExtractionContext(
             novel=NovelExtractionMetadata(
                 name=novel.name,
@@ -131,7 +133,7 @@ class ExtractionContextLoader:
                 project_type=novel.project_type,
                 project_setting=novel.project_setting,
             ),
-            assets=tuple(self._asset_snapshot(asset, asset.variants) for asset in assets),
+            assets=tuple(snapshots),
             chapter=ChapterExtractionInput(
                 id=chapter.id,
                 number=chapter.number,
