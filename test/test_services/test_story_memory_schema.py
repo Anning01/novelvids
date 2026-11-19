@@ -36,6 +36,7 @@ async def run():
     assert not await StoryMemoryProject.filter(novel=project).exists()
     split = await Novel.create(name='split novel')
     await StoryMemoryProject.create(novel=split)
+    await db.execute_script('ALTER TABLE story_memory_projects DROP COLUMN uses_split_source')
     await Tortoise.close_connections()
     await Tortoise.init(db_url=__import__('os').environ['DATABASE_URL'], modules={'models': [f'models.{n}' for n in models.__all__]})
     await ensure_story_memory_schema()
@@ -43,7 +44,7 @@ async def run():
     assert await StorySubject.filter(id=subject.id, name='world').exists()
     assert await StoryCommit.filter(id=commit.id, status='accepted').exists()
     assert await StorySnapshot.filter(commit_id=commit.id).exists()
-    assert await StoryMemoryProject.filter(novel_id=split.id).count() == 1
+    assert (await StoryMemoryProject.get(novel_id=split.id)).uses_split_source is True
     assert not await StoryMemoryProject.filter(novel_id=project.id).exists()
     assert await Novel.filter(id=project.id, story_outline='old outline', project_setting='old setting').exists()
     assert await Chapter.filter(id=chapter.id, content='old source', screenplay='old script').exists()
@@ -71,8 +72,11 @@ async def test_postgres_story_schema_is_safe_and_uses_backend_foreign_keys(monke
     monkeypatch.setattr('services.schema_compat.Tortoise.get_connection', lambda _: connection)
     await ensure_story_memory_schema()
     await ensure_story_memory_schema()
-    assert len(sql) == 10
-    assert all('CREATE TABLE IF NOT EXISTS' in statement for statement in sql)
-    assert not re.search(r'^\s*(DROP|UPDATE|DELETE|ALTER)\b', '\n'.join(sql), re.MULTILINE)
+    assert len(sql) == 12
+    creates = [statement for statement in sql if 'CREATE TABLE IF NOT EXISTS' in statement]
+    assert len(creates) == 10
+    assert sql[5] == sql[11] == (
+        'ALTER TABLE story_memory_projects ADD COLUMN IF NOT EXISTS uses_split_source BOOL NOT NULL DEFAULT TRUE;')
+    assert not re.search(r'^\s*(DROP|UPDATE|DELETE)\b', '\n'.join(sql), re.MULTILINE)
     assert 'UUID' in sql[1] and 'JSONB' in sql[1]
     assert all(model._meta.db_table in '\n'.join(sql) for model in (StorySubject, StoryCommit, StoryFact, StoryMemoryProject, StorySnapshot))

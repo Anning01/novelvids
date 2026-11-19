@@ -75,6 +75,7 @@ async def story_context(novel_id, chapter_id=None, *, purpose='generation', supp
         (item for item in states['chapters'] if item['chapter_id'] == chapter_id), None)
     if state is None:
         raise HTTPException(404, '章节不属于当前作品')
+    supplemental = supplemental or (states['automatic'] and state['state'] != 'current')
     if supplemental:
         if states['baseline']['state'] != 'current':
             return unavailable
@@ -124,7 +125,7 @@ async def verify_bindings(params):
             continue
         current = await story_context(params['novel_id'], expected['chapter_id'], purpose=expected['purpose'])
         if binding(current) != expected:
-            raise HTTPException(409, '故事记忆在生成期间已变化，结果已保留，请复核后重新生成')
+            raise HTTPException(409, '故事记忆在生成期间已变化，结果已保留，请重新生成')
 
 
 async def saved_binding(params):

@@ -14,8 +14,10 @@ async def memory_status(novel_id):
     if project is None:
         raise HTTPException(404, '作品不存在')
     chapters = await Chapter.filter(novel_id=novel_id).order_by('number', 'id')
-    automatic = await StoryMemoryProject.filter(novel_id=novel_id).exists()
-    opening = next((item for chapter in chapters if (item := opening_source(chapter, prefer_original=automatic))), None) if automatic or needs_opening_source(project) else None
+    settings = await StoryMemoryProject.get_or_none(novel_id=novel_id)
+    automatic = settings is not None
+    split_source = bool(settings and settings.uses_split_source)
+    opening = next((item for chapter in chapters if (item := opening_source(chapter, prefer_original=split_source))), None) if split_source or needs_opening_source(project) else None
     # Load each table once; status must not rescan every prefix for every chapter.
     latest, attempts = {}, {}
     for commit in await StoryCommit.filter(novel_id=novel_id).order_by('-id').only(
@@ -39,10 +41,10 @@ async def memory_status(novel_id):
         if commit is None:
             reason = '尚未建立正式记忆'
         elif fingerprint(snapshot_data(project, chapter, opening=opening if chapter is None else None,
-                preceding=preceding_excerpt(previous) if automatic else None)) != commit.source_hash:
+                preceding=preceding_excerpt(previous) if split_source else None)) != commit.source_hash:
             reason = '剧本或项目设定已变化'
         elif invalidation:
-            reason = '来源或前情变化后尚未重新确认'
+            reason = '制作时会自动更新故事记忆' if automatic else '来源或前情变化后尚未重新确认'
         elif snapshot is None:
             reason = '正式记忆快照缺失'
         elif blocked_by:
@@ -56,7 +58,10 @@ async def memory_status(novel_id):
             'reason': reason, 'can_analyze': blocked_by is None, 'blocked_by': blocked_by,
             'invalidation': invalidation})
         if reason and blocked_by is None and (chapter is None or not automatic):
-            blocked_by = f'第 {chapter.number} 章记忆需要重新确认' if chapter else '全局故事底稿需要重新确认'
+            if chapter:
+                blocked_by = f'第 {chapter.number} 章记忆需要重新确认'
+            else:
+                blocked_by = '制作时会自动准备全局故事底稿' if automatic else '全局故事底稿需要重新确认'
         if not automatic or not reason:
             parent_id = commit.id if commit else None
         previous = chapter

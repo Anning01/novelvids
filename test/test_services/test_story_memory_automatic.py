@@ -141,6 +141,55 @@ async def test_multi_chapter_split_queues_one_global_task_and_target_episode_aut
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('opening_is_baseline', [False, True])
+async def test_deleting_episode_refreshes_affected_legacy_memory_during_creation(monkeypatch, opening_is_baseline):
+    from models.story_memory import StorySubject
+    from services.story_memory.context import story_context
+    from test.test_services.test_story_memory import accept, candidate, saved_candidate
+
+    await model_config()
+    requests = model_transport(monkeypatch)
+    setting = '' if opening_is_baseline else '故事发生在古城。'
+    project = await Novel.create(name='删除后的自动记忆', project_setting=setting)
+    removed = await Chapter.create(novel=project, number=1, name='待删除', content='只在被删章节出现的前情。')
+    remaining = await Chapter.create(novel=project, number=2, name='保留', content='老周来到未来城。')
+    baseline = await accept(project, await saved_candidate(project, payload=candidate(
+        removed.content if opening_is_baseline else setting,
+        source='opening_chapter.text' if opening_is_baseline else 'project.setting',
+    )))
+    subject = await StorySubject.get(novel=project)
+    for chapter in (removed, remaining):
+        await accept(project, await saved_candidate(project, chapter, candidate(
+            chapter.content, source='chapter.text', existing_id=subject.id)))
+    assert not (await memory_status(project.id))['automatic']
+
+    await chapter_controller.remove(removed.id)
+    assert not requests
+    state = await memory_status(project.id)
+    assert state['automatic'] is True
+    assert state['baseline']['state'] == ('missing' if opening_is_baseline else 'current')
+    assert state['chapters'][0]['state'] == 'stale'
+    assert not state['chapters'][0]['candidate_id']
+    assert '确认' not in (state['chapters'][0]['blocked_by'] or '')
+    assert await StoryCommit.filter(id=baseline.id).exists() is not opening_is_baseline
+    context = await story_context(project.id, remaining.id)
+    assert context['enabled'] is not opening_is_baseline
+
+    task = await chapter_controller.extract(remaining.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    contracts = [item['response_format']['json_schema']['name'] for item in requests]
+    assert contracts == ['story_memory_extract'] * (2 if opening_is_baseline else 1) + ['assets']
+    model_inputs = [json.loads(item['messages'][-1]['content'])['task_context']['input'] for item in requests]
+    assert removed.content not in json.dumps(model_inputs, ensure_ascii=False)
+    state = await memory_status(project.id)
+    assert state['baseline']['state'] == 'current'
+    assert state['chapters'][0]['state'] == 'current'
+    assert not await AiTask.filter(stage='needs_review').exists()
+
+
+@pytest.mark.asyncio
 async def test_pasted_single_chapter_and_screenplay_do_not_enable_global_memory():
     await model_config()
     single = await novel_controller.create(NovelCreate(name='单章', content='只有这一章的故事。'))

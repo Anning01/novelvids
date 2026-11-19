@@ -418,17 +418,24 @@ async def test_invented_replacement_is_rejected(project):
 
 
 @pytest.mark.asyncio
-async def test_story_evidence_prevents_chapter_deletion_and_renumbering(project):
+async def test_deleting_chapter_removes_its_memory_and_invalidates_later_decisions(project):
     from controllers.chapter import chapter_controller
     from schemas.chapter import ChapterPatch
-    await accept(project, await saved_candidate(project))
+    baseline = await accept(project, await saved_candidate(project))
     chapter = await Chapter.create(novel=project, number=1, name='一', content='古城断水。')
-    await pending(project, chapter)
-    with pytest.raises(HTTPException, match='故事记忆'):
-        await chapter_controller.remove(chapter.id)
+    removed = await pending(project, chapter)
+    later_chapter = await Chapter.create(novel=project, number=2, name='二', content='古城下雨。')
+    later = await StoryCommit.create(novel=project, chapter=later_chapter, request_id=uuid4(),
+        source_snapshot={}, source_hash='hash', parent_id=removed.id, status='accepted')
+    snapshot = await StorySnapshot.create(novel=project, commit=later, data={})
     with pytest.raises(HTTPException, match='故事记忆'):
         await chapter_controller.patch(chapter.id, ChapterPatch(number=2))
-    assert await Chapter.filter(id=chapter.id, number=1, content='古城断水。').exists()
+    await chapter_controller.remove(chapter.id)
+    assert not await Chapter.filter(id=chapter.id).exists()
+    assert not await StoryCommit.filter(id=removed.id).exists()
+    assert await StoryCommit.filter(id=baseline.id).exists()
+    await snapshot.refresh_from_db()
+    assert snapshot.data['invalidation']['reason'] == 'chapter_deleted'
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Prepare reusable story snapshots for novels with a recorded multi-chapter split."""
+"""Prepare reusable story snapshots for projects with automatic memory enabled."""
 
 import logging
 from uuid import NAMESPACE_URL, uuid5

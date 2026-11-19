@@ -62,7 +62,8 @@ async def source_snapshot(novel_id, chapter_id=None):
     project = await Novel.get_or_none(id=novel_id)
     if project is None:
         raise HTTPException(404, '作品不存在')
-    automatic = await StoryMemoryProject.filter(novel_id=novel_id).exists()
+    settings = await StoryMemoryProject.get_or_none(novel_id=novel_id)
+    split_source = bool(settings and settings.uses_split_source)
     chapter = None
     preceding = None
     if chapter_id is not None:
@@ -71,13 +72,13 @@ async def source_snapshot(novel_id, chapter_id=None):
             raise HTTPException(404, '章节不属于当前作品')
         if not chapter.production_text.strip():
             raise HTTPException(422, '本章没有可分析的剧本或原文')
-        if automatic:
+        if split_source:
             previous = await Chapter.filter(novel_id=novel_id, number__lt=chapter.number).order_by('-number', '-id').first()
             preceding = preceding_excerpt(previous)
     opening = None
-    if chapter is None and (automatic or needs_opening_source(project)):
-        first = await first_opening_chapter(novel_id, prefer_original=automatic)
-        opening = opening_source(first, prefer_original=automatic)
+    if chapter is None and (split_source or needs_opening_source(project)):
+        first = await first_opening_chapter(novel_id, prefer_original=split_source)
+        opening = opening_source(first, prefer_original=split_source)
     return snapshot_data(project, chapter, opening=opening, preceding=preceding)
 
 
@@ -94,6 +95,8 @@ async def predecessor(novel_id, chapter_id):
         raise HTTPException(404, '章节不属于当前作品')
     parent = state['baseline']
     if parent['state'] != 'current':
+        if state['automatic']:
+            conflict('制作时会自动准备全局故事底稿')
         conflict('全局故事底稿缺失或已失效，请先分析并确认')
     for previous in state['chapters']:
         if previous['chapter_id'] == chapter_id:
@@ -114,6 +117,8 @@ async def verify_inputs(commit, *, check_target=True):
     if commit.status == 'accepted':
         snapshot = await StorySnapshot.get_or_none(commit_id=commit.id)
         if snapshot and snapshot.data.get('invalidation'):
+            if snapshot.data['invalidation'].get('reason') == 'chapter_deleted':
+                conflict('章节已删除，相关故事记忆会在制作时自动更新')
             conflict('本次正式记忆已失效，请重新分析并复核后续章节')
     if check_target:
         previous = await latest_commit(commit.novel_id, commit.chapter_id)

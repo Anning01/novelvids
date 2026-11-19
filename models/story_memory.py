@@ -5,9 +5,10 @@ from models._base import AbstractBaseModel
 
 
 class StoryMemoryProject(AbstractBaseModel):
-    """Provenance for a novel that was successfully split into multiple chapters."""
+    """Projects whose story memory is automatically prepared during production."""
 
     novel = fields.OneToOneField('models.Novel', related_name='automatic_story_memory', on_delete=fields.CASCADE)
+    uses_split_source = fields.BooleanField(default=True)
 
     class Meta:
         table = 'story_memory_projects'
