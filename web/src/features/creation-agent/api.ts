@@ -30,7 +30,7 @@ export const agentApi = {
   submit: (id: number, input: AgentRunInput) => request<SingleResponse<AgentRun>>(`${base}/conversations/${id}/runs`, {
     method: 'POST', body: JSON.stringify(input),
   }),
-  snapshot: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}`),
+  snapshot: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}`, { signal: AbortSignal.timeout(10_000) }),
   stop: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}/stop`, { method: 'POST' }),
   resume: (taskId: string) => request<SingleResponse<AgentRun>>(`${base}/runs/${taskId}/resume`, { method: 'POST' }),
   undo: (changeId: number) => request<SingleResponse<AgentChange>>(`${base}/changes/${changeId}/undo`, { method: 'POST' }),

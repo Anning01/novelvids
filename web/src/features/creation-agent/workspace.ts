@@ -16,6 +16,7 @@ export const useCreationAgentWorkspace = defineStore('creation-agent-workspace',
   const projectId = ref(0)
   const chapterId = ref(0)
   const isOpen = ref(false)
+  const productionRun = ref<{ taskId: string; conversationId: number }>()
   const modelId = ref('')
   const selection = ref<AgentTargetOption[]>([])
   const scopeEdited = ref(false)
@@ -27,6 +28,7 @@ export const useCreationAgentWorkspace = defineStore('creation-agent-workspace',
     const nextIdentity = `${getAuthToken() || ''}:${getActiveTeamId() || ''}`
     if (id !== projectId.value || identity !== nextIdentity) {
       isOpen.value = false
+      productionRun.value = undefined
       modelId.value = ''
       drafts.value = {}
       selection.value = []
@@ -57,6 +59,12 @@ export const useCreationAgentWorkspace = defineStore('creation-agent-workspace',
     focusRevision.value += 1
   }
 
-  return { projectId, chapterId, isOpen, modelId, selection, scopeEdited, focusRevision, drafts,
-    enterProject, enterChapter, select, editTargets }
+  function showProductionRun(novelId: number, run?: typeof productionRun.value) {
+    enterProject(novelId)
+    if (run) productionRun.value = run
+    isOpen.value = true
+  }
+
+  return { projectId, chapterId, isOpen, productionRun, modelId, selection, scopeEdited, focusRevision, drafts,
+    enterProject, enterChapter, select, editTargets, showProductionRun }
 })

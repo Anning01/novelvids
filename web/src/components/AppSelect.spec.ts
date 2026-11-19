@@ -7,6 +7,13 @@ const options = ['wan3', 'minimax-h3', 'seedance-2.5', 'seedance-mini', 'seedanc
 const rect = (top: number, height: number): DOMRect => ({ top, bottom: top + height, left: 100, right: 320, width: 220, height, x: 100, y: top, toJSON: () => ({}) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('associates a visible label with the trigger instead of its wrapper', () => {
+  const wrapper = mount(AppSelect, { props: { modelValue: 'one', options: ['one'], ariaLabel: '查看范围', ariaLabelledby: 'scope-label' } })
+  expect(wrapper.get('button').attributes('aria-labelledby')).toBe('scope-label')
+  expect(wrapper.attributes('aria-labelledby')).toBeUndefined()
+  wrapper.unmount()
+})
+
 it('searches all options and supports keyboard selection of a filtered result', async () => {
   const wrapper = mount(AppSelect, { attachTo: document.body, props: {
     modelValue: '', ariaLabel: '账单用户', searchable: true,

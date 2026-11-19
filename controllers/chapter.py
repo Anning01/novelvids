@@ -68,6 +68,9 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
         return await self._edit(chapter_id, obj_in)
 
     async def _ensure_unreferenced(self, chapter: Chapter) -> None:
+        from models.story_memory import StoryCommit
+        if await StoryCommit.filter(chapter_id=chapter.id).exists():
+            raise HTTPException(409, localized_message('本集已有故事记忆提交，请保留集号和来源章节'))
         for task in await AiTask.filter(status__in=[TaskStatusEnum.pending, TaskStatusEnum.running, TaskStatusEnum.queued]):
             params = task.request_params or {}
             if params.get('novel_id') == chapter.novel_id and (params.get('chapter_id') == chapter.id or task.task_type in {AiTaskTypeEnum.project_analysis, AiTaskTypeEnum.creation_agent}):
@@ -87,13 +90,10 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
                 raise HTTPException(409, localized_message('本集已关联资产或形态'))
 
     async def remove(self, chapter_id: int) -> None:
+        from services.creative_deletion import delete_chapter
+
         chapter = await self.get(chapter_id)
-        async with project_write(chapter.novel_id) as db:
-            chapter = await self.get(chapter_id)
-            await self._ensure_unreferenced(chapter)
-            await chapter.delete(using_db=db)
-            count = await Chapter.filter(novel_id=chapter.novel_id).using_db(db).count()
-            await Novel.filter(id=chapter.novel_id).using_db(db).update(episodes_managed=True, total_chapters=count)
+        await delete_chapter(chapter.id, chapter.novel_id)
 
     async def extract(
         self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None,

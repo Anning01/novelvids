@@ -53,7 +53,7 @@ export interface AgentConversation {
   title?: string
 }
 
-export interface ProductionReceipt { scene_id?: number; saved?: boolean; task_id: string; operation: string; status: number; stage?: string | null; error?: string | null; started_at?: string | null; finished_at?: string | null }
+export interface ProductionReceipt { scene_id?: number; saved?: boolean; task_id: string; operation: string; status: number; stage?: string | null; error?: string | null; started_at?: string | null; finished_at?: string | null; story_review_progress?: { completed: number; total: number } }
 
 export interface AgentActivityStep {
   id: string

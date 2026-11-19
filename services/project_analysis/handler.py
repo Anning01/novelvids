@@ -154,6 +154,12 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
     """完成分章与书稿理解；人物仅保留为分析参考，封面按请求生成。"""
 
     async def execute(self, request_params: dict) -> dict:
+        if request_params.get('operation') == 'story_memory_recheck':
+            from services.story_memory.recheck import run_recheck
+            return await run_recheck(request_params)
+        if request_params.get('operation') in {'story_memory_analyze', 'story_memory_repair', 'story_memory_review'}:
+            from services.story_memory.analysis import analyze
+            return await analyze(request_params)
         novel_id = int(request_params["novel_id"])
         prompt_language = normalize_prompt_language(request_params.get("prompt_language"))
         from services.ai_task_executor import current_task_id
@@ -182,7 +188,8 @@ class ProjectAnalysisTaskHandler(BaseTaskHandler):
         chapter_query = Chapter.filter(novel_id=novel_id).order_by("number")
         chapter_count = await chapter_query.count()
         if not chapter_count and not novel.episodes_managed:
-            await novel_controller.split(novel_id)
+            from services.creation_agent.handler import authorize_run
+            await novel_controller.split(novel_id, ctx=await authorize_run(request_params), assistant_model_config_id=llm_config.id)
             chapter_count = await chapter_query.count()
 
         samples = []

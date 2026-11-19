@@ -55,3 +55,24 @@ it('keeps single-image callers working and reopens at the requested image', asyn
   expect(screen.find('[aria-label="下一张"]').exists()).toBe(false)
   expect(screen.get('img').attributes('src')).toBe('/single.png')
 })
+
+it('stays open until the animated close finishes, including repeated cancel requests', async () => {
+  const { wrapper, screen } = await viewer()
+  await wrapper.setProps({ animated: true })
+  const dialog = screen.get<HTMLDialogElement>('dialog')
+  let finish!: () => void
+  const finished = new Promise<void>(resolve => { finish = resolve })
+  const getAnimations = vi.fn(() => [{ finished }])
+  Object.defineProperty(dialog.element, 'getAnimations', { value: getAnimations })
+
+  await dialog.trigger('cancel')
+  await dialog.trigger('cancel')
+  expect(dialog.element.open).toBe(true)
+  expect(dialog.find('img').exists()).toBe(true)
+  expect(getAnimations).toHaveBeenCalledTimes(1)
+
+  finish()
+  await flushPromises()
+  expect(dialog.element.open).toBe(false)
+  expect(wrapper.emitted('close')).toHaveLength(1)
+})

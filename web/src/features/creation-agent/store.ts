@@ -13,6 +13,10 @@ import type { AgentActivityStep, AgentCapabilities, AgentChange, AgentConversati
 const activeStatuses = new Set([1, 2, 6])
 export const isAgentRunning = (status: number) => activeStatuses.has(status)
 
+function isStoryMemoryRun(run: AgentRun) {
+  return run.production?.some(receipt => receipt.task_id === run.task_id && receipt.operation.startsWith('story_memory_'))
+}
+
 export const useCreationAgentStore = defineStore('creation-agent', () => {
   const snapshotRequests = new Map<string, ReturnType<typeof agentApi.snapshot>>()
   function snapshot(taskId: string) {
@@ -39,6 +43,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   const nextBefore = ref<number | null>(null)
   const changesRevision = ref(0)
   const latestChanges = ref<AgentChange[]>([])
+  const unavailableSnapshots = ref(new Set<string>())
   const busy = computed(() => submitting.value || Boolean(currentRun.value && !currentRun.value.background && isAgentRunning(currentRun.value.status)))
   let subscription: HttpAgent | null = null
   let epoch = 0
@@ -64,14 +69,19 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     if (changed.length) { latestChanges.value = changed; changesRevision.value += 1 }
   }
 
-  function applySnapshot(run: AgentRun) {
-    currentRun.value = run
+  function updateRunMessage(run: AgentRun) {
+    unavailableSnapshots.value.delete(run.task_id)
     const message = messages.value.find(item => item.task_id === run.task_id && item.role === 'assistant')
     if (message) Object.assign(message, {
       recovery: run.recovery,
       activity: streamConnected.value && isAgentRunning(run.status)
         ? mergeActivity(run.activity || [], message.activity || [])
         : run.activity, started_at: run.started_at, finished_at: run.finished_at, content: isAgentRunning(run.status) && !run.content ? message.content : run.content, changes: run.changes, usage: run.usage, status: run.status, query_results: run.query_results || [], production: run.production || [], pending_production: run.pending_production })
+  }
+
+  function applySnapshot(run: AgentRun) {
+    currentRun.value = run
+    updateRunMessage(run)
     reportChanges(run.changes)
     if (run.background) {
       statusText.value = tr('任务已提交，正在等待模型执行。')
@@ -101,6 +111,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   async function follow(taskId: string) {
     if (!conversationId.value) return
+    if (currentRun.value?.task_id === taskId && isStoryMemoryRun(currentRun.value)) {
+      await refreshProduction()
+      return
+    }
     disconnect()
     const revision = epoch
     const id = conversationId.value
@@ -161,13 +175,14 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     return `creation-agent:conversation:${getActiveTeamId() ?? 'personal'}:${novelId}`
   }
 
-  async function selectConversation(id: number | null) {
+  async function selectConversation(id: number | null, taskId?: string) {
     const sameConversation = conversationId.value === id
     disconnect()
     epoch += 1
     conversationId.value = id
     if (id !== null) sessionStorage.setItem(selectionKey(), String(id))
     currentRun.value = null
+    unavailableSnapshots.value.clear()
     if (!sameConversation) messages.value = []
     error.value = ''
     statusText.value = ''
@@ -179,21 +194,27 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
     try {
       await history()
       if (revision !== epoch) return
-      const latestTaskId = conversations.value.find(item => item.id === id)?.active_task_id
+      const latestTaskId = taskId ?? conversations.value.find(item => item.id === id)?.active_task_id
         ?? [...messages.value].reverse().find(message => message.role === 'assistant')?.task_id
       if (latestTaskId) {
         const response = await snapshot(latestTaskId)
         if (revision !== epoch) return
         applySnapshot(response.data)
-        if (isAgentRunning(response.data.status)) void follow(latestTaskId)
+        if (isAgentRunning(response.data.status) && !isStoryMemoryRun(response.data)) void follow(latestTaskId)
       }
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('无法恢复当前对话')
     } finally { if (revision === epoch) loading.value = false }
   }
 
-  async function open(novelId: number) {
+  async function open(novelId: number, productionRun?: { taskId: string; conversationId: number }) {
     const nextIdentity = `${getAuthToken() || ''}:${getActiveTeamId() || ''}`
+    if (productionRun && identity === nextIdentity && projectId.value === novelId && !loading.value
+        && conversationId.value === productionRun.conversationId && currentRun.value?.task_id === productionRun.taskId
+        && isStoryMemoryRun(currentRun.value)) {
+      await refreshProduction()
+      return
+    }
     disconnect()
     epoch += 1
     const revision = epoch
@@ -214,9 +235,10 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
       capabilities.value = available.data
       conversations.value = listed.data
       const remembered = Number(sessionStorage.getItem(selectionKey(novelId)))
-      const selected = listed.data.find(item => item.id === conversationId.value)
+      const productionConversation = listed.data.find(item => item.id === productionRun?.conversationId)
+      const selected = productionConversation ?? listed.data.find(item => item.id === conversationId.value)
         ?? listed.data.find(item => item.id === remembered) ?? listed.data[0]
-      await selectConversation(selected?.id ?? null)
+      await selectConversation(selected?.id ?? null, productionConversation ? productionRun?.taskId : undefined)
     } catch (caught) {
       if (revision === epoch) error.value = caught instanceof Error ? caught.message : tr('加载助手失败')
     } finally { if (revision === epoch) loading.value = false }
@@ -341,17 +363,18 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
 
   async function refreshProduction() {
     const revision = epoch
-    const runs = [...new Set(messages.value.filter(message => message.role === 'assistant'
-      && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))]
-    await Promise.allSettled(runs.map(async taskId => {
-      const response = await snapshot(taskId)
-      if (revision !== epoch) return
-      if (currentRun.value?.task_id === taskId) { applySnapshot(response.data); return }
-      const message = messages.value.find(item => item.task_id === taskId && item.role === 'assistant')
-      if (message) Object.assign(message, { production: response.data.production || [], usage: response.data.usage,
-        activity: streamConnected.value && isAgentRunning(response.data.status)
-          ? mergeActivity(response.data.activity || [], message.activity || [])
-          : response.data.activity, started_at: response.data.started_at, finished_at: response.data.finished_at })
+    const runs = new Set(messages.value.filter(message => message.role === 'assistant'
+      && (isAgentRunning(message.status) || message.production?.some(receipt => isAgentRunning(receipt.status)))).map(message => message.task_id))
+    if (currentRun.value && isAgentRunning(currentRun.value.status)) runs.add(currentRun.value.task_id)
+    await Promise.allSettled([...runs].map(async taskId => {
+      try {
+        const response = await snapshot(taskId)
+        if (revision !== epoch) return
+        if (currentRun.value?.task_id === taskId) applySnapshot(response.data)
+        else updateRunMessage(response.data)
+      } catch {
+        if (revision === epoch) unavailableSnapshots.value.add(taskId)
+      }
     }))
   }
 
@@ -384,7 +407,7 @@ export const useCreationAgentStore = defineStore('creation-agent', () => {
   }
 
   return { projectId, conversations, deletedConversations, conversationId, messages, capabilities, currentRun, loading, submitting, sessionBusy,
-    streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges,
+    streamConnected, busy, error, statusText, nextBefore, changesRevision, latestChanges, unavailableSnapshots,
     open, history, send, stop, resume, undo, refreshProduction, newConversation, selectConversation, follow, disconnect,
     deleteConversation, restoreConversation, loadDeletedConversations, refreshConversations }
 })

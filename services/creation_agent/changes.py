@@ -117,6 +117,8 @@ class CreationChanges:
                     raise PromptEditConflict('同一调用标识不能对应不同操作')
                 return prior
             # Check every target before mutating any of them.
+            from services.story_memory.context import verify_bindings
+            await verify_bindings({'novel_id': self.novel_id, 'task_id': self.task_id})
             scenes = []
             for scene_id in prompts:
                 scene = await self.checked('scene', scene_id, set())
@@ -313,6 +315,8 @@ class CreationChanges:
                         raise PromptEditConflict('同一调用标识不能对应不同操作')
                     return replay
                 await self.require_running()
+                from services.story_memory.context import verify_bindings
+                await verify_bindings({'novel_id': self.novel_id, 'task_id': self.task_id})
                 executor = CreationOperations(self)
                 changes = []
                 for operation in change_set.operations:

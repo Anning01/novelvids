@@ -16,6 +16,7 @@ from api.workbench import router as workbench_router
 from api.remake import router as remake_router
 from api.creation_agent import router as creation_agent_router
 from api.user_skill import router as user_skill_router
+from api.story_memory import router as story_memory_router
 
 from api.resource_library import router as resource_library_router
 from api.resource_catalog import router as resource_catalog_router
@@ -53,3 +54,4 @@ api_router.include_router(billing_router, prefix="/billing", tags=["账单计费
 api_router.include_router(remake_router, prefix="/remake", tags=["重制工坊"])
 api_router.include_router(creation_agent_router, prefix="/creation-agent", tags=["创作助手"])
 api_router.include_router(user_skill_router, prefix='/skills', tags=['创作技能'])
+api_router.include_router(story_memory_router, tags=['故事记忆'])

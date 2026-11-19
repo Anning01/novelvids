@@ -56,9 +56,14 @@ async def write_fields(objects: CreationObjects, target, fields: dict):
             values['metadata'] = {**(target.metadata or {}), 'asset_variant_ids': values.pop('variant_bindings')}
     if values:
         values['updated_at'] = datetime.now(timezone.utc)
-        changed = await type(target).filter(id=target.id).update(**values)
-        if not changed:
-            raise ValueError(localized_message('对象已被移除，请重新读取'))
+        if isinstance(target, Chapter):
+            for key, value in values.items():
+                setattr(target, key, value)
+            await target.save(update_fields=list(values))
+        else:
+            changed = await type(target).filter(id=target.id).update(**values)
+            if not changed:
+                raise ValueError(localized_message('对象已被移除，请重新读取'))
     await target.refresh_from_db()
 
 

@@ -8,6 +8,7 @@ from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.novel import Novel
 from services.creation_agent.catalog import CreationCatalog
+from services.story_memory.context import MAX_GENERATION_MEMORY_CHARACTERS, fit_context, story_context
 
 CATALOG_PATH = '/project_facts/registered-assets.jsonl'
 
@@ -39,7 +40,10 @@ async def load_project_facts(*, novel_id, chapter_id, page_size, character_budge
         'storyboard_enabled': project.storyboard_enabled, 'audiovisual_guidance': audiovisual_guidance(project.audiovisual_guidance), 'shot_duration_max': project.shot_duration_max,
         'aspect_ratio': project.aspect_ratio, 'storyboard_strategy': project.storyboard_strategy}
     relevant = [row for row in rows if row['id'] in active_ids] if chapter else rows
-    preview, used = [], 0
+    memory = fit_context(await story_context(novel_id, chapter_id, purpose='chat', supplemental=True),
+                         min(character_budget, MAX_GENERATION_MEMORY_CHARACTERS))
+    used = len(json.dumps(memory, ensure_ascii=False)) if memory else 0
+    preview = []
     for row in relevant or rows:
         size = len(json.dumps(row, ensure_ascii=False))
         if len(preview) >= page_size or used + size > character_budget:
@@ -50,6 +54,8 @@ async def load_project_facts(*, novel_id, chapter_id, page_size, character_budge
         'saved_assets': len(rows), 'saved_variants': len(variants), 'catalog_path': CATALOG_PATH,
         'asset_groups': preview, 'preview_has_more': len(relevant or rows) > len(preview),
         'source': 'current_saved_project_catalog'}
+    if memory:
+        summary['story_memory'] = memory
     entries = [{'world_and_style': world}]
     for row in rows:
         entries.append({key: value for key, value in row.items() if key != 'variants'})

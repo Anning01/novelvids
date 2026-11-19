@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from models.agent_operation import AgentOperation
 from models.ai_task import AiTask
+from models.chapter_export import ChapterExport
 from models.scene import Scene
 from models.video import Video
 from services.creation_agent.operation_receipts import record_once
@@ -40,11 +41,10 @@ async def apply_enhanced_video(export, *, select: bool = False) -> Video | None:
         async with export_media.materialize(export.media_ref) as path:
             if await asyncio.to_thread(file_digest, path) != export.media_sha256:
                 raise ValueError(localized_message('原片来源已变化，请重新准备成片'))
-            if ref != export.media_ref:
-                await export_media.store(ref, path)
-
         async def publish():
             async with project_write(export.novel_id):
+                if not await ChapterExport.filter(id=export.id).exists():
+                    raise ValueError(localized_message('导出记录不存在'))
                 current_task = await AiTask.get(id=task.id)
                 if current_task.status != 3:
                     raise ValueError(localized_message('请先选择已生成成功的视频'))
@@ -54,6 +54,9 @@ async def apply_enhanced_video(export, *, select: bool = False) -> Video | None:
                 current = await Video.get_or_none(id=chosen, scene_id=scene.id) if chosen else await Video.filter(scene_id=scene.id).order_by('-id').first()
                 same_source = current and (current.id == source.id or (current.metadata or {}).get('enhancement_source_video_id') == source.id)
                 higher = not current or min(int((current.metadata or {}).get('width') or 0), int((current.metadata or {}).get('height') or 0)) < min(probe.width, probe.height)
+                if ref != export.media_ref:
+                    async with export_media.materialize(export.media_ref) as path:
+                        await export_media.store(ref, path)
                 video = await Video.create(scene_id=scene.id, model_type=source.model_type, status=3, url=ref,
                     metadata={**{key: value for key, value in (source.metadata or {}).items()
                                  if key in {'poster_url', 'poster_thumbnail_url', 'first_frame_url', 'last_frame_url', 'ratio', 'aspect_ratio'}},

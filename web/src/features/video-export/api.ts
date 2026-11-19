@@ -29,6 +29,7 @@ export const exportApi = {
   prepareVideo: (videoId: number) => request<Response<ExportTask>>(`/video/exports/video/${videoId}`, { method: 'POST' }),
   models: () => request<Response<EnhancementModel[]>>('/video/exports/models'),
   get: (id: number) => request<Response<ChapterExport>>(`/video/exports/${id}`),
+  remove: (id: number) => request<Response<null>>(`/video/exports/${id}`, { method: 'DELETE' }),
   apply: (id: number) => request<Response<Video>>(`/video/exports/${id}/apply`, { method: 'POST' }),
   prepare: (chapter_id: number) => request<Response<ExportTask>>('/video/exports', { method: 'POST', body: JSON.stringify({ chapter_id }) }),
   quote: (id: number, model: number, resolution = '1080p') => request<Response<ExportQuote>>(`/video/exports/${id}/quote?model_config_id=${model}&resolution=${encodeURIComponent(resolution)}`),

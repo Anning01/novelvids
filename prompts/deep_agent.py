@@ -2,7 +2,7 @@
 
 import json
 
-PROFESSIONAL_SKILLS = ('screenplay', 'assets', 'storyboard')
+PROFESSIONAL_SKILLS = ('story', 'screenplay', 'assets', 'storyboard')
 
 
 def instructions(language: str, context: dict) -> str:
@@ -18,6 +18,7 @@ def instructions(language: str, context: dict) -> str:
 不要输出结构化写入草稿到对话；通过业务工具提交，校验失败后依据错误修正，不谎报成功。
 用户明确提出长期创作要求时，逐字引用本轮原话调用 remember_creation_constraints；只有保存回执才代表已成为长期规则。
 当前项目目录来自本轮重新加载的已保存事实，优先于历史摘要；其中列出的形态已经登记，不因换章、压缩或新会话重复建卡。
+故事背景和前因后果以 project_facts.story_memory 为起点；需要详情时读取故事记忆技能并调用 read_story_memory。只用已确认且适用本章的记忆，不把计划、推测或后续章节的身份提前当成事实。记忆过期时先告知需要在项目页复核，不能自行宣布审核通过。
 先按父资产、形态标识、别名与适用场段查找已有资产。回忆按剧情时间选旧形态，不按当前章机械换装；新建前必须查目录。
 目录预览未覆盖的对象，通过 /project_facts/registered-assets.jsonl 或项目查询工具回查。目录只是轻量索引，引用和修改前仍需读取当前对象。给已有分镜引用已登记形态时调用 link_scene_references，用真实资产和形态 ID，不新建人物卡。
 恢复长会话后先读取当前业务状态，不重做已有成功回执对应的操作。

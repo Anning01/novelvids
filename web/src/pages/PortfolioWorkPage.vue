@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElDialog } from 'element-plus'
-import { ArrowLeft, Check, ChevronDown, Clapperboard, Copy, Download, Pencil, Play, Shield, Star } from 'lucide-vue-next'
+import { ArrowLeft, Check, ChevronDown, Clapperboard, Copy, Download, Pencil, Play, Shield, Star, Trash2 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { money } from '@/features/billing/recordDisplay'
@@ -10,9 +10,11 @@ import FinishedCover from '@/features/finished-episodes/FinishedCover.vue'
 import { finishedApi, runtime, versionName, type FinishedVersion } from '@/features/finished-episodes/api'
 import { useAuthStore } from '@/features/auth/authStore'
 import { productionCostLabel, productionTime, workApi, workDate, workLength, workResolution, workStatus, type WorkAction, type WorkDetail, type WorkEpisode, type WorkProfile } from '@/features/portfolio/api'
-import { authHeaders } from '@/api'
+import { ApiRequestError, authHeaders } from '@/api'
 import { tr } from '@/i18n'
 import { appConfirm } from '@/shared/confirmDialog'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { exportApi } from '@/features/video-export/api'
 import { downloadFile } from '@/shared/downloadFile'
 import '@/features/resource-library/dialog.css'
 import '@/features/portfolio/portfolio.css'
@@ -30,6 +32,7 @@ const loading = ref(false)
 const playing = ref(false)
 const saving = ref(false)
 const downloading = ref(false)
+const removing = ref(false)
 const loadError = ref('')
 const actionError = ref('')
 const profileError = ref('')
@@ -52,6 +55,7 @@ let downloadRequest = 0
 
 const episode = computed(() => work.value?.episodes.find(row => row.chapter_id === episodeId.value))
 const current = computed(() => versions.value.find(row => row.id === versionId.value) ?? episode.value?.version)
+const canDeleteVideo = computed(() => !publicView.value && (!auth.enabled || ['admin', 'creator', 'super'].includes(auth.role || '')))
 const versionOptions = computed(() => versions.value.map(row => ({
   value: String(row.id), label: `${versionName(row)} · ${runtime(row.duration)}${episode.value?.published_id === row.id ? ` · ${tr('已公开')}` : ''}`,
 })))
@@ -92,6 +96,25 @@ function selectVersion(value: string) {
   playerError.value = ''
   versionId.value = Number(value)
 }
+async function removeCurrentVideo() {
+  const target = current.value
+  if (!target || !canDeleteVideo.value || removing.value || editing.value || saving.value) return
+  const projectId = id.value
+  removing.value = true
+  try {
+    if (!await confirmVideoDeletion(versionName(target), episode.value?.published_id === target.id)) return
+    await exportApi.remove(target.id)
+    if (id.value !== projectId) return
+    const code = await load()
+    if (id.value !== projectId) return
+    if (code === 404) await router.replace({ path: '/finished-library' })
+    else notice.value = tr('视频已删除')
+  } catch (error) {
+    if (id.value === projectId) actionError.value = error instanceof Error ? error.message : tr('视频删除失败')
+  } finally {
+    removing.value = false
+  }
+}
 function resetPublication(item: WorkDetail) {
   selected.value = Object.fromEntries(item.episodes.flatMap(row => {
     const version = item.status === 'public' ? row.published_id : row.version.id
@@ -129,7 +152,10 @@ async function load() {
     if (first) void selectEpisode(first, false, Number(route.query.version))
     if (route.query.edit === '1') startEdit()
   } catch (reason) {
-    if (!controller.signal.aborted) loadError.value = reason instanceof Error ? reason.message : tr('作品加载失败')
+    if (!controller.signal.aborted) {
+      loadError.value = reason instanceof Error ? reason.message : tr('作品加载失败')
+      if (reason instanceof ApiRequestError) return reason.code
+    }
   } finally {
     if (!controller.signal.aborted) loading.value = false
   }
@@ -335,6 +361,7 @@ onBeforeUnmount(() => {
           <div v-if="!publicView && current" class="work-version work-actions">
             <AppSelect :model-value="String(current.id)" :options="versionOptions" :ariaLabel="tr('合成版本')" density="compact" @update:model-value="selectVersion" />
             <AppButton size="sm" :loading="downloading" @click="download"><Download :size="15" />{{ tr('下载成片') }}</AppButton>
+            <AppButton v-if="canDeleteVideo" size="sm" variant="ghost" :loading="removing" :disabled="removing || editing || saving" @click="removeCurrentVideo"><Trash2 :size="15" aria-hidden="true" />{{ tr('永久删除成片') }}</AppButton>
           </div>
           <section class="work-panel work-episodes">
             <div class="work-tabs" role="group" :aria-label="tr('作品详情栏目')">

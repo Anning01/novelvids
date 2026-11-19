@@ -54,6 +54,24 @@ async def ensure_resource_library_schema() -> None:
     await connection.execute_script(generator._get_table_sql(ResourcePlacement, safe=True)['table_creation_string'])
 
 
+async def ensure_story_memory_schema() -> None:
+    """Keep existing story editions readable across additive schema changes."""
+    from models.story_memory import StorySubject, StoryCommit, StoryFact, StoryMemoryProject, StorySnapshot
+    connection = Tortoise.get_connection('default')
+    generator = connection.schema_generator(connection)
+    for model in (StorySubject, StoryCommit, StoryFact, StorySnapshot, StoryMemoryProject):
+        definition = generator._get_table_sql(model, safe=True)
+        await connection.execute_script(definition['table_creation_string'])
+    if connection.capabilities.dialect == 'sqlite':
+        columns = await connection.execute_query_dict('PRAGMA table_info(story_memory_projects)')
+        if 'uses_split_source' not in {column['name'] for column in columns}:
+            await connection.execute_script(
+                'ALTER TABLE story_memory_projects ADD COLUMN uses_split_source INT NOT NULL DEFAULT 1;')
+    else:
+        await connection.execute_script(
+            'ALTER TABLE story_memory_projects ADD COLUMN IF NOT EXISTS uses_split_source BOOL NOT NULL DEFAULT TRUE;')
+
+
 async def ensure_text_task_schema() -> None:
     from models.user_skill import UserSkill, TaskSkillPreference
     connection = Tortoise.get_connection('default')
@@ -76,13 +94,14 @@ async def ensure_text_task_schema() -> None:
 
 
 async def ensure_video_editor_schema() -> None:
+    from models.media_deletion import MediaDeletion
     from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
     from models.finished_episode import FinishedEpisodePublication
     from models.portfolio import PortfolioEpisode, PortfolioWork
     from models.resource_library import ProjectResource
     connection = Tortoise.get_connection('default')
     generator = connection.schema_generator(connection)
-    for model in (ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode):
+    for model in (ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode, MediaDeletion):
         definition = generator._get_table_sql(model, safe=True)
         await connection.execute_script(definition['table_creation_string'])
 

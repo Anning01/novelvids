@@ -3,7 +3,7 @@ import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
 import StageModelSelect from '@/components/StageModelSelect.vue'
 import { tr } from '@/i18n'
 
-import { computed, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpenText,
@@ -22,6 +22,7 @@ import {
   Trash2,
   Upload,
   UsersRound,
+  X,
 } from 'lucide-vue-next'
 import AppBadge from '@/components/AppBadge.vue'
 import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
@@ -30,9 +31,10 @@ import ChapterAssetReuseDialog from '@/components/ChapterAssetReuseDialog.vue'
 import AppButton from '@/components/AppButton.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
+import { dismissWorkbenchNotice, isWorkbenchNoticeDismissed } from '@/features/workbench/interaction/dismissedNotices'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
-import { appConfirm } from '@/shared/confirmDialog'
+import { confirmAssetDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -95,6 +97,8 @@ const batchGenerating = ref(false)
 const submittingExtraction = ref(false)
 const extractionTask = ref<AiTask | null>(null)
 const extractionSubmissionError = ref('')
+const dismissedExtractionId = ref('')
+const refreshAssetButton = ref<InstanceType<typeof AppButton> | null>(null)
 const generatingAssetIds = ref(new Set<number>())
 const failedAssetIds = ref(new Set<number>())
 const mergingAssetIds = ref(new Set<number>())
@@ -171,14 +175,23 @@ const extractionTaskActive = computed(() => {
   return status === TaskStatusEnum.PENDING || status === TaskStatusEnum.PROCESSING || status === TaskStatusEnum.QUEUED
 })
 const extractionBusy = computed(() => submittingExtraction.value || extractionTaskActive.value)
+const extractionTaskFailed = computed(() => extractionTask.value?.status === TaskStatusEnum.FAILED
+  || extractionTask.value?.status === TaskStatusEnum.CANCELLED)
 const extractionStatusVisible = computed(() => {
   if (extractionTask.value?.status === TaskStatusEnum.COMPLETED) return false
-  return submittingExtraction.value
-    || extractionTaskActive.value
-    || Boolean(extractionSubmissionError.value)
-    || extractionTask.value?.status === TaskStatusEnum.FAILED
-    || extractionTask.value?.status === TaskStatusEnum.CANCELLED
+  if (extractionBusy.value || extractionSubmissionError.value) return true
+  const task = extractionTask.value
+  return Boolean(task && extractionTaskFailed.value && task.id !== dismissedExtractionId.value
+    && !isWorkbenchNoticeDismissed(`asset-extraction:${task.id}`))
 })
+function dismissExtractionStatus() {
+  if (extractionTask.value && extractionTaskFailed.value) {
+    dismissedExtractionId.value = extractionTask.value.id
+    dismissWorkbenchNotice(`asset-extraction:${dismissedExtractionId.value}`)
+  }
+  extractionSubmissionError.value = ''
+  void nextTick(() => refreshAssetButton.value?.$el.focus())
+}
 const extractionStatusText = computed(() => (
   extractionSubmissionError.value
     ? tr('提交失败')
@@ -199,8 +212,7 @@ const extractionStatusMessage = computed(() => {
 const extractionStatusClass = computed(() => ({
   'is-running': extractionTaskActive.value || submittingExtraction.value,
   'is-error': Boolean(extractionSubmissionError.value)
-    || extractionTask.value?.status === TaskStatusEnum.FAILED
-    || extractionTask.value?.status === TaskStatusEnum.CANCELLED,
+    || extractionTaskFailed.value,
 }))
 
 async function loadProject(chapterId = selectedChapterId.value) {
@@ -496,13 +508,8 @@ function truncateText(value: string | undefined, maxLength: number) {
 }
 
 async function removeAsset(asset: Asset) {
-  if (!await appConfirm({
-    title: tr('删除{p0}「{p1}」？', { p0: activeTabConfig.value.label, p1: asset.canonical_name }),
-    message: tr('该资产及其参考图片将被删除，且无法恢复。'),
-    confirmLabel: tr('删除{p0}', { p0: activeTabConfig.value.label }),
-    tone: 'danger',
-  })) return
   try {
+    if (!await confirmAssetDeletion([{ id: asset.id, name: asset.canonical_name }])) return
     await api.deleteAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)
     notice.success(tr('资产已删除'))
@@ -831,7 +838,7 @@ onBeforeUnmount(() => {
           <span><Check :size="13" />{{ tr('已完成') }} {{ completedCount }}</span>
           <span><i v-if="generatingCount" class="generating-summary-dot" />{{ tr('生成中') }} {{ generatingCount }}</span>
           <span>{{ tr('失败') }} {{ failedCount }}</span>
-          <AppButton type="button" variant="secondary" size="sm" icon-only :aria-label="tr('刷新')" @click="refreshWorkspaceState"><RefreshCw :size="14" /></AppButton>
+          <AppButton ref="refreshAssetButton" type="button" variant="secondary" size="sm" icon-only :aria-label="tr('刷新')" @click="refreshWorkspaceState"><RefreshCw :size="14" /></AppButton>
           <AppButton type="button" variant="primary" size="sm" @click="openAssetDialog()"><Plus :size="15" />{{ tr('添加') }}{{ activeTabConfig.label }}</AppButton>
           <AppButton type="button" variant="soft" size="sm" :loading="batchGenerating" :disabled="batchGenerating" @click="assets.length ? showBatchDialog = true : notice.info(tr('请先添加角色、场景或道具资产'))"><Layers3 v-if="!batchGenerating" :size="15" />{{ batchGenerating ? tr('批量生成中') : tr('批量生成') }}</AppButton>
         </div>
@@ -841,16 +848,20 @@ onBeforeUnmount(() => {
         v-if="project.creationMode === 'agent' && extractionStatusVisible"
         class="extraction-task-status"
         :class="extractionStatusClass"
-        role="status"
-        aria-live="polite"
       >
-        <span>
+        <span aria-hidden="true">
           <LoaderCircle v-if="extractionBusy" :size="19" />
           <RefreshCw v-else :size="19" />
         </span>
-        <div>
+        <div role="status" aria-atomic="true">
           <strong>{{ tr('第') }} {{ selectedChapter?.number || '-' }} {{ tr('章资产提取 ·') }} {{ extractionStatusText }}</strong>
           <p>{{ extractionStatusMessage }}</p>
+        </div>
+        <div v-if="extractionStatusClass['is-error'] && !extractionBusy" class="extraction-status-actions">
+          <AppButton type="button" variant="secondary" size="sm" :disabled="!selectedChapter || !stageModelId"
+            @click="extractSelectedChapterAssets">{{ tr('重新提取本章资产') }}</AppButton>
+          <AppButton type="button" variant="ghost" size="sm" icon-only :aria-label="tr('关闭资产提取提示')"
+            :title="tr('关闭资产提取提示')" @click="dismissExtractionStatus"><X :size="16" aria-hidden="true" /></AppButton>
         </div>
       </div>
 
@@ -1019,14 +1030,19 @@ onBeforeUnmount(() => {
 .asset-summary > i { width: 1px; height: 13px; background: #dfe1e8; }
 .asset-summary strong { color: #303442; }
 .generating-summary-dot { width: 6px; height: 6px; border-radius: 999px; background: #686af5; box-shadow: 0 0 0 0 rgb(104 106 245 / 32%); animation: generation-pulse 1.6s ease-out infinite; }
-.extraction-task-status { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 14px; padding: 13px 15px; border: 1px solid #dfe2eb; border-radius: 12px; color: #626979; background: #fff; }
+.extraction-task-status { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 14px; padding: 13px 15px; border: 1px solid #dfe2eb; border-radius: 12px; color: #626979; background: #fff; }
 .extraction-task-status > span { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: #6668f6; background: #eff0ff; }
-.extraction-task-status > div { display: grid; min-width: 0; gap: 3px; }
-.extraction-task-status strong { color: #343947; font-size: 12px; }
+.extraction-task-status > [role="status"] { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.extraction-status-actions { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 600px) {
+  .extraction-task-status { grid-template-columns: 38px minmax(0, 1fr); }
+  .extraction-status-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+}
+.extraction-task-status strong { color: var(--app-text); font-size: 12px; }
 .extraction-task-status p { margin: 0; font-size: 11px; line-height: 1.5; }
 .extraction-task-status small { overflow: hidden; color: #969dac; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .extraction-task-status.is-running { border-color: #cfd0fb; background: #f7f7ff; }
-.extraction-task-status.is-running svg { animation: spin .8s linear infinite; }
+.extraction-task-status.is-running > span svg { animation: spin .8s linear infinite; }
 .extraction-task-status.is-error { border-color: #f1cfd3; background: #fff7f8; }
 .extraction-task-status.is-error > span { color: #bd5f6b; background: #fdebed; }
 .icon-button,.text-action { display: inline-flex; align-items: center; gap: 6px; color: #424857; background: transparent; }

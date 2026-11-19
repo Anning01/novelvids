@@ -4,7 +4,8 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import VideoComposerNode from './VideoComposerNode.vue'
 
-vi.mock('@/api', () => ({
+vi.mock('@/api', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api')>(),
   api: {},
   mediaUrl: (value: string) => value,
   sleep: vi.fn(),

@@ -16,6 +16,7 @@ const CreationAgentPanel = defineAsyncComponent(() => import('@/features/creatio
 const assistant = useCreationAgentWorkspace()
 const assistantOpen = computed({ get: () => assistant.isOpen, set: value => { assistant.isOpen = value } })
 const assistantButton = ref<InstanceType<typeof AppButton> | null>(null)
+const reviewTarget = ref<HTMLElement | null>(null)
 
 export type ShortDramaPhase = 'script' | 'settings' | 'storyboard' | 'video'
 
@@ -151,8 +152,8 @@ defineExpose({ editWithAssistant })
     />
 
     <div class="short-drama-workspace-content">
-      <div class="short-drama-workspace-body"><slot /></div>
-      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :chapter-label="activeChapter ? tr('第 {p0} 章 · {p1}', { p0: activeChapter.number, p1: activeChapter.name }) : tr('当前项目')" :phase="activePhase" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" />
+      <div class="short-drama-workspace-body"><slot :review-target="assistantOpen ? reviewTarget : null" /></div>
+      <CreationAgentPanel v-if="assistantOpen" :project-id="projectId" :chapter-id="activeChapterId || Number(route.query.chapter) || 0" :chapter-label="activeChapter ? tr('第 {p0} 章 · {p1}', { p0: activeChapter.number, p1: activeChapter.name }) : tr('当前项目')" :phase="activePhase" :selected-targets="agentTargets" :workflow="immersive" @close="closeAssistant" @changed="emit('promptsChanged', $event)" @review-target="reviewTarget = $event" />
     </div>
   </div>
 </template>

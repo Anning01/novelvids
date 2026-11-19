@@ -98,7 +98,8 @@ class CreationAgentController:
         if before is not None:
             query = query.filter(id__lt=before)
         rows = await query.order_by('-id').select_related('task').limit(50)
-        visible = [row for row in rows if not (row.run_input or {}).get("internal_production_step")]
+        visible = [row for row in rows if not (row.run_input or {}).get("internal_production_step")
+                   and not row.task.request_params.get('story_recheck_id')]
         assistants = [row for row in visible if row.role == 'assistant']
         events = await agent_event_log.load_projection_many(assistants)
         changes = await changes_by_message(assistants, conversation.novel_id, events)

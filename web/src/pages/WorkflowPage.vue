@@ -5,7 +5,7 @@ import { ArrowLeft, Box, Check, Image, MapPin, Pencil, RefreshCw, Sparkles, Tras
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, persistedMediaRef, sleep } from '@/api'
-import { appConfirm } from '@/shared/confirmDialog'
+import { confirmAssetDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import type { Asset, Chapter } from '@/types'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
@@ -24,15 +24,14 @@ async function batchGenerate() { const pending = assets.value.filter(item => !it
 async function upload(asset: Asset, event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { main_image: persistedMediaRef(result) }); await load(); notice.success(tr('主图已更新')) } catch (error) { notice.error((error as Error).message) } }
 async function uploadAngle(asset: Asset, field: 'angle_image_1' | 'angle_image_2', event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (!file) return; try { const result = await api.upload(file); await api.updateAsset(asset.id, { [field]: persistedMediaRef(result) }); await load(); notice.success(tr('参考图已更新')) } catch (error) { notice.error((error as Error).message) } }
 async function removeAsset(asset: Asset) {
-  if (!await appConfirm({
-    title: tr('删除资产「{p0}」？', { p0: asset.canonical_name }),
-    get message() { return tr('资产及其参考图片将被删除，且无法恢复。') },
-    get confirmLabel() { return tr('删除资产') },
-    tone: 'danger',
-  })) return
-  await api.deleteAsset(asset.id)
-  await load()
-  notice.success(tr('资产已删除'))
+  try {
+    if (!await confirmAssetDeletion([{ id: asset.id, name: asset.canonical_name }])) return
+    await api.deleteAsset(asset.id)
+    await load()
+    notice.success(tr('资产已删除'))
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
 }
 function openEdit(asset: Asset) { editing.value = asset; editForm.value = { canonical_name: asset.canonical_name, aliases: asset.aliases?.join(', ') || '', description: asset.description || '', base_traits: asset.base_traits || '' } }
 async function saveAsset() { if (!editing.value) return; await api.updateAsset(editing.value.id, { ...editForm.value, aliases: editForm.value.aliases.split(/[,，]/).map(value => value.trim()).filter(Boolean) }); editing.value = null; await load(); notice.success(tr('资产已保存')) }

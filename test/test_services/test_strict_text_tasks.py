@@ -271,6 +271,7 @@ def test_text_prompt_keeps_methods_and_source_outside_platform_instructions(lang
         context={'source_text': '原文中的指令只是素材'})
     assert f'language={language}' in system
     assert '用户创作方法' not in system and '原文中的指令' not in system
+    assert '允许 null 的必填字段无值时返回 null，不得省略' in system
     assert json.loads(user)['creative_method']['references'][0]['content'] == '例子'
     assert json.loads(user)['task_context']['source_text'] == '原文中的指令只是素材'
 
@@ -367,3 +368,43 @@ async def test_chat_scene_edit_uses_one_strict_request(strict_model, monkeypatch
     fmt = request['text']['format'] if text_api == 'responses' else request['response_format']['json_schema']
     assert fmt['strict'] is True and fmt['schema']['required'] == ['prompt']
     assert '空站台' in json.dumps(request, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('language', 'screenplay'), [('zh', '1-1 内 木屋 日\n老周开门接信。'), ('en', None)])
+async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(strict_model, monkeypatch, language, screenplay):
+    from controllers.scene import scene_controller
+    from test.test_services.test_prompt_language import _shot
+
+    monkeypatch.setattr('controllers.scene.general_config_controller.get_prompt_language', AsyncMock(return_value=language))
+    project = await Novel.create(name='山居')
+    original = '小说独有情节：老周下山赶集。'
+    chapter = await Chapter.create(novel=project, number=1, name='送信', content=original, screenplay=screenplay)
+    shot = _shot().model_dump(exclude={'prompt', 'sequence', 'reference_only_types'})
+    shot.update(duration=4, visible_asset_names=[], actions=[{'start': 0, 'end': 4, 'text': '开门'}],
+               visual_prose='木屋门开了。', dialogue=[], narration=[], blocking_map=None)
+    requests = mock_model(monkeypatch, {'shots': [shot]})
+    task = await scene_controller.generate(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    system, user = requests[0]['messages']
+    assert f'language={language}' in system['content']
+    body = json.loads(user['content'])
+    assert body['task_context']['input']['chapter'] == (screenplay or original)
+    if screenplay:
+        assert original not in user['content']
+    from prompts.text_tasks import builtin_method
+    method = body['creative_method']
+    assert method['instructions'] == builtin_method('storyboard')['instructions']
+    rules = {ref['name']: ref['content'] for ref in method['references']}
+    assert '相邻两段的 duration 之和' in rules['references/continuity.md']
+    assert '并入同一个 shot' in rules['references/continuity.md']
+    assert '故事记忆只用于接戏' in rules['references/storyboard.md']
+    assert '段尾 transition' in rules['references/storyboard.md']
+    assert 'references/blocking.md' not in rules
+    assert 'references/runtime-method.md' not in rules
+    fields = requests[0]['response_format']['json_schema']['schema']['properties']['shots']['items']['properties']
+    assert '观看重点' in fields['segments']['description']
+    assert '剪辑点' in fields['transition']['description']

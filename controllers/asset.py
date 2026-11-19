@@ -252,9 +252,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
         return await self._edit_asset(asset_id, obj_in)
 
     async def remove(self, asset_id: int) -> None:
+        from services.creative_deletion import delete_asset
+
         instance = await self.get(asset_id)
-        async with creation_write(instance.novel_id):
-            await CreationObjects(instance.novel_id).archive('asset', asset_id)
+        await delete_asset(instance.id, instance.novel_id)
 
     async def reuse_in_chapter(self, asset_id: int, chapter_id: int) -> Asset:
         asset = await self.get(asset_id)
@@ -556,12 +557,10 @@ class AssetController(CRUDBase[Asset, AssetCreate, AssetUpdate]):
             return variants
 
     async def remove_variant(self, asset_id: int, variant_id: int) -> None:
+        from services.creative_deletion import delete_asset
+
         asset = await self.get(asset_id)
-        async with creation_write(asset.novel_id):
-            variant = await AssetVariant.get_or_none(id=variant_id, asset_id=asset_id)
-            if variant is None:
-                raise HTTPException(status_code=404, detail=localized_message('资产形态不存在'))
-            await CreationObjects(asset.novel_id).archive('variant', variant_id)
+        await delete_asset(asset.id, asset.novel_id, variant_id)
 
     async def generation_history(self, asset_id: int) -> list[dict[str, Any]]:
         """Return sanitized base-asset image-generation history."""

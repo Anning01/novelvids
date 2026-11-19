@@ -105,7 +105,7 @@ async def set_active(owner, identifier, body):
     return skill_data(row, include_files=False)
 
 
-async def snapshot_method(owner, task, identifier=None):
+async def snapshot_method(owner, task, identifier=None, *, blocking_maps=False):
     if identifier is None:
         preference = await TaskSkillPreference.get_or_none(owner_id=owner, task=task)
         identifier = preference.skill_id if preference else 0
@@ -120,7 +120,7 @@ async def snapshot_method(owner, task, identifier=None):
             except ValueError as error:
                 raise HTTPException(400, localized_message(str(error))) from None
     else:
-        result = builtin_method(task)
+        result = builtin_method(task, blocking_maps=blocking_maps)
     result = {key: value for key, value in result.items() if key not in ('limits', 'is_summary')}
     revision = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {key: value for key, value in result.items() if key != 'files'} | {'revision': revision}

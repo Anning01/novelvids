@@ -24,16 +24,19 @@ import {
 import { api } from '@/api'
 import { skillsApi } from '@/features/creation-agent/skillsApi'
 import TaskSkillPicker from '@/features/creation-agent/TaskSkillPicker.vue'
+import StoryMemoryPanel from '@/features/story-memory/StoryMemoryPanel.vue'
 import EpisodePacingDialog from '@/components/EpisodePacingDialog.vue'
 import type { EpisodePacing } from '@/types'
 import { useCreationAgentWorkspace } from '@/features/creation-agent/workspace'
 import { useAuthStore } from '@/features/auth/authStore'
 import ImageModelSelect from '@/components/ImageModelSelect.vue'
+import ImageLightbox from '@/components/ImageLightbox.vue'
 import AppBadge from '@/components/AppBadge.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { appConfirm } from '@/shared/confirmDialog'
+import { confirmChapterDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel } from '@/shared/chapterTitle'
 import EpisodeScreenplay from '@/components/EpisodeScreenplay.vue'
@@ -134,6 +137,9 @@ const loadingChapterId = ref<number | null>(null)
 const startingAnalysis = ref(false)
 const editing = ref(false)
 const savingEdits = ref(false)
+const memoryRefreshKey = ref(0)
+const memoryChapterSelection = ref(0)
+const assistantWorkspace = useCreationAgentWorkspace()
 const pendingStoryboard = ref<boolean | null>(null)
 const savingStoryboard = computed(() => pendingStoryboard.value !== null)
 const savingDuration = ref(false)
@@ -218,6 +224,7 @@ async function generateScreenplay(id: number, existingTask = sessionStorage.getI
     if (!chapter.screenplay) throw new Error(tr('未读取到本集导演剧本'))
     chapterDetails.value[id] = chapter
     episodeViews.value[id] = 'screenplay'
+    ++memoryRefreshKey.value
   } catch (error) {
     if (!scriptRequests.signal.aborted) notice.error((error as Error).message)
   } finally {
@@ -426,6 +433,8 @@ const coverModelId = ref('')
 const generatingCover = ref(false)
 const coverError = ref('')
 const hasCover = computed(() => Boolean(project.value.coverPreview || project.value.cover || analysisResult.value?.cover))
+const coverPreviewSrc = ref('')
+const coverAlt = computed(() => tr('{p0}封面', { p0: displayedProjectName.value }))
 
 async function monitorCover(taskId: string) {
   generatingCover.value = true
@@ -660,6 +669,7 @@ async function saveEdits() {
         : chapter)
     }
     cancelEditing(false)
+    ++memoryRefreshKey.value
     notice.success(tr('修改已保存{p0}', { p0: changedChapterDrafts.length ? `，同步更新 ${changedChapterDrafts.length} 个章节` : '' }))
   } catch (error) {
     notice.error((error as Error).message)
@@ -669,6 +679,7 @@ async function saveEdits() {
 }
 
 async function refreshAgentEpisodes() {
+  ++memoryRefreshKey.value
   if (editing.value) {
     notice.info(tr('助手修改已保存，当前编辑草稿已保留'))
     return
@@ -683,6 +694,7 @@ async function addEpisode() {
   episodeBusy.value = true
   try {
     const {data} = await api.createChapter({novel_id: projectId.value, content: ''})
+    ++memoryRefreshKey.value
     await loadChapters(data.id)
     await selectEpisode(data.number)
     beginEditing()
@@ -698,8 +710,9 @@ async function removeEpisode() {
   if (!target || episodeBusy.value || editing.value || !canEdit.value) return
   episodeBusy.value = true
   try {
-    if (!await appConfirm({title: tr('删除本集'), message: episodeDisplayLabel(target), confirmLabel: tr('删除')})) return
+    if (!await confirmChapterDeletion(episodeDisplayLabel(target))) return
     await api.deleteChapter(target.id)
+    ++memoryRefreshKey.value
     delete chapterDetails.value[target.id]
     delete chapterAssets.value[target.id]
     const neighbor = chapters.value.find(item => item.id !== target.id)
@@ -723,13 +736,14 @@ function continueToSettings() {
 }
 
 async function selectEpisode(chapterNumber: number, event?: MouseEvent) {
+  const button = event?.currentTarget as HTMLElement | null
   activeEpisode.value = chapterNumber
+  memoryChapterSelection.value += 1
   const chapter = chapters.value.find(item => item.number === chapterNumber)
   if (chapter) void router.replace({ query: { ...route.query, chapter: String(chapter.id) } })
   await loadChapterContent(chapter)
   if (editing.value && selectedEpisode.value) ensureChapterDraft(selectedEpisode.value)
   await nextTick()
-  const button = event?.currentTarget as HTMLElement | null
   if (!button || !episodeTabs.value) return
   const left = button.offsetLeft - (episodeTabs.value.clientWidth - button.offsetWidth) / 2
   episodeTabs.value.scrollTo({ left: Math.max(0, left), behavior: 'smooth' })
@@ -778,19 +792,13 @@ onBeforeUnmount(() => {
       :chapters="chapters"
       :active-chapter-id="selectedEpisodeBrief?.id || 0"
     >
+      <template #default="{ reviewTarget }">
       <section class="agent-content">
       <div class="analysis-hero">
-        <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover" :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="tr('{p0}封面', { p0: displayedProjectName })" :max-width="144" :max-height="96" />
+        <ProjectCover :source="project.coverPreview || project.cover || analysisResult?.cover" :original="project.cover || analysisResult?.cover"
+          :aspect-ratio="novel?.aspect_ratio || project.aspectRatio" :alt="coverAlt" :max-width="104" :max-height="64"
+          previewable @preview="coverPreviewSrc = $event" />
         <div class="analysis-hero-copy">
-          <AppBadge
-            class="analysis-ready"
-            :tone="analysisRunning || startingAnalysis ? 'accent' : analysisResult ? 'success' : analysisTask?.status === TaskStatusEnum.FAILED ? 'danger' : 'neutral'"
-          >
-            <RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="13" />
-            <Check v-else-if="analysisResult" :size="13" />
-            <FileText v-else :size="13" />
-            {{ analysisStatus }}
-          </AppBadge>
           <input v-if="editing && projectDraft" v-model="projectDraft.name" class="analysis-title-input" :aria-label="tr('小说昵称')" maxlength="255" />
           <h1 v-else>{{ project.name }}</h1>
           <div class="episode-project-meta">
@@ -805,6 +813,18 @@ onBeforeUnmount(() => {
               <span><MonitorPlay :size="14" />{{ project.resolution }}</span>
               <span :title="projectView.customStyle || displayStyle"><Palette :size="14" />{{ displayStyle }}</span>
             </template>
+            <AppBadge
+              size="sm"
+              :tone="analysisRunning || startingAnalysis ? 'accent' : analysisResult ? 'success' : analysisTask?.status === TaskStatusEnum.FAILED ? 'danger' : 'neutral'"
+            >
+              <RefreshCw v-if="analysisRunning || startingAnalysis" class="status-spinner" :size="13" />
+              <Check v-else-if="analysisResult" :size="13" />
+              <FileText v-else :size="13" />
+              {{ analysisStatus }}
+            </AppBadge>
+            <span v-if="!editing && displayedTags.length" class="genre-tags">
+              <AppBadge v-for="(genre, index) in displayedTags" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
+            </span>
           </div>
           <label v-if="editing && projectDraft?.styleKey === 'custom'" class="tag-editor">
             <span>{{ tr('自定义风格') }}</span>
@@ -814,9 +834,6 @@ onBeforeUnmount(() => {
             <span>{{ tr('项目标签') }}</span>
             <input v-model="projectDraft.tagsText" :placeholder="tr('使用逗号分隔，例如：都市，热血，成长')" />
           </label>
-          <div v-else-if="displayedTags.length" class="genre-tags">
-            <AppBadge v-for="(genre, index) in displayedTags" :key="genre" :tone="index % 2 ? 'success' : 'accent'" size="sm">{{ genre }}</AppBadge>
-          </div>
         </div>
         <div class="analysis-hero-actions">
           <div v-if="canEdit && hasAnalysisContent" class="story-generation-controls">
@@ -841,9 +858,7 @@ onBeforeUnmount(() => {
               </AppButton>
               <small v-if="coverError" class="cover-generation-error" role="alert">{{ coverError }}</small>
             </div>
-            <div v-if="canEdit && hasAnalysisContent" class="cover-generation-actions">
-              <AppButton class="secondary-action" variant="secondary" size="sm" type="button" :disabled="!analysisModelId || analysisRunning || startingAnalysis" @click="startAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
-            </div>
+            <AppButton v-if="canEdit && hasAnalysisContent" variant="secondary" size="sm" type="button" :disabled="!analysisModelId || analysisRunning || startingAnalysis" @click="startAnalysis"><RefreshCw :size="15" />{{ tr('重新分析') }}</AppButton>
             <AppButton v-if="canEdit && novel" variant="primary" size="sm" type="button" :disabled="savingStoryboard || savingDuration || adapting" @click="beginEditing"><Pencil :size="15" />{{ tr('编辑内容') }}</AppButton>
           </template>
         </div>
@@ -865,130 +880,134 @@ onBeforeUnmount(() => {
       <div v-if="analysisResult?.cover_warning" class="creation-cover-notice" role="status"><p>{{ analysisResult.cover_warning }}</p><p v-if="analysisResult.cover_error">{{ analysisResult.cover_error }}</p></div>
       <template v-if="novel">
       <div class="production-settings">
-      <section class="analysis-section">
-        <header><h2>{{ tr('项目设定') }}</h2></header>
-        <div class="profile-grid">
-          <article class="profile-card">
-            <span><Clapperboard :size="18" /></span>
-            <div>
-              <small>{{ tr('分镜策略') }}</small>
-              <template v-if="editing && projectDraft">
-                <AppSelect
-                  class="storyboard-strategy-select"
-                  :model-value="projectDraft.storyboardStrategy"
-                  :ariaLabel="tr('分镜策略')"
-                  :menu-label="tr('分镜策略')"
-                  :menu-width="230"
-                  :options="storyboardStrategyOptions"
-                  @update:model-value="selectStoryboardStrategy"
-                />
-                <p>{{ projectDraft.storyboardSetting }}</p>
-                <button v-if="narrationStrategyActive" type="button" class="narrator-voice-button" @click="narratorPickerOpen = true">
-                  <Volume2 :size="14" /><span><small>{{ tr('旁白声音') }}</small><strong>{{ narratorVoice?.nickname || tr('选择旁白音色') }}</strong></span>
-                </button>
-              </template>
-              <template v-else>
-                <strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong><p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p>
-                <div v-if="narrationStrategyActive" class="narrator-voice-summary"><Volume2 :size="13" />{{ tr('旁白音色：') }}{{ narratorVoice?.nickname || tr('未选择') }}</div>
-              </template>
+        <section class="production-panel">
+          <h2>{{ tr('项目设定') }}</h2>
+          <div class="production-panel-body">
+            <div class="production-summary">
+              <span class="strategy-icon"><Clapperboard :size="16" aria-hidden="true" /></span>
+              <div>
+                <template v-if="editing && projectDraft">
+                  <AppSelect
+                    class="storyboard-strategy-select"
+                    :model-value="projectDraft.storyboardStrategy"
+                    :ariaLabel="tr('分镜策略')"
+                    :menu-label="tr('分镜策略')"
+                    :menu-width="230"
+                    :options="storyboardStrategyOptions"
+                    @update:model-value="selectStoryboardStrategy"
+                  />
+                  <p>{{ projectDraft.storyboardSetting }}</p>
+                  <button v-if="narrationStrategyActive" type="button" class="narrator-voice-button" @click="narratorPickerOpen = true">
+                    <Volume2 :size="14" /><span><small>{{ tr('旁白声音') }}</small><strong>{{ narratorVoice?.nickname || tr('选择旁白音色') }}</strong></span>
+                  </button>
+                </template>
+                <template v-else>
+                  <div class="strategy-label"><small>{{ tr('分镜策略') }}</small><strong>{{ projectStrategyView?.name || projectView.storyboardStrategy }}</strong></div>
+                  <p>{{ projectStrategyView?.description || projectView.storyboardSetting }}</p>
+                  <div v-if="narrationStrategyActive" class="narrator-voice-summary"><Volume2 :size="13" />{{ tr('旁白音色：') }}{{ narratorVoice?.nickname || tr('未选择') }}</div>
+                </template>
+              </div>
             </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="analysis-section">
-        <header><h2>{{ tr('全片视听约定') }}</h2></header>
-        <article class="profile-card audiovisual-card">
-          <div v-if="editing && projectDraft">
-            <textarea v-model="projectDraft.audiovisualGuidance" :aria-label="tr('全片视听约定')" :placeholder="tr('按剧情决定')" maxlength="4000" rows="3" />
+            <label class="shot-duration-control">
+              <span class="production-control-label"><Timer :size="16" aria-hidden="true" />{{ tr('单分镜最长时长') }}</span>
+              <input type="range" min="1" max="30" step="1" :value="durationSeconds"
+                :style="{ '--filled': ((durationSeconds - 1) / 29 * 100) + '%' }"
+                :aria-label="tr('单分镜最长时长')" :aria-valuetext="durationSeconds + 's'"
+                :aria-busy="savingDuration" :disabled="!canEdit || savingEdits || savingDuration"
+                @input="previewDuration" @change="commitDuration" />
+              <output class="duration-value"><span :key="durationSeconds">{{ durationSeconds }}s</span></output>
+            </label>
           </div>
-          <div v-else><p>{{ projectView.audiovisualGuidance }}</p></div>
+        </section>
 
-        </article>
-      </section>
-
-      </div>
-      <div class="production-controls">
-        <label class="shot-duration-control">
-          <span class="production-control-label"><Timer :size="16" aria-hidden="true" />{{ tr('单分镜最长时长') }}</span>
-          <input type="range" min="1" max="30" step="1" :value="durationSeconds"
-            :style="{ '--filled': ((durationSeconds - 1) / 29 * 100) + '%' }"
-            :aria-label="tr('单分镜最长时长')" :aria-valuetext="durationSeconds + 's'"
-            :aria-busy="savingDuration" :disabled="!canEdit || savingEdits || savingDuration"
-            @input="previewDuration" @change="commitDuration" />
-          <output class="duration-value"><span :key="durationSeconds">{{ durationSeconds }}s</span></output>
-        </label>
-        <label class="storyboard-switch-row">
-          <span class="production-control-label"><GalleryHorizontalEnd :size="16" aria-hidden="true" />{{ tr('逐镜线稿故事版') }}</span>
-          <button class="storyboard-switch" type="button" role="switch" :aria-label="tr('逐镜线稿故事版')"
-            :aria-checked="storyboardEnabled" :aria-busy="savingStoryboard"
-            :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">
-            <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span>
-          </button>
-        </label>
-      </div>
-      <section class="analysis-section episode-section">
-        <header>
-          <h2>{{ tr('分集剧情') }}</h2>
-          <div v-if="canEdit && !editing" class="episode-actions">
-            <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增一集') }}</AppButton>
-            <AppButton v-if="selectedEpisodeBrief" variant="ghost" size="sm" :disabled="episodeBusy" @click="removeEpisode">{{ tr('删除本集') }}</AppButton>
+        <section class="production-panel">
+          <h2>{{ tr('全片视听约定') }}</h2>
+          <div class="production-panel-body">
+            <div class="audiovisual-guidance">
+              <textarea v-if="editing && projectDraft" v-model="projectDraft.audiovisualGuidance" :aria-label="tr('全片视听约定')" :placeholder="tr('按剧情决定')" maxlength="4000" rows="2" />
+              <p v-else>{{ projectView.audiovisualGuidance }}</p>
+            </div>
+            <div class="storyboard-switch-row">
+              <span class="production-control-label"><GalleryHorizontalEnd :size="16" aria-hidden="true" />{{ tr('逐镜线稿故事版') }}</span>
+              <button class="storyboard-switch" type="button" role="switch" :aria-label="tr('逐镜线稿故事版')"
+                :aria-checked="storyboardEnabled" :aria-busy="savingStoryboard"
+                :disabled="!canEdit || savingEdits || savingStoryboard" @click="toggleStoryboard">
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span>
+              </button>
+            </div>
           </div>
-        </header>
-        <div v-if="!chapters.length && !chaptersLoading" class="episode-empty-state">
-          <p>{{ tr('新增一集开始写剧本，也可以和创作助手一起构思。') }}</p>
-          <AppButton v-if="canEdit" variant="soft" size="sm" @click="useCreationAgentWorkspace().editTargets(projectId, 0, [])">{{ tr('与助手开始创作') }}</AppButton>
-        </div>
-        <div ref="episodeTabs" class="episode-tabs" role="tablist" :aria-label="tr('分集剧情')" tabindex="0">
-          <AppButton v-for="chapter in chapters" :key="chapter.id" variant="soft" size="sm" icon-only type="button" role="tab" :active="activeEpisode === chapter.number" :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</AppButton>
-          <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? tr('加载中…') : tr('继续滚动加载') }}</span>
+        </section>
+      </div>
+      <StoryMemoryPanel v-if="novel" :project-id="projectId" :chapter-id="selectedEpisodeBrief?.id"
+        :can-edit="canEdit" :disabled="editing || savingEdits || adapting" :models="analysisModels" :models-loading="loadingAnalysisModels" :refresh-key="memoryRefreshKey" :chapter-selection-key="memoryChapterSelection" :review-target="reviewTarget"
+        v-model:model-id="analysisModelId" v-model:skill-id="storySkillId" @show-run="assistantWorkspace.showProductionRun(projectId, $event)" />
+
+      <section class="episode-section">
+        <div class="episode-navigation">
+          <header>
+            <h2>{{ tr('分集剧情') }}</h2>
+            <div v-if="canEdit && !editing" class="episode-actions">
+              <AppButton variant="secondary" size="sm" :disabled="episodeBusy" @click="addEpisode">{{ tr('新增一集') }}</AppButton>
+              <AppButton v-if="selectedEpisodeBrief" variant="ghost" size="sm" :disabled="episodeBusy" @click="removeEpisode">{{ tr('删除本集') }}</AppButton>
+            </div>
+          </header>
+          <div v-if="!chapters.length && !chaptersLoading" class="episode-empty-state">
+            <p>{{ tr('新增一集开始写剧本，也可以和创作助手一起构思。') }}</p>
+            <AppButton v-if="canEdit" variant="soft" size="sm" @click="useCreationAgentWorkspace().editTargets(projectId, 0, [])">{{ tr('与助手开始创作') }}</AppButton>
+          </div>
+          <div ref="episodeTabs" class="episode-tabs" role="tablist" :aria-label="tr('分集剧情')" tabindex="0">
+            <button v-for="chapter in chapters" :key="chapter.id" type="button" role="tab"
+              :aria-selected="activeEpisode === chapter.number" @click="selectEpisode(chapter.number, $event)">{{ chapter.number }}</button>
+            <span v-if="chaptersHasMore" class="episode-load-more">{{ chaptersLoading ? tr('加载中…') : tr('继续滚动加载') }}</span>
+          </div>
         </div>
         <div ref="episodeSentinel" class="episode-sentinel" aria-hidden="true"></div>
         <article v-if="selectedEpisode" class="episode-content">
           <header>
-            <div>
+            <div class="episode-heading">
               <label v-if="editing && selectedEpisodeDraft" class="chapter-title-editor">
                 <span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('集') }}</span>
                 <input v-model="selectedEpisodeDraft.name" :aria-label="tr('章节标题')" maxlength="255" />
               </label>
               <h3 v-else>{{ episodeDisplayLabel(selectedEpisode) }}</h3>
             </div>
+            <div class="episode-doc-tools">
+              <div class="episode-doc-tabs" :aria-label="tr('分集剧情')" role="group">
+                <button type="button" :aria-pressed="episodeView === 'source'" @click="episodeViews[selectedEpisode.id] = 'source'">{{ tr('原文') }}</button>
+                <button type="button" :aria-pressed="episodeView === 'screenplay'" @click="episodeViews[selectedEpisode.id] = 'screenplay'">{{ tr('导演剧本') }}</button>
+              </div>
+              <EpisodePacingDialog v-if="canEdit" :key="selectedEpisode.id"
+                :pacing="selectedEpisode.episode_pacing" :episode="episodeDisplayLabel(selectedEpisode)"
+                :disabled="editing || selectedEpisodeLoading || generatingScripts[selectedEpisode.id]"
+                :save="(pacing) => saveEpisodePacing(selectedEpisode!.id, pacing)" />
+              <TaskSkillPicker v-if="canEdit" v-model="screenplaySkillId" task="screenplay" class="episode-skill-picker"
+                :disabled="editing || adapting" />
+              <div v-if="canEdit" class="episode-adaptation-controls">
+                <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
+                  :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON Schema 输出模型') }, ...analysisModels]"
+                  :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
+                <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
+                <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
+                <AppButton v-if="canEdit && selectedEpisode.content?.trim()" class="generate-screenplay" variant="primary" size="sm"
+                  :disabled="editing || !analysisModelId" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
+                  {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : selectedEpisode.screenplay ? tr('重新生成本集剧本') : tr('生成本集剧本') }}
+                </AppButton>
+              </div>
+            </div>
           </header>
-          <div class="episode-doc-tools">
-            <div class="episode-doc-tabs" :aria-label="tr('分集剧情')" role="group">
-              <button type="button" :aria-pressed="episodeView === 'source'" @click="episodeViews[selectedEpisode.id] = 'source'">{{ tr('原文') }}</button>
-              <button type="button" :aria-pressed="episodeView === 'screenplay'" @click="episodeViews[selectedEpisode.id] = 'screenplay'">{{ tr('导演剧本') }}</button>
-            </div>
-            <EpisodePacingDialog v-if="canEdit" :key="selectedEpisode.id"
-              :pacing="selectedEpisode.episode_pacing" :episode="episodeDisplayLabel(selectedEpisode)"
-              :disabled="editing || selectedEpisodeLoading || generatingScripts[selectedEpisode.id]"
-              :save="(pacing) => saveEpisodePacing(selectedEpisode!.id, pacing)" />
-            <TaskSkillPicker v-if="canEdit" v-model="screenplaySkillId" task="screenplay" class="episode-skill-picker"
-              :disabled="editing || adapting" />
-            <div v-if="canEdit" class="episode-adaptation-controls">
-              <AppSelect v-model="analysisModelId" density="compact" :ariaLabel="tr('剧情分析模型')"
-                :options="[{ value: '', label: loadingAnalysisModels ? tr('正在读取模型…') : analysisModels.length ? tr('选择分析模型') : tr('暂无 JSON Schema 输出模型') }, ...analysisModels]"
-                :disabled="!analysisModels.length || analysisRunning || startingAnalysis || adapting || editing" />
-              <small v-if="analysisModelsError" class="cover-generation-error" role="alert">{{ analysisModelsError }}</small>
-              <AppButton v-if="analysisModelsError" variant="ghost" size="xs" @click="loadAnalysisModels">{{ tr('重试') }}</AppButton>
-            <AppButton v-if="canEdit && selectedEpisode.content?.trim()" class="generate-screenplay" variant="primary" size="sm"
-              :disabled="editing || !analysisModelId" :title="editing ? tr('请先保存或取消编辑') : undefined" :loading="generatingScripts[selectedEpisode.id]" @click="generateScreenplay(selectedEpisode.id)">
-              {{ generatingScripts[selectedEpisode.id] ? tr('正在改编…') : selectedEpisode.screenplay ? tr('重新生成本集剧本') : tr('生成本集剧本') }}
-            </AppButton>
-            </div>
-          </div>
-          <div class="episode-document">
-          <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
-          <template v-else-if="episodeView === 'source'">
-            <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
-            <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
-            <p v-else class="episode-content-state">{{ tr('本集未提供原文') }}</p>
-          </template>
-          <template v-else>
-            <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.screenplay" class="chapter-content-editor" :aria-label="tr('导演剧本')" />
-            <EpisodeScreenplay v-else-if="selectedEpisode.screenplay" :text="selectedEpisode.screenplay" :episode-number="selectedEpisode.number" :episode-name="selectedEpisode.name" />
-            <p v-else class="episode-content-state">{{ tr('本集暂无导演剧本') }}</p>
-          </template>
+          <div :key="`${selectedEpisode.id}:${episodeView}:${selectedEpisodeLoading}`" class="episode-document"
+            :class="{ 'is-ready': !selectedEpisodeLoading }">
+            <p v-if="selectedEpisodeLoading" class="episode-content-state">{{ tr('正在加载章节正文…') }}</p>
+            <template v-else-if="episodeView === 'source'">
+              <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.content" class="chapter-content-editor" :aria-label="tr('章节内容')" />
+              <p v-else-if="selectedEpisode.content">{{ selectedEpisode.content }}</p>
+              <p v-else class="episode-content-state">{{ tr('本集未提供原文') }}</p>
+            </template>
+            <template v-else>
+              <textarea v-if="editing && selectedEpisodeDraft" v-model="selectedEpisodeDraft.screenplay" class="chapter-content-editor" :aria-label="tr('导演剧本')" />
+              <EpisodeScreenplay v-else-if="selectedEpisode.screenplay" :text="selectedEpisode.screenplay" :episode-number="selectedEpisode.number" :episode-name="selectedEpisode.name" />
+              <p v-else class="episode-content-state">{{ tr('本集暂无导演剧本') }}</p>
+            </template>
           </div>
           <footer><span><UsersRound :size="14" />{{ selectedEpisodeCharacters }}</span><span>{{ tr('第') }} {{ selectedEpisode.number }} {{ tr('章') }}</span></footer>
         </article>
@@ -998,88 +1017,77 @@ onBeforeUnmount(() => {
       </template>
       </section>
     <AudioReferencePicker :open="narratorPickerOpen" :selected-id="projectDraft?.narratorAudioReferenceId || novel?.narrator_audio_reference_id" :novel-id="novel?.id" @close="narratorPickerOpen = false" @choose="selectNarratorVoice" />
+    <ImageLightbox :open="Boolean(coverPreviewSrc)" :src="coverPreviewSrc" :alt="coverAlt" animated @close="coverPreviewSrc = ''" />
+    </template>
   </ShortDramaWorkspaceShell>
   </main>
 </template>
 
 <style scoped>
-.episode-project-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; color: var(--app-text-secondary); font-size: 12px; }
+.episode-project-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; color: var(--app-text-secondary); font-size: 12px; }
 .episode-project-meta > span, .episode-project-meta > label { display: inline-flex; align-items: center; gap: 6px; }
 .episode-project-meta svg { flex: none; }
 .episode-project-meta :deep(.app-select) { width: auto; }
 .tag-editor textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; border: 1px solid var(--app-border); border-radius: 8px; color: var(--app-text); background: var(--app-surface-muted); font: inherit; }
 .tag-editor textarea:focus-visible { outline: 2px solid var(--app-accent); }
 
-.episode-empty-state { padding: 20px; border: 1px dashed var(--app-border); border-radius: 12px; color: var(--app-text-secondary); }
-.episode-empty-state p { margin: 0 0 12px; line-height: 1.7; }
+.episode-empty-state { padding: 12px; border: 1px dashed var(--app-border); border-radius: 12px; color: var(--app-text-secondary); }
+.episode-empty-state p { margin: 0 0 8px; line-height: 1.7; }
 .episode-adaptation-controls { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; flex-wrap: wrap; }
-.episode-doc-tools { display:flex; align-items:flex-start; justify-content:flex-start; flex-wrap:wrap; gap:10px; margin:12px 0 18px; }
-.episode-doc-tabs { display:inline-flex; padding:3px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
-.episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; }
+.episode-doc-tools { display: flex; min-width: 0; max-width: 100%; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.episode-doc-tabs { display:inline-flex; padding:2px; background:var(--app-surface-muted); border:1px solid var(--app-border); border-radius:9px; }
+.episode-doc-tabs button { border:0; background:transparent; color:var(--app-text-secondary); min-height: 28px; padding: 4px 10px; border-radius: 6px; cursor:pointer; font:inherit; font-size:13px; transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease; }
 .episode-doc-tabs button[aria-pressed="true"] { background:var(--app-surface); color:var(--app-accent); box-shadow:0 1px 3px #0002; }
 .episode-doc-tabs button:hover { color:var(--app-accent); }
 .episode-doc-tabs button:focus-visible { outline:2px solid var(--app-accent); }
 
-.episode-actions { display: flex; gap: 8px; }
-.profile-card input[type="checkbox"] { width: auto; min-height: 0; height: auto; accent-color: var(--app-accent); }
+.episode-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .creation-cover-notice p { margin: 0; overflow-wrap: anywhere; }
 .creation-cover-notice { padding: 13px 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); color: var(--app-text-secondary); font-size: 12px; line-height: 1.8; }
-@container creation-workspace (max-width: 800px) { .agent-content { padding: 20px 18px; }.analysis-hero { gap: 18px; }.profile-grid { grid-template-columns: 1fr; } }
-
-.agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: #303442; background: #f9fafc; }
-.analysis-hero-copy p { display: flex; align-items: center; gap: 7px; color: #9297a6; font-size: 10px; }
-.analysis-hero-copy i { width: 1px; height: 10px; background: #dfe1e8; }
-.agent-content { width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 20px 22px 48px; box-sizing: border-box; }
-.analysis-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 18px 52px rgb(42 46 64 / 8%); }
-.analysis-hero-copy { display: grid; flex: 1 1 16rem; min-width: 0; justify-items: start; }
-.analysis-ready { margin-bottom: 9px; }
+.agent-page { min-width: 0; min-height: 100%; overflow-x: clip; color: var(--app-text); background: var(--app-canvas); }
+.agent-content { display: grid; gap: 8px; width: min(1440px, 100%); min-width: 0; margin: 0 auto; padding: 12px 16px 40px; box-sizing: border-box; }
+.analysis-hero {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px;
+  border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface);
+}
+.analysis-hero-copy { display: grid; flex: 1 1 16rem; min-width: 0; justify-items: start; gap: 4px; }
 .status-spinner { animation: status-spin 1.1s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-.analysis-hero h1 { margin: 0 0 10px; color: #282c3a; font-size: clamp(20px, 2vw, 24px); letter-spacing: -.035em; }
-.analysis-title-input { width: min(620px, 100%); margin: 0 0 10px; padding: 5px 9px; color: var(--app-text); font-size: clamp(20px, 2vw, 24px); font-weight: 700; letter-spacing: -.035em; }
-.analysis-hero-copy p { margin: 0; font-size: 11px; }
-.genre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
-.tag-editor { display: grid; width: min(620px, 100%); gap: 5px; margin-top: 13px; }
-.tag-editor > span { color: #777c8d; font-size: 9px; font-weight: 650; }
+.analysis-hero h1 { margin: 0; color: var(--app-text); font-size: 1.25rem; line-height: 1.3; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.analysis-title-input { width: min(620px, 100%); padding: 5px 9px; color: var(--app-text); font-size: 1.125rem; font-weight: 700; }
+.episode-project-meta .genre-tags { flex-wrap: wrap; gap: 4px; }
+.tag-editor { display: grid; width: min(620px, 100%); gap: 4px; margin-top: 4px; }
+.tag-editor > span { color: var(--app-text-secondary); font-size: 11px; font-weight: 650; }
 .cover-generation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cover-generation-error { flex-basis: 100%; color: var(--creation-danger); }
-.analysis-hero-actions { min-width: 0; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px; }
-.secondary-action { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 9px; color: #626879; background: #f3f4f8; cursor: pointer; font-size: 11px; }
-.secondary-action:hover { color: #4f51e8; background: #ededff; }
-.secondary-action:disabled { opacity: .55; cursor: wait; }
-.secondary-action.compact { min-height: 34px; }
-.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 16px; margin-top: 22px; padding: 20px; border-radius: 16px; background: var(--app-surface); box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
+.cover-generation-error { flex-basis: 100%; color: var(--creation-danger); overflow-wrap: anywhere; }
+.analysis-hero-actions { min-width: 0; max-inline-size: 100%; margin-inline-start: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.analysis-progress-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--app-surface); box-shadow: 0 10px 34px rgb(45 49 68 / 6%); }
 .analysis-progress-card > span { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 14px; color: var(--app-accent); background: var(--app-accent-soft); }
 .analysis-progress-card h2 { margin: 0 0 6px; font-size: 15px; }
 .analysis-progress-card p { margin: 0; color: var(--app-text-secondary); font-size: 11px; line-height: 1.7; }
 .analysis-progress-card > button { min-height: 36px; padding: 0 15px; border: 0; border-radius: 9px; color: #fff; background: #5b5cf6; cursor: pointer; font-size: 11px; font-weight: 650; }
 .analysis-progress-card.is-failed > span { color: var(--creation-danger); background: color-mix(in srgb, var(--creation-danger) 10%, var(--app-surface)); }
-.analysis-section { padding-top: 20px; }
-.analysis-section > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
-.analysis-section > header > div:not(.episode-actions) { display: grid; gap: 4px; }
-.analysis-section > header h2 { margin: 0; color: #303442; font-size: 17px; }
-.analysis-section > header p { margin: 2px 0 0; color: #9297a7; font-size: 11px; }
-.analysis-section > header > span { color: #999eac; font-size: 10px; }
-.analysis-section > header > a { display: inline-flex; align-items: center; gap: 5px; color: #5b5cf6; font-size: 11px; }
-.section-kicker { color: #7779ef; font-size: 8px; font-weight: 750; letter-spacing: .16em; }
-.profile-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-.profile-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 13px; padding: 16px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
-.production-settings > section { display: flex; flex-direction: column; }
-.production-settings .profile-card { flex: 1; box-sizing: border-box; }
-.production-settings > section > header { height: 44px; flex: 0 0 44px; align-items: center; }
-.production-controls {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 8px;
-  color: var(--app-text); font-size: 13px;
+.production-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.production-panel, .episode-navigation {
+  min-width: 0; padding: 8px 12px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface);
 }
+.production-panel h2, .episode-navigation h2 { margin: 0; color: var(--app-text); font-size: .875rem; }
+.production-panel-body { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 4px; }
+.production-summary, .audiovisual-guidance { flex: 1 1 13rem; min-width: 0; overflow-wrap: anywhere; }
+.production-summary { display: flex; align-items: flex-start; gap: 8px; }
+.production-summary > div { min-width: 0; }
+.strategy-icon { display: grid; flex: 0 0 30px; height: 30px; place-items: center; border-radius: 8px; color: var(--app-accent); background: var(--app-accent-soft); }
+.strategy-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; }
+.strategy-label small { color: var(--app-text-secondary); font-size: 12px; }
+.production-summary p, .audiovisual-guidance p { margin: 0; color: var(--app-text-secondary); font-size: 12px; line-height: 1.5; }
 .shot-duration-control, .storyboard-switch-row {
-  min-width: 0; min-height: 48px; box-sizing: border-box; padding: 4px 16px;
-  display: grid; align-items: center; gap: 10px;
-  border-radius: 10px; border: 1px solid var(--app-border);
-  background: color-mix(in srgb, var(--app-surface) 65%, var(--app-surface-muted));
+  display: grid; flex: 0 1 12rem; min-width: 0; align-items: center; column-gap: 6px;
+  padding-inline: 8px; border-radius: 8px; background: var(--app-surface-muted); font-size: 12px;
 }
-.shot-duration-control { grid-template-columns: minmax(max-content, 1fr) minmax(64px, 160px) auto; }
-.storyboard-switch-row { grid-template-columns: 1fr auto; }
-.production-control-label { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; }
+.shot-duration-control { grid-template-columns: minmax(0, 1fr) auto; padding-block-start: 4px; }
+.shot-duration-control .production-control-label { grid-column: 1 / -1; }
+.storyboard-switch-row { grid-template-columns: minmax(0, 1fr) auto; }
+.production-control-label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; overflow-wrap: anywhere; }
 .production-control-label svg { flex: none; color: var(--app-text-secondary); }
 .shot-duration-control input {
   appearance: none; width: 100%; min-width: 0; height: 36px; margin: 0; border: 0; border-radius: 5px; cursor: pointer;
@@ -1107,36 +1115,21 @@ onBeforeUnmount(() => {
 .storyboard-switch[aria-checked="true"] .switch-track { background: var(--app-accent); }
 .storyboard-switch[aria-checked="true"] .switch-thumb { transform: translateX(15px); }
 .storyboard-switch:enabled:hover .switch-track { box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-accent) 12%, transparent); }
-.production-controls :is(input,button):focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
-.production-controls :disabled { opacity: .6; cursor: default; }
-@container creation-workspace (max-width: 800px) {
-  .production-controls { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-}
-@container creation-workspace (max-width: 420px) {
-  .shot-duration-control, .storyboard-switch-row { padding-inline: 10px; gap: 8px; }
-  .shot-duration-control { grid-template-columns: max-content minmax(48px, 1fr) auto; }
-}
+.production-settings :is(input,button):focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
+.production-settings :disabled { opacity: .6; cursor: default; }
 @media (prefers-reduced-motion: reduce) {
+  .status-spinner { animation: none; }
   .switch-track, .switch-thumb { transition: none; }
   .shot-duration-control input::-webkit-slider-thumb { transition: none; }
   .shot-duration-control input::-moz-range-thumb { transition: none; }
   .duration-value span { animation: none; }
 }
-.production-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.audiovisual-card { grid-template-columns: minmax(0, 1fr); }
-.audiovisual-card p, .audiovisual-card small { font-size: 12px; line-height: 1.6; }
-@container creation-workspace (max-width: 800px) { .production-settings { grid-template-columns: minmax(0, 1fr); gap: 0; } }
-.profile-card > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 11px; color: #5b5cf6; background: #eff0ff; }
-.profile-card > div { display: grid; gap: 4px; }
-.profile-card small { color: #969baa; font-size: 9px; }
-.profile-card strong { font-size: 13px; }
-.profile-card p { margin: 1px 0 0; color: #858a99; font-size: 10px; line-height: 1.55; }
 .narrator-voice-button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; margin-top: 7px; padding: 7px 10px; border: 1px solid var(--app-border); border-radius: 9px; color: var(--app-accent); background: var(--app-surface-muted); cursor: pointer; text-align: left; }.narrator-voice-button:hover { border-color: var(--app-accent); }.narrator-voice-button > span { display: grid; gap: 2px; }.narrator-voice-button small { color: var(--app-text-secondary); font-size: 8px; }.narrator-voice-button strong { color: var(--app-text); font-size: 10px; }.narrator-voice-summary { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--app-accent); font-size: 9px; }
-.analysis-title-input, .tag-editor input, .profile-card input, .profile-card textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
-.analysis-title-input:focus, .tag-editor input:focus, .profile-card input:focus, .profile-card textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
-.tag-editor input, .profile-card input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }
+.analysis-title-input, .tag-editor input, .audiovisual-guidance textarea, .chapter-title-editor input, .chapter-content-editor { border: 1px solid var(--app-border); border-radius: 9px; outline: 0; background: var(--app-surface-muted); box-shadow: inset 0 1px 2px rgb(39 43 62 / 3%); box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.analysis-title-input:focus, .tag-editor input:focus, .audiovisual-guidance textarea:focus, .chapter-title-editor input:focus, .chapter-content-editor:focus { border-color: var(--app-accent); background: var(--app-surface); box-shadow: 0 0 0 3px var(--app-accent-soft); }
+.tag-editor input, .chapter-title-editor input { width: 100%; min-height: 34px; padding: 0 10px; color: var(--app-text); font-size: 11px; }
 .storyboard-strategy-select { width: min(260px, 100%); }
-.profile-card textarea { width: 100%; min-height: 68px; padding: 8px 10px; resize: vertical; color: var(--app-text-secondary); font: inherit; font-size: 10px; line-height: 1.6; }
+.audiovisual-guidance textarea { width: 100%; display: block; min-height: 48px; padding: 6px 8px; resize: vertical; color: var(--app-text); font: inherit; font-size: 12px; line-height: 1.6; }
 .character-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .character-card { display: grid; gap: 12px; padding: 17px; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px rgb(45 49 68 / 5%); }
 .character-title { display: flex; align-items: center; gap: 11px; }
@@ -1151,48 +1144,74 @@ onBeforeUnmount(() => {
 .show-more svg { transition: transform .15s ease; }
 .show-more svg.is-up { transform: rotate(180deg); }
 .episode-section { min-width: 0; }
-.episode-tabs { display: flex; width: 100%; max-width: 100%; gap: 7px; margin-bottom: 10px; padding: 2px 2px 8px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-behavior: smooth; scroll-snap-type: x proximity; scrollbar-color: #d9dbe6 transparent; scrollbar-width: thin; }
-.episode-tabs::-webkit-scrollbar { height: 5px; }
-.episode-tabs::-webkit-scrollbar-track { background: transparent; }
-.episode-tabs::-webkit-scrollbar-thumb { border-radius: 999px; background: #d9dbe6; }
-.episode-tabs:focus-visible { outline: 3px solid rgb(91 92 246 / 14%); outline-offset: 2px; border-radius: 10px; }
-.episode-tabs button { display: grid; width: 34px; min-width: 34px; height: 34px; flex: 0 0 34px; place-items: center; scroll-snap-align: center; border: 0; border-radius: 9px; color: #777d8e; background: #f1f2f7; cursor: pointer; font-size: 11px; }
-.episode-tabs button.is-active { color: #fff; background: #6768ef; box-shadow: 0 7px 18px rgb(91 92 246 / 20%); }
-.episode-content { scroll-margin-top: calc(var(--short-drama-header-height, 72px) + 12px); --reading-inset: clamp(16px, 3vw, 40px); min-width: 0; border: 1px solid var(--app-border); border-radius: 14px; background: var(--app-surface); }
-.episode-content > header { padding: 22px var(--reading-inset) 0; }
-.episode-content h3 { margin: 0; color: var(--app-text); font-size: 20px; letter-spacing: -.02em; }
-.episode-content .episode-doc-tools { margin: 0; padding: 12px var(--reading-inset) 16px; border-bottom: 1px solid var(--app-border); }
+.episode-navigation > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.episode-tabs {
+  position: relative; display: flex; gap: 4px; padding: 4px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-padding-inline: 4px; scroll-snap-type: x proximity; scrollbar-color: var(--app-border-strong) transparent; scrollbar-width: thin;
+}
+.episode-tabs:empty { display: none; }
+.episode-tabs:focus-visible { outline: 2px solid var(--app-accent); border-radius: 8px; }
+.episode-tabs > button {
+  position: relative; min-width: 32px; min-height: 32px; flex: none; scroll-snap-align: center;
+  padding: 0 4px; border: 0; border-radius: 7px; cursor: pointer; color: var(--app-text-secondary); background: var(--app-surface-muted);
+  font: inherit; font-size: 11px; font-weight: 620; font-variant-numeric: tabular-nums;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+.episode-tabs > button:hover { color: var(--app-accent); background: var(--app-surface-hover); }
+.episode-tabs > button[aria-selected="true"] { color: var(--app-accent); background: var(--app-accent-soft); }
+.episode-tabs > button::after { content: ''; position: absolute; inset: auto 8px 3px; border-block-end: 2px solid currentColor; opacity: 0; }
+.episode-tabs > button[aria-selected="true"]::after { opacity: 1; }
+.episode-tabs > button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 1px; }
+.episode-content { scroll-margin-top: calc(var(--short-drama-header-height, 72px) + 8px); --reading-inset: clamp(12px, 2vw, 32px); min-width: 0; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); }
+.episode-content > header {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  padding: 10px var(--reading-inset); border-bottom: 1px solid var(--app-border);
+}
+.episode-heading { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.episode-content h3 { margin: 0; color: var(--app-text); font-size: 1.0625rem; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .episode-skill-picker { width: auto; max-inline-size: 100%; }
 .story-generation-controls { display: contents; }
 .story-generation-controls > .task-skill-picker { width: auto; max-inline-size: 100%; }
-.episode-document { padding: clamp(18px, 2vw, 30px) var(--reading-inset); }
-.chapter-title-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 5px; }
-.chapter-title-editor > span { color: #555b6b; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.episode-document { padding: 12px var(--reading-inset) 20px; }
+@media (prefers-reduced-motion: no-preference) {
+  .episode-tabs > button::after { scale: .65 1; transition: opacity 140ms ease, scale 160ms ease-out; }
+  .episode-tabs > button[aria-selected="true"]::after { scale: 1; }
+  .episode-document.is-ready { animation: episode-document-in 190ms cubic-bezier(.16, 1, .3, 1); }
+}
+@keyframes episode-document-in {
+  from { opacity: .55; translate: 0 4px; }
+}
+.chapter-title-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.chapter-title-editor > span { color: var(--app-text-secondary); font-size: 12px; font-weight: 700; white-space: nowrap; }
 .episode-document > p { max-width: 52em; margin: 0 auto; color: var(--app-text); font-size: 15px; line-height: 2; overflow-wrap: anywhere; white-space: pre-wrap; }
 .episode-document > p.episode-content-state { min-height: 100px; display: grid; place-items: center; color: var(--app-text-secondary); }
 .chapter-content-editor { display: block; width: 100%; min-height: 520px; margin: 0; padding: 18px 20px; resize: vertical; color: var(--app-text); font: inherit; font-size: 15px; line-height: 2; white-space: pre-wrap; }
-.episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px var(--reading-inset); border-top: 1px solid var(--app-border); border-radius: 0 0 14px 14px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; }
+.episode-content > footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px var(--reading-inset); border-top: 1px solid var(--app-border); border-radius: 0 0 12px 12px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; }
 .episode-content > footer span { display: inline-flex; align-items: center; gap: 5px; }
-.episode-sentinel { height: 2px; margin-top: 8px; }
+.episode-sentinel { height: 1px; margin-bottom: 7px; }
 .episode-load-more { align-self: center; padding: 0 8px; color: var(--app-text-muted); font-size: 11px; white-space: nowrap; }
-.continue-button { position: relative; display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; margin-top: 28px; padding: 0 52px; border: 0; border-radius: 13px; color: #fff; background: #5b5cf6; box-shadow: 0 14px 30px rgb(91 92 246 / 22%); cursor: pointer; font-size: 13px; font-weight: 700; }
+.continue-button { position: relative; display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; padding: 0 52px; border: 0; border-radius: 13px; color: #fff; background: #5b5cf6; box-shadow: 0 14px 30px rgb(91 92 246 / 22%); cursor: pointer; font-size: 13px; font-weight: 700; }
 .continue-button > span { display: inline-flex; align-items: center; gap: 8px; }
 .continue-button > svg { position: absolute; right: 20px; }
 .continue-button:hover { background: #4d4ee9; transform: translateY(-1px); }
-@media (max-width: 720px) {
-  .agent-content { width: 100%; padding: 22px 14px 60px; }
-  .analysis-hero { gap: 15px; padding: 15px; }
-  .analysis-hero h1 { font-size: 19px; }
-  .genre-tags { margin-top: 11px; }
-  .profile-grid, .character-grid { grid-template-columns: 1fr; }
-  .analysis-section { padding-top: 20px; }
+@container creation-workspace (max-width: 720px) {
+  .agent-content { padding: 8px 10px 28px; }
+  .analysis-hero-copy { flex-basis: 0; }
+  .analysis-hero-actions { flex-basis: 100%; margin-inline-start: 0; justify-content: flex-start; }
+  .production-settings { grid-template-columns: minmax(0, 1fr); }
+  .production-summary, .audiovisual-guidance { flex-basis: 9rem; }
+  .shot-duration-control { flex-basis: 10rem; }
+  .storyboard-switch-row { flex-basis: 11rem; }
   .analysis-progress-card { grid-template-columns: 44px minmax(0, 1fr); }
   .analysis-progress-card > span { width: 44px; height: 44px; }
   .analysis-progress-card > button { grid-column: 2; justify-self: start; }
-  .episode-content > footer { align-items: flex-start; flex-direction: column; }
+  .episode-content > footer { flex-wrap: wrap; gap: 6px; }
 }
-@media (max-width: 480px) {
-  .analysis-hero-actions { margin-inline-start: 0; justify-content: flex-start; }
-  .analysis-section > header { align-items: flex-start; flex-direction: column; }
+@container creation-workspace (max-width: 420px) {
+  .analysis-hero-actions > button, .cover-generation-actions > button { padding-inline: 8px; }
+}
+@media (pointer: coarse) {
+  .episode-tabs > button { min-width: 40px; min-height: 40px; }
+  .episode-doc-tabs button { min-height: 36px; }
 }
 </style>

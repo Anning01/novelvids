@@ -7,6 +7,7 @@ export type AppConfirmTone = 'neutral' | 'warning' | 'danger'
 export interface AppConfirmOptions {
   title: string
   message?: string
+  details?: string[]
   confirmLabel?: string
   cancelLabel?: string
   tone?: AppConfirmTone
@@ -16,6 +17,7 @@ export const appConfirmState = reactive({
   open: false,
   title: '',
   message: '',
+  details: [] as string[],
   confirmLabel: tr('确认'),
   cancelLabel: tr('取消'),
   tone: 'danger' as AppConfirmTone,
@@ -37,6 +39,7 @@ export function appConfirm(options: AppConfirmOptions) {
     open: true,
     title: options.title,
     message: options.message || '',
+    details: options.details || [],
     confirmLabel: options.confirmLabel || tr('确认'),
     cancelLabel: options.cancelLabel || tr('取消'),
     tone: options.tone || 'danger',

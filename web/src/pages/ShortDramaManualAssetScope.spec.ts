@@ -506,6 +506,45 @@ it('reconciles an old failed extraction with the latest completed task on window
   expect(api.latestExtraction).toHaveBeenCalledTimes(calls)
 })
 
+it('dismisses the current extraction failure across refreshes and shows a new failure', async () => {
+  const failure = { id: 'dismissible-extraction', task_type: 1, status: TaskStatusEnum.FAILED,
+    error_message: '第一次提取失败', created_at: '' }
+  vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: '', data: failure })
+  const wrapper = await mountInCurrentChapterScope()
+  const banner = '.extraction-task-status'
+  expect(wrapper.get(banner).text()).toContain(failure.error_message)
+  await wrapper.get('[aria-label="关闭资产提取提示"]').trigger('click')
+  await wrapper.get('[aria-label="刷新"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.find(banner).exists()).toBe(false)
+  wrapper.unmount()
+
+  const reopened = await mountInCurrentChapterScope()
+  expect(reopened.find(banner).exists()).toBe(false)
+  vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: '',
+    data: { ...failure, id: 'next-extraction', error_message: '第二次提取失败' } })
+  await reopened.get('[aria-label="刷新"]').trigger('click')
+  await flushPromises()
+  expect(reopened.get(banner).text()).toContain('第二次提取失败')
+  reopened.unmount()
+})
+
+it('retries through the chapter extraction endpoint from the failure banner', async () => {
+  vi.mocked(api.latestExtraction).mockResolvedValue({ code: 0, message: '',
+    data: { id: 'retry-extraction', task_type: 1, status: TaskStatusEnum.FAILED, created_at: '' } })
+  vi.mocked(api.extract).mockResolvedValue({ code: 0, message: '',
+    data: { id: 'successful-retry', task_type: 1, status: TaskStatusEnum.COMPLETED, created_at: '' } })
+  const wrapper = await mountInCurrentChapterScope()
+  await wrapper.get('[aria-label="选择资产提取模型"]').trigger('click')
+  document.querySelector<HTMLElement>('[role="option"] [title="Asset text"]')!.click()
+  await flushPromises()
+  await wrapper.findAll('.extraction-task-status button').find(button => button.text() === '重新提取本章资产')!.trigger('click')
+  await flushPromises()
+  expect(api.extract).toHaveBeenCalledWith(chapter.id, undefined, 22, undefined)
+  expect(wrapper.find('.extraction-task-status').exists()).toBe(false)
+  wrapper.unmount()
+})
+
 it('refreshes extraction state as well as assets through the existing refresh button', async () => {
   vi.mocked(api.latestExtraction).mockResolvedValueOnce({ code: 0, message: '', data: {
     id: 'old-failure', task_type: 1, status: TaskStatusEnum.FAILED, error_message: '旧失败', created_at: '',

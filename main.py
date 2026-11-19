@@ -109,6 +109,8 @@ async def _initialize_database_schema() -> None:
     await ensure_agent_operation_schema()
     from services.schema_compat import ensure_video_editor_schema
     await ensure_video_editor_schema()
+    from services.schema_compat import ensure_story_memory_schema
+    await ensure_story_memory_schema()
     from services.schema_compat import ensure_recharge_order_schema
     await ensure_recharge_order_schema()
 
@@ -161,12 +163,15 @@ async def lifespan(_: FastAPI):
     await editor_export_worker.start()
     import asyncio
     from services.billing.platform import settle_periodically as settle_studio_calls
+    from services.deleted_media import clean_deleted_media_periodically
     billing_reconciler = asyncio.create_task(settle_studio_calls())
+    media_cleanup = asyncio.create_task(clean_deleted_media_periodically())
     try:
         yield
     finally:
         billing_reconciler.cancel()
-        await asyncio.gather(billing_reconciler, return_exceptions=True)
+        media_cleanup.cancel()
+        await asyncio.gather(billing_reconciler, media_cleanup, return_exceptions=True)
         await editor_export_worker.stop()
         await production_recovery.stop()
         await video_task_reconciler.stop()

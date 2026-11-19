@@ -5,6 +5,7 @@ from tortoise import Tortoise
 
 from models.asset import Asset
 from models.novel import Novel
+from services.creation_objects import CreationObjects, project_write
 from services.extraction.extractor import (
     AssetExtractionResult,
     Item,
@@ -95,6 +96,27 @@ def _result(
         scenes=scenes or [],
         items=items or [],
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("matching_people", [0, 2])
+async def test_removed_prop_conflict_is_preserved_without_a_unique_local_character(matching_people):
+    novel = await Novel.create(name="已移除的道具")
+    other = await Novel.create(name="另一作品")
+    name = "纸鸢"
+    await Asset.create(novel=other, asset_type=AssetTypeEnum.person.value, canonical_name=name)
+    for index in range(matching_people):
+        await Asset.create(novel=novel, asset_type=AssetTypeEnum.person.value,
+            canonical_name=f"人物{index + 1}", aliases=[name])
+    prop = await Asset.create(novel=novel, asset_type=AssetTypeEnum.item.value, canonical_name=name)
+    async with project_write(novel.id):
+        await CreationObjects(novel.id).archive("asset", prop.id)
+
+    with pytest.raises(ValueError, match="已移除的同名设定（纸鸢）"):
+        await AssetUpsertService().save_result(novel_id=novel.id, chapter_number=3,
+            result=_result(items=[Item(name=name, base_traits="纸制风筝")]))
+
+    assert await Asset.with_deleted().filter(id=prop.id, deleted_at__not_isnull=True).exists()
 
 
 @pytest.mark.asyncio

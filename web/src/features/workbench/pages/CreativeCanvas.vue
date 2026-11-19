@@ -711,7 +711,10 @@ function handleKeydown(event: KeyboardEvent) {
   if (command && event.key.toLowerCase() === 'c') { event.preventDefault(); store.copySelection() }
   if (command && event.key.toLowerCase() === 'v') { event.preventDefault(); store.paste() }
   if (command && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? void redoCanvasAction() : void undoCanvasAction() }
-  if ((event.key === 'Delete' || event.key === 'Backspace') && hasDeletableSelection.value) { event.preventDefault(); store.deleteSelection() }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && hasDeletableSelection.value) {
+    event.preventDefault()
+    if (!event.repeat) void store.deleteSelection().catch(error => notice.error(error instanceof Error ? error.message : tr('删除节点失败')))
+  }
 }
 function handleKeyup(event: KeyboardEvent) { if (event.code === 'Space') spacePanActive.value = false }
 

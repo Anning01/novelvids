@@ -5,7 +5,7 @@ import { ArrowLeft, FileText, Plus, Scissors, Trash2, X } from 'lucide-vue-next'
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/api'
-import { appConfirm } from '@/shared/confirmDialog'
+import { confirmChapterDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import type { Chapter, Novel } from '@/types'
 const route = useRoute(); const id = Number(route.params.id); const novel = ref<Novel | null>(null); const chapters = ref<Chapter[]>([]); const showCreate = ref(false); const form = ref({ number: 1, name: '', content: '' }); const splitting = ref(false)
@@ -13,14 +13,13 @@ async function load() { try { const [a, b] = await Promise.all([api.novel(id), a
 async function create() { await api.createChapter({ ...form.value, novel_id: id }); showCreate.value = false; await load(); notice.success(tr('章节已创建')) }
 async function split() { splitting.value = true; try { await api.splitNovel(id); await load(); notice.success(tr('章节拆分完成')) } catch (error) { notice.error((error as Error).message) } finally { splitting.value = false } }
 async function remove(item: Chapter) {
-  if (!await appConfirm({
-    title: tr('删除第 {p0} 章？', { p0: item.number }),
-    get message() { return tr('本章内容及相关创作数据将被删除，且无法恢复。') },
-    get confirmLabel() { return tr('删除章节') },
-    tone: 'danger',
-  })) return
-  await api.deleteChapter(item.id)
-  await load()
+  try {
+    if (!await confirmChapterDeletion(item.name || tr('第 {p0} 章', { p0: item.number }))) return
+    await api.deleteChapter(item.id)
+    await load()
+  } catch (error) {
+    notice.error((error as Error).message)
+  }
 }
 onMounted(load)
 </script>

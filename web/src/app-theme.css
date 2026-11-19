@@ -230,7 +230,7 @@
   background: color-mix(in srgb,var(--character-accent) 18%,var(--app-surface));
   box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--character-accent) 28%,transparent);
 }
-:root[data-app-theme='dark'] .agent-page :is(.secondary-action,.episode-tabs button,.episode-content > footer) { color: var(--app-text-secondary); background: var(--app-surface-muted); }
+:root[data-app-theme='dark'] .agent-page :is(.secondary-action,.episode-content > footer) { color: var(--app-text-secondary); background: var(--app-surface-muted); }
 :root[data-app-theme='dark'] .agent-page .show-more {
   border: 1px solid var(--app-border);
   color: var(--app-text-secondary);

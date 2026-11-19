@@ -124,6 +124,11 @@ async def initialize_db():
 @pytest.fixture(scope="function", autouse=True)
 async def clear_db():
     """Clear data between tests but keep schema."""
+    from models.story_memory import StoryCommit, StoryFact, StorySnapshot, StorySubject
+    await StorySnapshot.all().delete()
+    await StoryFact.all().delete()
+    await StoryCommit.all().delete()
+    await StorySubject.all().delete()
     from models.studio_call import StudioCall
     from models.user_skill import UserSkill, TaskSkillPreference
     await TaskSkillPreference.all().delete()
@@ -138,7 +143,9 @@ async def clear_db():
     from models.novel import Novel
     from models.chapter import Chapter
     from models.chapter_export import ChapterExport
+    from models.media_deletion import MediaDeletion
     await ChapterExport.all().delete()
+    await MediaDeletion.all().delete()
     from models.asset import Asset
     from models.asset_variant import AssetVariant
     from models.scene import Scene
