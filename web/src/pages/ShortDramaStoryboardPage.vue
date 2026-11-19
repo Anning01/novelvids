@@ -68,6 +68,7 @@ import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
 import { api, ApiRequestError, mediaUrl, sleep, retryableStatusError } from '@/api'
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { appConfirm } from '@/shared/confirmDialog'
+import { useAuthStore } from '@/features/auth/authStore'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
@@ -192,6 +193,8 @@ const savingVideoDefaults = ref(false)
 const persistedVideoModelId = ref<number | null>(null)
 let videoModelPreferenceSaveQueue: Promise<void> = Promise.resolve()
 const videos = ref<Record<number, VideoResult[]>>({})
+const auth = useAuthStore()
+const canDeleteVideos = computed(() => !auth.enabled || ['admin', 'creator', 'super'].includes(auth.role || ''))
 const videoPageEnabled = computed(() => chapterHasCompletedVideo(scenes.value, videos.value))
 const loading = ref(true)
 const generatingChapterIds = ref<Set<number>>(new Set())
@@ -2332,6 +2335,12 @@ async function selectVideoHistoryRecord(scene: Scene, record: VideoResult) {
   }
 }
 
+function removeVideoHistoryRecord(scene: Scene, record: VideoResult) {
+  videoPolls.get(record.id)?.controller.abort()
+  videos.value[scene.id] = (videos.value[scene.id] || []).filter(item => item.id !== record.id)
+  void refreshVideoHistory(scene)
+}
+
 function syncInjectedLastFrame(result: VideoResult) {
   const metadata = result.metadata
   if (!metadata || typeof metadata !== 'object') return
@@ -2870,8 +2879,10 @@ onBeforeUnmount(() => {
                   :records="videos[scene.id] || []"
                   :current-id="currentVideoId(scene)"
                   :busy="refreshingVideoHistorySceneIds.has(scene.id)"
+                  :can-delete="canDeleteVideos"
                   @refresh="refreshVideoHistory(scene)"
                   @select="selectVideoHistoryRecord(scene, $event)"
+                  @deleted="removeVideoHistoryRecord(scene, $event)"
                   @retry="generateVideo(scene)"
                 />
               </aside>

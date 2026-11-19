@@ -257,6 +257,20 @@ async def get_merged_video(
     return ResponseSchema(data=result)
 
 
+@router.delete("/merge/{chapter_id}", summary="永久删除合并视频", response_model=ResponseSchema)
+async def delete_merged_video(
+    chapter_id: int,
+    _: AuthContext = Depends(require_chapter_access),
+    __: AuthContext = _EDITOR,
+):
+    from models.chapter import Chapter
+    from services.creative_deletion import delete_composition
+
+    chapter = await Chapter.get(id=chapter_id)
+    await delete_composition(chapter.id, chapter.novel_id)
+    return ResponseSchema()
+
+
 @router.get("/chapter/{chapter_id}", summary="获取章节下所有分镜的视频")
 async def get_chapter_videos(
     chapter_id: int,

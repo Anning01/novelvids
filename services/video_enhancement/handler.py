@@ -17,14 +17,16 @@ class PrepareExportHandler(BaseTaskHandler):
         async def prepare():
             if not export.source_sha256:
                 result = await export_media.compose(export)
-                export.source_media_ref = result['ref']
-                export.source_sha256 = result['sha256']
-                export.source_probe = result['probe']
-                export.media_ref = result['ref']
-                export.media_sha256 = result['sha256']
-                export.output_probe = result['probe']
-                await export.save(update_fields=['source_media_ref', 'source_sha256', 'source_probe',
-                    'media_ref', 'media_sha256', 'output_probe', 'updated_at'])
+                from tortoise.transactions import in_transaction
+                async with in_transaction() as db:
+                    changed = await ChapterExport.filter(id=export.id).using_db(db).update(
+                        source_media_ref=result['ref'], source_sha256=result['sha256'], source_probe=result['probe'],
+                        media_ref=result['ref'], media_sha256=result['sha256'], output_probe=result['probe'])
+                    if not changed:
+                        from services.deleted_media import enqueue_media
+                        await enqueue_media([result['ref']], export.team_id)
+                if not changed:
+                    raise ValueError(localized_message('导出记录不存在'))
             return {'export_id': export.id}
 
         return await execute_step(request_params['task_id'], 'prepare:chapter_export', prepare)
@@ -103,7 +105,8 @@ class EnhanceExportHandler(BaseTaskHandler):
             if reserved >= quota:
                 await AiTask.filter(id=request_params['task_id']).using_db(db).update(status=6, stage='waiting_capacity')
             else:
-                await ChapterExport.filter(id=export.id).using_db(db).update(submission_slot=True)
+                if not await ChapterExport.filter(id=export.id).using_db(db).update(submission_slot=True):
+                    raise ValueError(localized_message('章节不存在'))
                 capacity_available = True
         if not capacity_available:
             raise WaitingForMedia({'export_id':export.id})

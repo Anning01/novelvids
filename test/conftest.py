@@ -143,7 +143,9 @@ async def clear_db():
     from models.novel import Novel
     from models.chapter import Chapter
     from models.chapter_export import ChapterExport
+    from models.media_deletion import MediaDeletion
     await ChapterExport.all().delete()
+    await MediaDeletion.all().delete()
     from models.asset import Asset
     from models.asset_variant import AssetVariant
     from models.scene import Scene

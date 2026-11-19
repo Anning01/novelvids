@@ -32,7 +32,7 @@ import ShortDramaWorkspaceShell from '@/components/ShortDramaWorkspaceShell.vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import type { AgentChange } from '@/features/creation-agent/types'
 import { api, sleep, statusLabel } from '@/api'
-import { appConfirm } from '@/shared/confirmDialog'
+import { confirmAssetDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { readShortDramaSettings } from '@/shared/shortDramaProject'
@@ -496,13 +496,8 @@ function truncateText(value: string | undefined, maxLength: number) {
 }
 
 async function removeAsset(asset: Asset) {
-  if (!await appConfirm({
-    title: tr('删除{p0}「{p1}」？', { p0: activeTabConfig.value.label, p1: asset.canonical_name }),
-    message: tr('该资产及其参考图片将被删除，且无法恢复。'),
-    confirmLabel: tr('删除{p0}', { p0: activeTabConfig.value.label }),
-    tone: 'danger',
-  })) return
   try {
+    if (!await confirmAssetDeletion([{ id: asset.id, name: asset.canonical_name }])) return
     await api.deleteAsset(asset.id)
     assets.value = assets.value.filter(item => item.id !== asset.id)
     notice.success(tr('资产已删除'))

@@ -86,13 +86,14 @@ async def ensure_text_task_schema() -> None:
 
 
 async def ensure_video_editor_schema() -> None:
+    from models.media_deletion import MediaDeletion
     from models.video_edit import ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset
     from models.finished_episode import FinishedEpisodePublication
     from models.portfolio import PortfolioEpisode, PortfolioWork
     from models.resource_library import ProjectResource
     connection = Tortoise.get_connection('default')
     generator = connection.schema_generator(connection)
-    for model in (ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode):
+    for model in (ChapterCanvasSnapshot, ChapterEditDraft, EditorAsset, ProjectResource, FinishedEpisodePublication, PortfolioWork, PortfolioEpisode, MediaDeletion):
         definition = generator._get_table_sql(model, safe=True)
         await connection.execute_script(definition['table_creation_string'])
 

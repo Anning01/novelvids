@@ -386,6 +386,9 @@ export const api = {
   createAsset: (data: Partial<Asset> & { novel_id: number; chapter_id?: number; asset_type: number; canonical_name: string }) => request<SingleResponse<Asset>>('/asset', { method: 'POST', body: JSON.stringify(data) }),
   updateAsset: (id: number, data: Partial<Asset>, expectedPrompt?: string | null) => request<SingleResponse<Asset>>(`/asset/${id}`, { method: 'PATCH', body: JSON.stringify({ ...data, expected_prompt: expectedPrompt }) }),
   deleteAsset: (id: number) => request<SingleResponse<null>>(`/asset/${id}`, { method: 'DELETE' }),
+  assetDeletionImpact: (id: number, variantId?: number) => request<SingleResponse<{ chapter_number: number; sequence: number }[]>>(
+    `/asset/${id}/deletion-impact${variantId === undefined ? '' : `?variant_id=${variantId}`}`,
+  ),
   mergeAssets: (sourceAssetId: number, targetAssetId: number) => request<SingleResponse<AssetMergeResult>>('/asset/merge', { method: 'POST', body: JSON.stringify({ source_asset_id: sourceAssetId, target_asset_id: targetAssetId }) }),
   reuseAsset: (assetId: number, chapterId: number) => request<SingleResponse<Asset>>(`/asset/${assetId}/chapters/${chapterId}`, { method: 'POST' }),
   assetVariants: (assetId: number) => request<SingleResponse<AssetVariant[]>>(`/asset/${assetId}/variants`),
@@ -457,6 +460,7 @@ export const api = {
   },
   queryVideo: (id: number, signal?: AbortSignal) => request<SingleResponse<Video>>(`/video/query/${id}`, signal ? { signal } : undefined),
   deleteVideo: (id: number) => request<SingleResponse<null>>(`/video/${id}`, { method: 'DELETE' }),
+  deleteComposedVideo: (chapterId: number) => request<SingleResponse<null>>(`/video/merge/${chapterId}`, { method: 'DELETE' }),
   mergeChapterVideos: (chapterId: number, strict = false) => request<SingleResponse<VideoMergeResult>>('/video/merge', { method: 'POST', body: JSON.stringify({ chapter_id: chapterId, ...(strict ? { strict: true } : {}) }) }),
   audioReferences: (page = 1, search = '', filters: Record<string, string | number | undefined> = {}, novelId?: number) => request<PaginationResponse<AudioReference>>(`/media-library/audio-references${qs({ page, page_size: 24, search, sort: '-id', novel_id: novelId, ...filters })}`),
   trimAudioReference: (id: number, start: number, end: number, novelId?: number) => request<SingleResponse<AudioReference>>(`/media-library/audio-references/${id}/trim`, {

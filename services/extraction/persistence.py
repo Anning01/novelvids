@@ -171,13 +171,36 @@ class AssetUpsertService:
                 Q(asset_type=kind.value, canonical_name__in={item.name for item in getattr(result, key)})
                 for kind, key in RESULT_ASSET_MAP
             ), join_type=Q.OR)
-            removed_names = await Asset.with_deleted().filter(
+            removed_assets = await Asset.with_deleted().filter(
                 names_by_type, novel_id=novel_id, deleted_at__not_isnull=True,
-            ).using_db(connection).order_by("id").values_list("canonical_name", flat=True)
+            ).using_db(connection).order_by("id").values_list("asset_type", "canonical_name")
+
+            item_type = AssetTypeEnum.item.value
+            removed_props = {name for kind, name in removed_assets if kind == item_type}
+            if removed_props:
+                people = await Asset.filter(
+                    novel_id=novel_id, asset_type=AssetTypeEnum.person.value,
+                ).using_db(connection).values_list("canonical_name", "aliases")
+                # A removed prop with a uniquely matching character is a likely duplicate.
+                retained_items = [
+                    item for item in result.items
+                    if item.name not in removed_props or sum(
+                        item.name == name or item.name in (aliases or []) or name in item.aliases
+                        for name, aliases in people
+                    ) != 1
+                ]
+                result = result.model_copy(update={"items": retained_items})
+                retained_names = {item.name for item in retained_items}
+                removed_assets = [
+                    (kind, name) for kind, name in removed_assets
+                    if kind != item_type or name in retained_names
+                ]
+
+            removed_names = dict.fromkeys(name for _, name in removed_assets)
             if removed_names:
                 raise ValueError(localized_message(
                     "本章提取到已移除的同名设定（{p0}）。请恢复这些设定后重新提取。",
-                    p0="、".join(dict.fromkeys(removed_names)),
+                    p0="、".join(removed_names),
                 ))
             for asset_type, result_key in RESULT_ASSET_MAP:
                 summary[result_key] = await self._save_assets(

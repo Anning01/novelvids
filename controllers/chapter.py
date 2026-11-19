@@ -90,13 +90,10 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
                 raise HTTPException(409, localized_message('本集已关联资产或形态'))
 
     async def remove(self, chapter_id: int) -> None:
+        from services.creative_deletion import delete_chapter
+
         chapter = await self.get(chapter_id)
-        async with project_write(chapter.novel_id) as db:
-            chapter = await self.get(chapter_id)
-            await self._ensure_unreferenced(chapter)
-            await chapter.delete(using_db=db)
-            count = await Chapter.filter(novel_id=chapter.novel_id).using_db(db).count()
-            await Novel.filter(id=chapter.novel_id).using_db(db).update(episodes_managed=True, total_chapters=count)
+        await delete_chapter(chapter.id, chapter.novel_id)
 
     async def extract(
         self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None,

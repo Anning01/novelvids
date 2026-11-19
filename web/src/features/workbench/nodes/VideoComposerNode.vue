@@ -2,10 +2,14 @@
 import { tr } from '@/i18n'
 
 import type { NodeProps } from '@vue-flow/core'
-import { ChevronDown, ChevronUp, Download, Film } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Download, Film, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { mediaUrl } from '@/api'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
+import AppButton from '@/components/AppButton.vue'
+import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
+import { notice } from '@/shared/notice'
+import { useAuthStore } from '@/features/auth/authStore'
 import type { VideoMergeResult } from '@/types'
 import {
   chapterComposerDisabledReason,
@@ -23,6 +27,9 @@ import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 
 const props = defineProps<NodeProps>()
 const store = useWorkbenchStore()
+const auth = useAuthStore()
+const canDelete = computed(() => !auth.enabled || ['admin', 'creator', 'super'].includes(auth.role || ''))
+const removing = ref(false)
 const storedConfig = computed(() => normalizeComposerConfig(
   (store.nodeByKey(props.id)?.data.config || props.data.config) as Partial<ComposerConfig>,
 ))
@@ -30,7 +37,7 @@ const draft = ref(storedConfig.value)
 watch(storedConfig, value => { draft.value = value }, { deep: true })
 const inputs = computed(() => orderedComposerInputs(props.id, store.nodes, store.edges))
 const busy = computed(() => store.busyComposerKeys.includes(props.id))
-const result = computed(() => (store.nodeByKey(props.id)?.data.result || props.data.result) as VideoMergeResult | undefined)
+const result = computed(() => (store.nodeByKey(props.id)?.data ?? props.data).result as VideoMergeResult | null | undefined)
 const resolutionOptions = COMPOSER_RESOLUTIONS.map(value => ({ value, label: value }))
 const aspectRatioOptions = COMPOSER_ASPECT_RATIOS.map(value => ({ value, label: value }))
 const disabledReason = computed(() => {
@@ -47,6 +54,20 @@ function saveConfig() {
 async function compose() {
   if (!canCompose.value) return
   await store.composeChapter(props.id)
+}
+
+async function removeResult() {
+  if (removing.value || busy.value) return
+  removing.value = true
+  try {
+    if (!await confirmVideoDeletion(draft.value.name || tr('章节成片'))) return
+    await store.deleteComposedVideo()
+    notice.success(tr('视频已删除'))
+  } catch (error) {
+    notice.error(error instanceof Error ? error.message : tr('视频删除失败'))
+  } finally {
+    removing.value = false
+  }
 }
 
 registerWorkbenchNodeRun(props.id, { enabled: canCompose, run: compose })
@@ -94,6 +115,9 @@ registerWorkbenchNodeRun(props.id, { enabled: canCompose, run: compose })
       <section v-if="result?.merged_url" class="workbench-composer-node__result">
         <DeferredVideoPlayer :src="mediaUrl(result.merged_url)" :poster="mediaUrl(result.poster_url || '')" :title="tr('成片预览')" />
         <a :href="mediaUrl(result.merged_url)" :download="tr('{p0}.mp4', { p0: draft.name || '章节成片' })"><Download :size="14" aria-hidden="true" />{{ tr('下载成片') }}</a>
+        <AppButton v-if="canDelete" variant="ghost" size="sm" :loading="removing" :disabled="busy || removing" @click="removeResult">
+          <Trash2 :size="14" aria-hidden="true" />{{ tr('永久删除成片') }}
+        </AppButton>
       </section>
       <span class="workbench-composer-node__output"><Film :size="13" aria-hidden="true" />{{ tr('结果输出端口') }}</span>
     </div>
