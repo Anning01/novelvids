@@ -274,6 +274,27 @@ async def test_source_conflict_keeps_saved_results(project, monkeypatch, operati
 
 
 @pytest.mark.asyncio
+async def test_asset_extraction_saves_when_only_episode_pacing_changes(project, monkeypatch):
+    novel, chapter, _ = project
+    requests = mock_model(monkeypatch, asset_payload())
+    generate = SkillExecution.generate_strict
+
+    async def change_pacing(self, facts):
+        result = await generate(self, facts)
+        await Chapter.filter(id=chapter.id).update(episode_pacing={'preset': 'compact', 'max_seconds': None})
+        return result
+
+    monkeypatch.setattr(SkillExecution, 'generate_strict', change_pacing)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+
+    assert task.status == 3, task.error_message
+    assert len(requests) == 1
+    assert await Asset.filter(novel=novel, canonical_name='阿岚').exists()
+
+
+@pytest.mark.asyncio
 async def test_storyboard_includes_blocking_and_segments_without_extra_model_calls(project, monkeypatch):
     novel, chapter, _ = project
     await Asset.create(novel=novel, canonical_name='阿岚', asset_type=1, source_chapters=[1])

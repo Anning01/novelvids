@@ -49,10 +49,12 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
         from prompts.skill_pack import read_skill
         from services.creation_agent.plan_sources import fingerprint
         chapter = await Chapter.get(id=params['chapter_id'], novel_id=params['novel_id']).prefetch_related('novel')
-        params = {**params, 'chapter_input_version': fingerprint([chapter.name, chapter.production_text, chapter.episode_pacing])}
         if task == 'assets':
+            params = {**params, 'chapter_asset_input_version': fingerprint([chapter.name, chapter.production_text])}
             rendering = {'asset_specifications': json.loads(read_skill('asset_contract'))[language],
                          'aspect_ratio': chapter.novel.aspect_ratio or '16:9'}
+        else:
+            params = {**params, 'chapter_input_version': fingerprint([chapter.name, chapter.production_text, chapter.episode_pacing])}
     contract = output_contract(task, asset_specifications=rendering.get('asset_specifications'),
         duration_range=params.get('shot_duration_range', (1, 30)), blocking_maps=params.get('generate_blocking_maps', False))
     if rendering:
@@ -69,12 +71,17 @@ async def prepare_text_workflow(params: dict, task: str, skill_id: int | None = 
 async def verify_chapter_input(params):
     from services.story_memory.context import verify_bindings
     await verify_bindings(params)
-    if 'chapter_input_version' not in params:
+    asset_version = params.get('chapter_asset_input_version')
+    version = asset_version or params.get('chapter_input_version')
+    if version is None:
         return
     from models.chapter import Chapter
     from services.creation_agent.plan_sources import fingerprint
     chapter = await Chapter.get(id=params['chapter_id'], novel_id=params['novel_id'])
-    if params['chapter_input_version'] != fingerprint([chapter.name, chapter.production_text, chapter.episode_pacing]):
+    source = [chapter.name, chapter.production_text]
+    if asset_version is None:
+        source.append(chapter.episode_pacing)
+    if version != fingerprint(source):
         raise ValueError(localized_message('本集原文或剧本已修改，请刷新后查看'))
 
 

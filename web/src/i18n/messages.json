@@ -3360,6 +3360,8 @@
     "正在分析本章人物、场景和道具，并与项目资产增量合并。": "Analyzing this chapter's characters, locations and props, then merging them into project assets.",
     "任务已取消，可以重新提取本章资产。": "Task canceled. You can extract this chapter's assets again.",
     "本章资产提取失败": "Chapter asset extraction failed",
+    "关闭资产提取提示": "Dismiss asset extraction notice",
+    "重新提取本章资产": "Retry chapter asset extraction",
     "模型余额不足，请充值或切换可用模型后重试": "Insufficient model balance. Top up or switch to an available model and retry.",
     "当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。": "The setting being edited was removed. Your draft is retained; undo the removal before saving.",
     "助手已保存设定调整。当前编辑草稿已保留，请核对后再保存。": "The assistant saved setting changes. Your draft is retained; review it before saving.",
