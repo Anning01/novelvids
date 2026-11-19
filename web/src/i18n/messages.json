@@ -1790,6 +1790,7 @@
     "切换到视频版本 {p0}": "Switch to video version {p0}",
     "生成后会在这里保留视频版本": "Generated video versions will appear here",
     "视频版本": "Video versions",
+    "视频版本 {p0}": "Video version {p0}",
     "关闭失败原因": "Close failure details",
     "重新生成": "Regenerate",
     "{p0}秒 · {p1} · {p2}": "{p0}s · {p1} · {p2}",
@@ -3361,6 +3362,7 @@
     "任务已取消，可以重新提取本章资产。": "Task canceled. You can extract this chapter's assets again.",
     "本章资产提取失败": "Chapter asset extraction failed",
     "关闭资产提取提示": "Dismiss asset extraction notice",
+    "取消修改": "Cancel edits",
     "重新提取本章资产": "Retry chapter asset extraction",
     "模型余额不足，请充值或切换可用模型后重试": "Insufficient model balance. Top up or switch to an available model and retry.",
     "当前编辑的设定已移除，草稿保留在编辑框中；可先撤销恢复再保存。": "The setting being edited was removed. Your draft is retained; undo the removal before saving.",
@@ -4329,6 +4331,7 @@
     "图片生成": "Image generation",
     "分镜生成": "Storyboard generation",
     "视频重制": "Video remake",
+    "章节成片": "Finished episode",
     "章节合成": "Episode composition"
   },
   "OrdersPage": {

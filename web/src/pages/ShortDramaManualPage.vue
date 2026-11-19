@@ -178,6 +178,7 @@ const extractionBusy = computed(() => submittingExtraction.value || extractionTa
 const extractionTaskFailed = computed(() => extractionTask.value?.status === TaskStatusEnum.FAILED
   || extractionTask.value?.status === TaskStatusEnum.CANCELLED)
 const extractionStatusVisible = computed(() => {
+  if (extractionTask.value?.status === TaskStatusEnum.COMPLETED) return false
   if (extractionBusy.value || extractionSubmissionError.value) return true
   const task = extractionTask.value
   return Boolean(task && extractionTaskFailed.value && task.id !== dismissedExtractionId.value
