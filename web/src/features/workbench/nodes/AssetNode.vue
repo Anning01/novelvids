@@ -157,6 +157,7 @@ watch(hasMultipleImages, multiple => {
   if (!multiple) imageGalleryExpanded.value = false
 })
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
+const galleryImages = computed(() => primaryImage.value ? [primaryImage.value, ...stackedAssetImages.value] : [])
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
 const assetImageStageStyle = computed(() => {
   const stackOffset = assetImageStackDepth.value * 4
@@ -754,13 +755,14 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           </button>
           <section
             v-if="hasMultipleImages && imageGalleryExpanded"
-            class="workbench-asset-gallery nodrag nowheel"
+            class="workbench-asset-gallery nodrag"
+            :style="{ '--gallery-columns': Math.ceil(Math.sqrt(galleryImages.length)) }"
             role="region"
             :aria-label="tr('{p0}图片列表', { p0: assetName })"
             @pointerdown.stop
           >
             <article
-              v-for="image in assetImages"
+              v-for="image in galleryImages"
               :key="image.key"
               class="workbench-asset-gallery__item"
               :class="{ 'is-primary': imageIsPrimary(image) }"

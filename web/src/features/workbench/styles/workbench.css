@@ -2482,23 +2482,21 @@
   border-color: #8f7ccb;
   background: rgb(32 27 39 / 94%);
 }
-.workbench-asset-image-stage.is-gallery-open {
-  border-radius: 15px;
-  background: var(--app-surface);
+.viral-workbench-canvas .vue-flow__node-asset:has(.workbench-asset-gallery) {
+  /* Keep the expanded images clickable over adjacent canvas nodes. */
+  z-index: 2147480000 !important;
 }
 .workbench-asset-image-stage.is-gallery-open > :is(.workbench-uploaded-image-preview, .workbench-asset-image-stack-layer) {
   visibility: hidden;
 }
 .workbench-asset-gallery {
   position: absolute;
-  inset: 52px 0 0;
+  inset: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr));
-  grid-auto-rows: minmax(96px, 1fr);
+  /* Each track uses the original preview as its size and extends onto the canvas. */
+  grid-template-columns: repeat(var(--gallery-columns), 100%);
+  grid-auto-rows: 100%;
   gap: 8px;
-  padding: 0 8px 8px;
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 .workbench-asset-gallery__item {
   position: relative;

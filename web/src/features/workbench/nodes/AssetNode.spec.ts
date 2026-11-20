@@ -69,7 +69,7 @@ it.each(['light', 'dark'])('loads originals on the canvas and repairs thumbnail 
   expect(wrapper.get('.workbench-node-frame__media-size').text()).toBe('2048 × 1152')
   await wrapper.get('[aria-label="展开原图角色的 2 张图片"]').trigger('click')
   expect(wrapper.findAll('.workbench-asset-gallery__item img').map(item => item.attributes('src')))
-    .toEqual(['/media/side.png', '/media/original.png'])
+    .toEqual(['/media/original.png', '/media/side.png'])
   await wrapper.get('[aria-label="收起原图角色的 2 张图片"]').trigger('click')
   await wrapper.setProps({ data: { asset: { ...asset, main_image: '/media/replacement.png',
     metadata: { workbenchImage: {} } }, generate_capability: false } })
@@ -350,6 +350,15 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(true)
 
 
+  for (const [count, columns] of [[2, 2], [3, 2], [4, 2], [5, 3]] as const) {
+    const urls = Array.from({ length: count - 2 }, (_, i) => `/media/extra-${i}.png`)
+    await wrapper.setProps({ data: { ...nodeData, asset: { ...nodeData.asset, metadata: { image_gallery: urls } } } })
+    const gallery = wrapper.get<HTMLElement>('.workbench-asset-gallery')
+    expect(gallery.element.style.getPropertyValue('--gallery-columns')).toBe(String(columns))
+    expect(gallery.findAll('article img').map(image => image.attributes('src')))
+      .toEqual(['/media/front.png', '/media/side.png', ...urls])
+  }
+  await wrapper.setProps({ data: nodeData })
   await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('pointerdown')
   await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('click')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(false)
