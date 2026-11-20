@@ -154,6 +154,29 @@ async def test_unified_uploads_local_images_through_existing_object_storage(monk
     assert storage.put_bytes.call_args.args[1:] == (b"image", "image/png")
 
 
+@pytest.mark.parametrize("status", [200, 422])
+async def test_studio_keeps_concrete_cat_api_video_error(monkeypatch, status):
+    config = await config_for("minimax_h3")
+    config.api_protocol = "novelvids"
+    client_type = httpx.AsyncClient
+    error = {"code": "ReferenceMediaTotalSizeExceeded", "message": "Reference media exceeds 50 MB"}
+    body = {"id": "cat-task-123", "status": "failed", "error": error}
+    transport = httpx.MockTransport(lambda _: httpx.Response(status, json=body))
+    monkeypatch.setattr("services.video.unified.httpx.AsyncClient",
+                        lambda **kw: client_type(**{**kw, "transport": transport}))
+    generator = get_generator(config)
+    if status == 422:
+        with pytest.raises(VideoProviderError) as rejected:
+            await generator.submit(prompt="A forest", duration=6)
+        detail = str(rejected.value)
+    else:
+        failed = await generator.query("cat-task-123")
+        assert failed["status"] == TaskStatusEnum.failed
+        detail = failed["metadata"]["error"]
+    assert "参考素材总大小不能超过 50 MB" in detail
+    assert "ReferenceMediaTotalSizeExceeded" in detail and "cat-task-123" in detail
+
+
 async def test_unified_rejects_base64_without_object_storage(monkeypatch):
     from services.video.public_media import PublicMediaResolver
 

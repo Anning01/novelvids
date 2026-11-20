@@ -4,6 +4,7 @@ import { tr } from '@/i18n'
 import { computed, ref } from 'vue'
 import { LoaderCircle, RotateCcw, Sparkles, Trash2, TriangleAlert, Video as VideoIcon, X } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
+import VideoThumbnail from '@/components/VideoThumbnail.vue'
 import { api } from '@/api'
 import { confirmVideoDeletion } from '@/shared/confirmCreativeDeletion'
 import { notice } from '@/shared/notice'
@@ -124,13 +125,11 @@ async function remove(record: Video, position: number) {
         @click="selectVersion(record)"
       >
         <span class="video-history__thumb">
-          <img
-            v-if="videoPosterUrl(record, 'thumbnail')"
-            :src="videoPosterUrl(record, 'thumbnail')"
-            alt=""
-            loading="lazy"
-            decoding="async"
-          >
+          <VideoThumbnail
+            v-if="isSelectable(record)"
+            :src="record.url || ''"
+            :poster="videoPosterUrl(record, 'thumbnail') || videoPosterUrl(record)"
+          />
           <LoaderCircle v-else-if="isRunning(record)" :size="18" class="is-spinning" />
           <TriangleAlert v-else-if="isFailed(record)" :size="18" />
           <VideoIcon v-else :size="18" />

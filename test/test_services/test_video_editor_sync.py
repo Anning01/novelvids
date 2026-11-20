@@ -93,3 +93,22 @@ async def test_failed_generation_remains_a_placeholder():
     loaded = await read_draft(chapter.id, AuthContext())
     assert not loaded['needs_save']
     assert loaded['document']['clips'][3]['source'] == {'kind':'missing', 'id':scenes[3].id}
+
+
+@pytest.mark.asyncio
+async def test_editor_uses_current_video_file_version_and_skips_reference_images(tmp_path, monkeypatch):
+    from config import settings
+
+    chapter, _, videos, _ = await fixture()
+    monkeypatch.setattr(settings, 'MEDIA_PATH', str(tmp_path))
+    file = tmp_path / 'videos' / '1.mp4'
+    file.parent.mkdir()
+    file.write_bytes(b'current video')
+    video = videos[0]
+    video.url = '/media/videos/1.mp4'
+    video.metadata = {'duration_seconds': 3, 'first_frame_url': '/media/previous-project.png'}
+    await video.save(update_fields=['url', 'metadata'])
+    editor = await read_draft(chapter.id, AuthContext())
+    item = next(row for row in editor['media'] if row['key'] == f'video:{video.id}')
+    assert item['url'].startswith('/media/videos/1.mp4?media_v=')
+    assert item['poster'] is None

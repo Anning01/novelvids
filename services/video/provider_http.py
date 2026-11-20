@@ -10,6 +10,9 @@ import re
 
 import httpx
 
+REFERENCE_MEDIA_SIZE_ERROR = "ReferenceMediaTotalSizeExceeded"
+REFERENCE_MEDIA_SIZE_MESSAGE = "参考素材总大小不能超过 50 MB"
+
 
 def safe_endpoint(value: str) -> str:
     parsed = urlsplit(value)
@@ -46,9 +49,45 @@ def provider_error(data: Any) -> str | None:
     return None
 
 
+def structured_video_error(payload: Any, *, secrets: tuple[str, ...] = ()) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    error = payload.get("error")
+    fields = error if isinstance(error, dict) else {}
+    sources = (fields, payload)
+    message = next((value for source in sources
+        for key in ("error_message", "error_msg", "fail_reason", "message", "msg", "detail", "error")
+        if isinstance(value := source.get(key), str) and value.strip()), "")
+    code = fields.get("code") or payload.get("error_code") or payload.get("code") or fields.get("type")
+    if code is not None:
+        code = str(code)
+    if (not code or code.casefold() == "success" or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", code)
+            or re.match(r"(?:sk|ark|secret)[-_]", code, re.I)
+            or any(secret and secret in code for secret in secrets)):
+        code = None
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[已隐去]")
+    message = message.strip().split("\n", 1)[0]
+    message = re.sub(r"https?://[^\s<>\"']+|data:[^\s<>\"']+", "[地址已隐去]", message, flags=re.I)
+    message = re.sub(r"\b(?:Bearer\s+|(?:sk|ark|secret)[-_])[\w.-]+", "[已隐去]", message, flags=re.I)
+    message = re.split(r"\b(?:prompt|authorization|token|api[_ -]?key)\s*[:=]", message, maxsplit=1, flags=re.I)[0]
+    message = "".join(char for char in message if char.isprintable()).strip()[:500]
+    if code == REFERENCE_MEDIA_SIZE_ERROR or REFERENCE_MEDIA_SIZE_ERROR in message or (
+        re.search(r"\b50\s*(?:mi?b|m\b|兆)", message, re.I)
+        and re.search(r"exceed|limit|maximum|too large|超过|上限|不得大于|过大", message, re.I)
+        and re.search(r"references?|inputs?|total (?:file |media )?size|参考|素材|总大小", message, re.I)
+    ):
+        return {"code": REFERENCE_MEDIA_SIZE_ERROR, "message": localized_message(REFERENCE_MEDIA_SIZE_MESSAGE)}
+    detail = {"code": code} if code else {}
+    if message and message.casefold() not in {"success", "ok"} and not message.startswith(("{", "[{", "Traceback", "<html")):
+        detail["message"] = message
+    return detail
+
+
 def public_provider_error(
     data: Any, *, status_code: int | None = None, transport_request_id: str | None = None,
-    secrets: tuple[str, ...] = (),
+    secrets: tuple[str, ...] = (), trusted_details: bool = False,
 ) -> str:
     """Keep recognized failure facts, never arbitrary provider text or media URLs."""
     payload = data if isinstance(data, dict) else {}
@@ -76,7 +115,9 @@ def public_provider_error(
         code = original_code[0] if original_code else "ResourceDownloadFailed"
         message = "resource download failed: " + " ".join(params)
     else:
-        message = localized_message('视频生成失败，请检查生成内容或联系管理员')
+        trusted = structured_video_error(payload, secrets=secrets) if trusted_details else {}
+        code = trusted.get("code")
+        message = trusted.get("message") or localized_message('视频生成失败，请检查生成内容或联系管理员')
 
     body_request_id = re.search(r"(?:Request id:\s*|request_id[=:]\s*[\"']?)([A-Za-z0-9_-]{1,120})(?=$|[\s.,\"'）})])", raw_message, re.I)
     candidates = (fields.get("request_id"), metadata.get("request_id"), payload.get("request_id"),
@@ -88,9 +129,9 @@ def public_provider_error(
     original_status = re.search(r"\bHTTP\s*([45]\d{2})\b", raw_message, re.I)
     status = int(original_status[1]) if original_status else status_code
     status = status if isinstance(status, int) and 400 <= status < 600 else None
-    if trace and status is None:
+    if trace and status is None and trace not in message:
         message += f" Request id: {trace}"
-    if code:
+    if code and f"（{code}）" not in message:
         message += f"（{code}）"
     if status:
         message += f"（HTTP {status}" + (f"，request_id={trace}" if trace else "") + "）"

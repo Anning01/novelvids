@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from 'vitest'
 import DeferredVideoPlayer from './DeferredVideoPlayer.vue'
 
 describe('DeferredVideoPlayer', () => {
+  it('falls back to a still frame of the current video when its poster fails', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const wrapper = mount(DeferredVideoPlayer, {
+      props: { src: '/media/videos/1.mp4?media_v=current', poster: '/missing.webp', title: '当前视频' },
+    })
+    vi.unstubAllGlobals()
+    await wrapper.get('img').trigger('error')
+    expect(wrapper.get('.video-thumbnail video').attributes('src')).toBe('/media/videos/1.mp4?media_v=current')
+    expect(wrapper.get('button').attributes('aria-label')).toContain('当前视频')
+    wrapper.unmount()
+  })
+
   it('pauses an activated preview when its chapter or phase becomes hidden without losing the player', async () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)

@@ -7,6 +7,7 @@ from models.video import Video
 from models.video_edit import EditorAsset
 from schemas.video_edit import EditDocument, EditSource
 from services.oss import normalize_media_url, resolve_media_url
+from services.video.poster import video_media_url
 from services.video_enhancement.media import file_digest
 from services.video.reference_media import _probe, _video_stream, _fps
 from utils.messages import localized_message as msg
@@ -52,8 +53,8 @@ class EditSources:
         return {'key': key, 'source': source.model_dump(), 'kind': 'video',
                 'name': msg('分镜 {p0}', p0=video.scene.sequence),
                 'scene_id': video.scene_id,
-                'ref': normalize_media_url(video.url) or video.url, 'url': resolve_media_url(video.url),
-                'poster': resolve_media_url(data.get('poster_thumbnail_url') or data.get('poster_url') or data.get('first_frame_url')),
+                'ref': normalize_media_url(video.url) or video.url, 'url': video_media_url(video.url),
+                'poster': video_media_url(data.get('poster_thumbnail_url') or data.get('poster_url')),
                 'duration': float(data.get('duration_seconds') or data.get('duration') or video.scene.duration or 4),
                 'width': data.get('width', 0), 'height': data.get('height', 0), 'fps': data.get('fps', 24)}
 
