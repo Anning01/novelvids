@@ -108,7 +108,7 @@ function handleTeamSwitch(teamId: string) {
   <div class="app-shell" :class="{ 'is-workflow-surface': isWorkflowSurface }">
     <aside v-if="!isFullscreen" class="app-sidebar">
       <RouterLink to="/" class="app-brand" :aria-label="tr('猫影首页')">
-        <img src="/logo.png" alt="" />
+        <img src="/studio-logo.webp" alt="" />
         <span>
           <strong>{{ tr('猫影') }}</strong>
           <small>{{ platform ? tr('开放平台') : 'NOVEL STUDIO' }}</small>

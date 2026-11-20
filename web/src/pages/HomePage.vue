@@ -25,6 +25,7 @@ const outputFormat = ref<'png' | 'gif'>('png')
 const frameCount = ref('9'), frameInterval = ref<number | string>(200)
 const videoModels = ref<VideoGenerationModel[]>([]), imageModels = ref<ImageGenerationModel[]>([])
 const loading = ref(true), entering = ref(false), uploading = ref(false), error = ref(''), galleryError = ref('')
+const recentLoading = ref(true), recentFailed = ref(false), galleryLoading = ref(true), modelsFailed = ref(false)
 const recent = ref<ClipSummary[]>([]), works = ref<ShowcaseWork[]>([])
 const referencePrompt = ref<InstanceType<typeof ClipReferencePrompt> | null>(null)
 const references = ref<VideoReferenceMedia[]>([]), uploadInput = ref<HTMLInputElement | null>(null)
@@ -115,28 +116,61 @@ watch([model, ratios, resolutions], () => {
   if (!resolutions.value.includes(resolution.value)) resolution.value = resolutions.value[0] ?? ''
   if (!durations.value.includes(duration.value)) duration.value = durations.value[0] ?? '5'
 })
-async function load() {
-  const current = ++epoch
-  entering.value = false; pending = null
-  loading.value = true; error.value = ''; galleryError.value = ''; recent.value = []; works.value = []
-  videoModels.value = []; imageModels.value = []; references.value = []
-  const results = await Promise.allSettled([
-    api.videoGenerationModels(),
-    api.imageGenerationModels(),
-    clipApi.recent(),
-    api.experienceShowcase(),
-  ])
+async function loadModels() {
+  const current = epoch
+  loading.value = true
+  modelsFailed.value = false
+  const [videos, images] = await Promise.allSettled([api.videoGenerationModels(), api.imageGenerationModels()])
   if (current !== epoch) return
-  const [videos, images, sessions, showcase] = results
   if (videos.status === 'fulfilled') videoModels.value = videos.value.data
   if (images.status === 'fulfilled') imageModels.value = images.value.data
-  if (sessions.status === 'fulfilled') recent.value = sessions.value.data
-  if (showcase.status === 'fulfilled') works.value = showcase.value.data
-  else galleryError.value = '作品暂时无法加载'
-  if (videos.status === 'rejected' || images.status === 'rejected' || sessions.status === 'rejected') error.value = '部分创作配置未能加载，请重试。'
+  modelsFailed.value = videos.status === 'rejected' || images.status === 'rejected'
   loading.value = false
 }
-watch(() => auth.activeTeamId, load, { immediate: true })
+
+async function loadRecent() {
+  const current = epoch
+  recentLoading.value = true
+  recentFailed.value = false
+  try {
+    const { data } = await clipApi.recent()
+    if (current === epoch) recent.value = data
+  } catch {
+    if (current === epoch) recentFailed.value = true
+  } finally {
+    if (current === epoch) recentLoading.value = false
+  }
+}
+
+async function loadShowcase() {
+  const current = epoch
+  galleryLoading.value = true
+  galleryError.value = ''
+  try {
+    const { data } = await api.experienceShowcase()
+    if (current === epoch) works.value = data
+  } catch {
+    if (current === epoch) galleryError.value = '作品暂时无法加载'
+  } finally {
+    if (current === epoch) galleryLoading.value = false
+  }
+}
+
+function loadWorkspace() {
+  epoch++
+  entering.value = false
+  pending = null
+  error.value = ''
+  recent.value = []
+  works.value = []
+  videoModels.value = []
+  imageModels.value = []
+  references.value = []
+  void loadModels()
+  void loadRecent()
+  void loadShowcase()
+}
+watch(() => auth.activeTeamId, loadWorkspace, { immediate: true })
 async function upload(event: Event) {
   const input = event.target as HTMLInputElement, files = Array.from(input.files || [])
   input.value = ''
@@ -274,7 +308,8 @@ async function create() {
         </section>
         <p v-if="loading" class="home-status" role="status">{{ tr('正在读取可用模型…') }}</p>
         <p v-else-if="!models.length" class="home-status" role="status">{{ tr('暂未配置可用模型，请联系管理员。') }}</p>
-        <div v-if="error" class="home-error" role="alert">{{ tr(error) }}<AppButton size="sm" @click="load">{{ tr('重新加载') }}</AppButton></div>
+        <div v-if="error" class="home-error" role="alert">{{ tr(error) }}<AppButton size="sm" @click="loadWorkspace">{{ tr('重新加载') }}</AppButton></div>
+        <div v-if="modelsFailed" class="home-error" role="alert">{{ tr('部分创作配置未能加载，请重试。') }}<AppButton size="sm" @click="loadModels">{{ tr('重新加载') }}</AppButton></div>
 
         <div class="shortcut-heading"><span>{{ tr('创作工具') }}</span></div>
         <nav class="home-shortcuts" :aria-label="tr('我的创作')">
@@ -284,9 +319,12 @@ async function create() {
           <RouterLink to="/resource-library"><span class="shortcut-icon is-teal"><Layers :size="23" /></span><div><strong>{{ tr('资源库') }}</strong><p>{{ tr('收藏角色、音色与参考素材') }}</p></div><ArrowUpRight :size="18" class="shortcut-arrow" /></RouterLink>
         </nav>
 
-        <section v-if="recent.length" class="recent-section"><header><h2>{{ tr('最近的片段') }}</h2><span>{{ tr('随时接着创作') }}</span></header><div class="recent-list"><RouterLink v-for="item in recent.slice(0, 3)" :key="item.project_id" :to="{name:'clip-studio',params:{projectId:item.project_id}}"><Film :size="18" /><span>{{ item.name }}</span><small>{{ item.aspect_ratio }}</small><ArrowUpRight :size="15" /></RouterLink></div></section>
+        <section v-if="recentLoading || recentFailed || recent.length" class="recent-section"><header><h2>{{ tr('最近的片段') }}</h2><span>{{ tr('随时接着创作') }}</span></header>
+          <p v-if="recentLoading" role="status">{{ tr('正在读取…') }}</p>
+          <div v-else-if="recentFailed" class="home-error" role="alert">{{ tr('加载失败，请重试') }}<AppButton size="sm" @click="loadRecent">{{ tr('重新加载') }}</AppButton></div>
+          <div v-else class="recent-list"><RouterLink v-for="item in recent.slice(0, 3)" :key="item.project_id" :to="{name:'clip-studio',params:{projectId:item.project_id}}"><Film :size="18" /><span>{{ item.name }}</span><small>{{ item.aspect_ratio }}</small><ArrowUpRight :size="15" /></RouterLink></div></section>
 
-        <ShowcaseGallery class="showcase-section" :works="works" :loading="loading" :error="tr(galleryError)" @retry="load" />
+        <ShowcaseGallery class="showcase-section" :works="works" :loading="galleryLoading" :error="tr(galleryError)" @retry="loadShowcase" />
       </div>
     </Transition>
   </main>
