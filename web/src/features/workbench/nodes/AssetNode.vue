@@ -109,7 +109,7 @@ const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
 const imageMetadata = computed(() => assetImageMediaMetadata(activeAsset.value))
-watch(() => [selectedVariantValue.value, activeAsset.value.main_image], () => {
+watch([() => asset.value.id, selectedVariantValue, () => activeAsset.value.main_image], () => {
   loadedImageWidth.value = 0
   loadedImageHeight.value = 0
   loadedGalleryImageSizes.value = {}
@@ -154,6 +154,9 @@ const primaryImage = computed(() => (
 ))
 const hasImagePreview = computed(() => Boolean(activeAsset.value.main_image))
 const hasMultipleImages = computed(() => assetImages.value.length > 1)
+watch(hasMultipleImages, multiple => {
+  if (!multiple) imageGalleryExpanded.value = false
+})
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
 const assetImageStageStyle = computed(() => {
@@ -471,12 +474,6 @@ function handlePromptFocusOut(event: FocusEvent) {
   void save()
 }
 
-function handleNodeFocusOut(event: FocusEvent) {
-  const content = event.currentTarget as HTMLElement | null
-  if (event.relatedTarget instanceof Node && content?.contains(event.relatedTarget)) return
-  void save()
-}
-
 function addMaterialReference(material: MaterialMentionOption, nextPrompt: string) {
   if (!referenceEdges.value.some(edge => edge.source === material.nodeKey)) return
   prompt.value = nextPrompt
@@ -731,7 +728,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           <small>{{ tr('选择当前生成形态，或新增人物变装、场景升级和道具形态。') }}</small>
         </section>
       </template>
-      <div class="workbench-node-content" @focusout="handleNodeFocusOut">
+      <div class="workbench-node-content">
         <div
           v-if="hasImagePreview && !imageGalleryExpanded"
           class="workbench-asset-image-stage"
@@ -761,6 +758,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             :aria-expanded="imageGalleryExpanded"
             :aria-label="tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
+            @keydown.space.stop
             @click.stop="imageGalleryExpanded = true"
           >
             <Maximize2 :size="17" aria-hidden="true" />
@@ -779,6 +777,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             class="workbench-asset-gallery__collapse"
             :aria-label="tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
+            @keydown.space.stop
             @click.stop="imageGalleryExpanded = false"
           >
             <Minimize2 :size="17" aria-hidden="true" />
