@@ -1,14 +1,38 @@
 """Exercise the shipped proxy with isolated containers and generated, non-user data."""
 import argparse
+import gzip
 import http.client
 import json
+import re
 import subprocess
 import time
 from uuid import uuid4
 
-RECEIVER = '''from http.server import BaseHTTPRequestHandler, HTTPServer
+RECEIVER = r'''from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Event
 import json
+release = Event()
 class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  if self.path.endswith('/events'):
+   release.clear()
+   self.send_response(200)
+   self.send_header('Content-Type', 'text/event-stream')
+   self.send_header('X-Accel-Buffering', 'no')
+   self.end_headers()
+   self.wfile.write(b'data: first\n\n')
+   self.wfile.flush()
+   if release.wait(10):
+    self.wfile.write(b'data: second\n\n')
+   return
+  if self.path.endswith('/release'):
+   release.set()
+  body = json.dumps({'items': list(range(1000))} if self.path.endswith('/large') else {}).encode()
+  self.send_response(200)
+  self.send_header('Content-Type', 'application/json')
+  self.send_header('Content-Length', str(len(body)))
+  self.end_headers()
+  self.wfile.write(body)
  def do_POST(self):
   remaining = size = int(self.headers.get('Content-Length', 0))
   while remaining:
@@ -22,8 +46,51 @@ class Handler(BaseHTTPRequestHandler):
   self.end_headers()
   self.wfile.write(body)
  def log_message(self, *args): pass
-HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
+ThreadingHTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
 '''
+
+
+def fetch(port, path, encoding):
+    connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+    try:
+        connection.request('GET', path, headers={'Accept-Encoding': encoding, 'Via': '1.1 test-edge'})
+        response = connection.getresponse()
+        assert response.status == 200, (path, response.status)
+        return response.headers, response.read()
+    finally:
+        connection.close()
+
+
+def check_compression(port):
+    _, html = fetch(port, '/index.html', 'identity')
+    script = re.search(r'<script[^>]+src="([^"]+)"', html.decode()).group(1)
+    styles = re.findall(r'<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"', html.decode())
+    stylesheet = max(styles, key=lambda path: len(fetch(port, path, 'identity')[1]))
+    for path in ('/index.html', script, stylesheet, '/api/test/large'):
+        headers, plain = fetch(port, path, 'identity')
+        assert headers.get('Content-Encoding') is None, path
+        headers, compressed = fetch(port, path, 'gzip')
+        assert headers.get('Content-Encoding') == 'gzip', path
+        assert 'accept-encoding' in headers.get('Vary', '').lower(), path
+        assert gzip.decompress(compressed) == plain and len(compressed) < len(plain), path
+        print(f'{path}: {len(plain)} -> {len(compressed)} bytes')
+
+    for path in ('/api/test/small', '/logo.png'):
+        headers, _ = fetch(port, path, 'gzip')
+        assert headers.get('Content-Encoding') is None, path
+
+    # The upstream sends the second event only after the client receives the first.
+    for path in ('/api/test/events', '/v1/test/events'):
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        try:
+            connection.request('GET', path, headers={'Accept-Encoding': 'gzip'})
+            response = connection.getresponse()
+            assert response.status == 200 and response.getheader('Content-Encoding') is None, path
+            assert response.readline() == b'data: first\n', path
+            fetch(port, '/api/test/release', 'identity')
+            assert response.read() == b'\ndata: second\n\n', path
+        finally:
+            connection.close()
 
 
 def check(docker, backend_image, frontend_image):
@@ -46,6 +113,7 @@ def check(docker, backend_image, frontend_image):
                 if attempt == 29:
                     raise
                 time.sleep(.2)
+        check_compression(port)
         # The second step submits the parsed manuscript again as a JSON body.
         payload = json.dumps({'content': 'x' * (20 * 1024 * 1024)}).encode()
         connection = http.client.HTTPConnection('127.0.0.1', port, timeout=120)
