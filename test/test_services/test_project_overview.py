@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -161,3 +162,49 @@ def test_only_finite_reported_video_durations_are_accepted(value):
     assert _reported_seconds({"metadata": {"provider_accounting": {
         "usage_reported": True, "reported_seconds": value,
     }}}) is None
+
+
+@pytest.mark.asyncio
+async def test_overlapping_reads_share_only_the_current_scope_and_survive_disconnect(monkeypatch):
+    from services import project_overview as service
+
+    started = asyncio.Queue()
+    release = asyncio.Event()
+    calls = []
+    original = service._load_project_overview
+
+    async def load(team_id):
+        calls.append(team_id)
+        await started.put(team_id)
+        await release.wait()
+        return await original(team_id)
+
+    monkeypatch.setattr(service, '_load_project_overview', load)
+    first = asyncio.create_task(project_overview(7))
+    assert await started.get() == 7
+    same = asyncio.create_task(project_overview(7))
+    other = asyncio.create_task(project_overview(8))
+    global_view = asyncio.create_task(project_overview())
+    assert {await started.get(), await started.get()} == {8, None}
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    release.set()
+    await asyncio.gather(same, other, global_view)
+    assert calls.count(7) == 1
+    await Novel.create(name='New project', team_id=7)
+    assert (await project_overview(7)).summary.project_count == 1
+    assert calls.count(7) == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_overview_can_be_retried(monkeypatch):
+    from unittest.mock import AsyncMock
+    from services import project_overview as service
+
+    expected = await project_overview(7)
+    load = AsyncMock(side_effect=[RuntimeError('read failed'), expected])
+    monkeypatch.setattr(service, '_load_project_overview', load)
+    with pytest.raises(RuntimeError, match='read failed'):
+        await project_overview(7)
+    assert await project_overview(7) == expected

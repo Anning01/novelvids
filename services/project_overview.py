@@ -1,5 +1,6 @@
 """Batch-read project progress without loading manuscripts or estimating runtime."""
 
+import asyncio
 from collections import defaultdict
 import math
 
@@ -46,7 +47,25 @@ def _reported_seconds(video):
     return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
+_pending_overviews: dict[int | None, asyncio.Task[ProjectOverview]] = {}
+
+
 async def project_overview(team_id: int | None = None) -> ProjectOverview:
+    task = _pending_overviews.get(team_id)
+    if task is None:
+        task = asyncio.create_task(_load_project_overview(team_id))
+        _pending_overviews[team_id] = task
+
+        def finished(completed: asyncio.Task[ProjectOverview]) -> None:
+            _pending_overviews.pop(team_id)
+            if not completed.cancelled():
+                completed.exception()  # Also observe failures if every HTTP caller disconnected.
+
+        task.add_done_callback(finished)
+    return await asyncio.shield(task)
+
+
+async def _load_project_overview(team_id: int | None) -> ProjectOverview:
     projects = await Novel.filter(**({"team_id": team_id} if team_id is not None else {})).values(
         "id", "name", "author", "description", "cover", "total_chapters", "workflow_kind",
         "aspect_ratio", "resolution", "tags", "project_type", "created_at", "updated_at",
