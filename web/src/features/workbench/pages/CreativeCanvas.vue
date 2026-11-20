@@ -54,6 +54,7 @@ import VideoComposerNode from '../nodes/VideoComposerNode.vue'
 import NoteNode from '../nodes/NoteNode.vue'
 import SectionNode from '../nodes/SectionNode.vue'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchNodeKind, WorkbenchPromptEditor } from '../types/workbenchTypes'
+import { commonMarkerColor, DEFAULT_SECTION_COLOR } from '../graph/nodeAppearance'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
 import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
@@ -140,7 +141,7 @@ const visibleStoreEdges = computed(() => store.edges
     && visibleNodeKeys.value.has(item.target)))
 const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
   id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
-  ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px` } } : {}),
+  ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px`, ...(item.kind === 'section' ? { '--section-layer': item.zIndex } : {}) } } : {}),
   data: {
     ...item.data,
     kind: item.kind,
@@ -231,7 +232,6 @@ provide(workbenchPromptEditorKey, {
 })
 
 const SECTION_PADDING = 64
-const DEFAULT_SECTION_COLOR = '#31558f'
 let sectionDrag: { sectionKey: string; startPosition: Point; memberPositions: Record<string, Point> } | null = null
 let selectionIntent: {
   kind: 'node'
@@ -411,7 +411,7 @@ function rememberSelectionIntent(event: PointerEvent) {
     ? { kind: 'pane', x: event.clientX, y: event.clientY }
     : null
 }
-function applySelectionIntent() {
+function applySelectionIntent(event: MouseEvent) {
   const intent = selectionIntent
   selectionIntent = null
   if (!intent) return
@@ -422,6 +422,8 @@ function applySelectionIntent() {
     void nextTick(() => { suppressNativeSelectionChanges = false })
     return
   }
+  // Vue Flow also toggles modifier-clicks. Let the store apply the selection exactly once.
+  if (intent.additive) event.stopPropagation()
   const nextSelection = selectionAfterNodeClick(intent.before, intent.key, intent.additive)
   applyAuthoritativeSelection(nextSelection)
   const selectedNode = nextSelection.length === 1 ? store.nodeByKey(nextSelection[0]) : null
@@ -674,7 +676,7 @@ function createSection() {
     }
   })
   const geometry = nodeGroupGeometry(selectedSectionMembers.value)
-  store.addSection(memberKeys, geometry.position, geometry.size, DEFAULT_SECTION_COLOR)
+  store.addSection(memberKeys, geometry.position, geometry.size, commonMarkerColor(selectedSectionMembers.value) || DEFAULT_SECTION_COLOR)
 }
 async function runSelected() {
   if (!runState.value.enabled) return
@@ -708,6 +710,11 @@ function handleKeydown(event: KeyboardEvent) {
   if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
   if (event.code === 'Space') { spacePanActive.value = true; event.preventDefault(); return }
   const command = event.metaKey || event.ctrlKey
+  if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'g' && canCreateSection.value) {
+    event.preventDefault()
+    if (!event.repeat) createSection()
+    return
+  }
   if (command && event.key.toLowerCase() === 'c') { event.preventDefault(); store.copySelection() }
   if (command && event.key.toLowerCase() === 'v') { event.preventDefault(); store.paste() }
   if (command && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? void redoCanvasAction() : void undoCanvasAction() }
@@ -765,12 +772,12 @@ onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectio
     <div v-if="store.loading" class="workbench-state" role="status">{{ tr('正在加载工作区…') }}</div>
     <div v-else-if="loadError" class="workbench-state" role="alert">{{ loadError }} <AppButton @click="openCanvas">{{ tr('重新加载') }}</AppButton></div>
     <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
-      <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
+      <Background variant="lines" color="var(--app-border-strong)" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" />
       <CanvasToolSwitcher v-model="canvasTool" />
       <CatalogResourcePicker :open="libraryOpen" @close="libraryOpen = false" @choose="addLibraryVideos" />
-      <WorkbenchToolbar @choose-library="libraryOpen = true" :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <WorkbenchToolbar @choose-library="libraryOpen = true" :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :can-color-selection="selectedNodes.length > 1" :selection-color="commonMarkerColor(selectedNodes)" @color-selection="store.setNodeColors(store.selectedNodeKeys, $event)" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
       <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
       <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />
       <p class="workbench-keyboard-status" role="status" :aria-label="tr('键盘连线状态')" aria-live="polite">{{ keyboardStatus }}</p>

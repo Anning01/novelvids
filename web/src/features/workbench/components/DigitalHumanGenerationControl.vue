@@ -64,10 +64,10 @@ const emit = defineEmits<{
   align-items: center;
   gap: 7px;
   padding: 4px 8px;
-  border: 1px solid #4a433d;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  color: #ded6ce;
-  background: #292522;
+  color: var(--app-text);
+  background: var(--app-fill-subtle);
   cursor: pointer;
   font: inherit;
   font-size: 10px;
@@ -76,8 +76,8 @@ const emit = defineEmits<{
 .digital-human-generation-control__trigger:focus-visible,
 .digital-human-generation-control__clear:hover,
 .digital-human-generation-control__clear:focus-visible {
-  border-color: #8f76d8;
-  color: #eee8e1;
+  border-color: var(--app-accent);
+  color: var(--app-text);
   outline: none;
 }
 .digital-human-generation-control__trigger img {
@@ -104,10 +104,10 @@ const emit = defineEmits<{
   width: 30px;
   height: 30px;
   place-items: center;
-  border: 1px solid #4a433d;
+  border: 1px solid var(--app-border);
   border-radius: 9px;
-  color: #a99f96;
-  background: #292522;
+  color: var(--app-text-secondary);
+  background: var(--app-fill-subtle);
   cursor: pointer;
 }
 </style>

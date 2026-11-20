@@ -1,3 +1,4 @@
+import { nodeMarkerColor } from '../graph/nodeAppearance'
 
 import { sheetReference, includeSheet } from '@/shared/storyboardSheetReference'
 import { tr } from '@/i18n'
@@ -405,6 +406,25 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     clearSelection() { this.selectedNodeKeys = []; this.selectedEdgeKeys = [] },
     updateNodeLayout(key: string, position: Point, size?: NodeSize | null, zIndex?: number) { const item = this.nodeByKey(key); if (!item) return; item.position = position; if (size !== undefined) item.size = size; if (zIndex !== undefined) item.zIndex = zIndex },
+    setNodeColors(keys: string[], color: string) {
+      const selected = new Set(keys)
+      const changed = this.nodes.filter(item => selected.has(item.key) && nodeMarkerColor(item) !== color)
+      if (!changed.length) return
+      this.checkpoint()
+      for (const item of changed) {
+        if (item.kind === 'section' || item.kind === 'note') item.data.color = color
+        else item.data.ui = { ...item.data.ui, color }
+      }
+      this.persistLayout()
+    },
+    renameSection(key: string, name: string) {
+      const item = this.nodeByKey(key)
+      const title = name.trim()
+      if (!title || item?.kind !== 'section' || item.title === title) return
+      this.checkpoint()
+      item.title = title
+      this.persistLayout()
+    },
     updateNodeUi(key: string, ui: Record<string, unknown>) { const item = this.nodeByKey(key); if (item) item.data.ui = ui; this.persistLayout() },
     updateManualNodeData(key: string, patch: Record<string, unknown>) {
       const item = this.nodeByKey(key)

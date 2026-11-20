@@ -10,7 +10,7 @@ import {
   Image,
   ImageUp,
   LayoutGrid,
-  Palette,
+  Group,
   Play,
   Plus,
   Redo2,
@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import WorkbenchColorPicker from './WorkbenchColorPicker.vue'
 import type { WorkbenchRunState } from '../execution/workbenchCapabilities'
 
 const props = defineProps<{
@@ -30,6 +31,8 @@ const props = defineProps<{
   hasSelection?: boolean
   canCopy?: boolean
   canPaste?: boolean
+  canColorSelection?: boolean
+  selectionColor?: string
   canCreateSection?: boolean
   runState: WorkbenchRunState
   watermarkEnabled?: boolean
@@ -46,6 +49,7 @@ const emit = defineEmits<{
   uploadImage: [file: File]
   uploadVideo: [file: File]
   uploadAudio: [file: File]
+  colorSelection: [color: string]
   createSection: []
   runSelected: []
   deleteSelection: []
@@ -188,8 +192,9 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
     <input ref="audioInput" class="workbench-toolbar__file-input" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" multiple :aria-label="tr('选择上传音频文件')" @change="emitFiles('audio', $event)">
 
     <div class="workbench-toolbar__scroll" tabindex="0" role="group" :aria-label="tr('画布节点与编辑工具，可横向滚动')">
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('为所选节点添加背景分区')" :title="tr('多选节点后添加背景分区')" :disabled="running || !canCreateSection" @click="$emit('createSection')">
-        <Palette :size="16" aria-hidden="true" />
+      <WorkbenchColorPicker v-if="canColorSelection" :color="selectionColor || ''" :label="tr('设置所选节点分组颜色')" :disabled="running" @change="$emit('colorSelection', $event)" />
+      <button class="workbench-toolbar__button" :class="{ 'workbench-toolbar__button--icon': !canCreateSection }" type="button" aria-keyshortcuts="Control+G Meta+G" :aria-label="tr('为所选节点添加背景分区')" :title="tr('多选节点后添加背景分区')" :disabled="running || !canCreateSection" @click="$emit('createSection')">
+        <Group :size="16" aria-hidden="true" /><span v-if="canCreateSection">{{ tr('编组') }}</span>
       </button>
       <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('自动整理布局')" :title="tr('按连接关系分列并自动避让')" :disabled="running" @click="$emit('auto-arrange')">
         <LayoutGrid :size="16" aria-hidden="true" />

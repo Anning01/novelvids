@@ -28,7 +28,7 @@ const isWorkflowSurface = computed(() => isWorkflowThemeSurface({
   path: route.path,
   view: route.query.view,
 }))
-const confirmDialogDark = computed(() => isWorkflowSurface.value || resolvedTheme.value === 'dark')
+const confirmDialogDark = computed(() => resolvedTheme.value === 'dark')
 const creationItems = [
   { path: '/create/short-drama', get label() { return tr('短剧制作') }, icon: Clapperboard, active: () => route.path.startsWith('/create/short-drama') },
   { path: '/create/remake', get label() { return tr('重制工坊') }, icon: RefreshCcw, active: () => route.path.startsWith('/create/remake') },
@@ -176,7 +176,7 @@ function handleTeamSwitch(teamId: string) {
           <small v-if="walletLabel" class="app-user-wallet">{{ walletLabel }}</small>
         </span>
       </RouterLink>
-      <AppSidebarPreferences :show-theme="!isWorkflowSurface" />
+      <AppSidebarPreferences />
     </aside>
     <section class="app-content" :class="{ 'is-fullscreen': isFullscreen }"><RouterView /></section>
     <AppThemeToggle v-if="isFullscreen && !isWorkflowSurface && !hasWorkspaceThemeControl" />

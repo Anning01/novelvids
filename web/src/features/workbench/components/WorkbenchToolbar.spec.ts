@@ -87,3 +87,20 @@ it('emits the automatic layout action from the grid button', async () => {
 
   expect(wrapper.emitted('auto-arrange')).toHaveLength(1)
 })
+
+it('offers grouping and batch color only for a groupable selection', async () => {
+  const wrapper = mount(WorkbenchToolbar, {
+    props: { runState: selectedRunState([], capabilities) },
+  })
+  const group = wrapper.get('[aria-label="为所选节点添加背景分区"]')
+  expect(group.attributes('disabled')).toBeDefined()
+  expect(wrapper.find('[aria-label="设置所选节点分组颜色"]').exists()).toBe(false)
+  await wrapper.setProps({ canCreateSection: true, canColorSelection: true })
+  expect(group.text()).toContain('编组')
+  await group.trigger('click')
+  expect(wrapper.emitted('createSection')).toHaveLength(1)
+  const picker = wrapper.getComponent({ name: 'WorkbenchColorPicker' })
+  picker.vm.$emit('change', '#6d99c7')
+  expect(wrapper.emitted('colorSelection')).toEqual([['#6d99c7']])
+  wrapper.unmount()
+})

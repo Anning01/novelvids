@@ -2985,12 +2985,12 @@ onBeforeUnmount(() => {
 .workspace-view-switch button:hover { color: #575d6d; background: rgb(255 255 255 / 68%); }
 .workspace-view-switch button.is-active { color: #5759eb; background: #fff; box-shadow: 0 3px 10px rgb(47 50 80 / 9%); }
 .workspace-view-switch button:focus-visible { outline: 2px solid rgb(91 92 246 / 22%); outline-offset: 1px; }
-.storyboard-page.is-workflow-view .workspace-view-switch { grid-column: 2; pointer-events: auto; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631, 0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
-.storyboard-page.is-workflow-view .workspace-view-switch button { color: #c7bdb4; }
-.storyboard-page.is-workflow-view .workspace-view-switch button:hover { color: #eee9e2; background: #2a2622; }
-.storyboard-page.is-workflow-view .workspace-view-switch button.is-active { color: #eee9e2; background: #3a354f; box-shadow: inset 0 0 0 1px rgb(169 149 255 / 22%); }
-.storyboard-page.is-workflow-view .workspace-view-switch button:focus-visible { outline-color: rgb(169 149 255 / 34%); }
-.workflow-canvas-shell { width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #151412; }
+.storyboard-page.is-workflow-view .workspace-view-switch { grid-column: 2; pointer-events: auto; background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
+.storyboard-page.is-workflow-view .workspace-view-switch button { color: var(--app-text-secondary); }
+.storyboard-page.is-workflow-view .workspace-view-switch button:hover { color: var(--app-text); background: var(--app-surface-hover); }
+.storyboard-page.is-workflow-view .workspace-view-switch button.is-active { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: none; }
+.storyboard-page.is-workflow-view .workspace-view-switch button:focus-visible { outline-color: var(--app-accent); }
+.workflow-canvas-shell { width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--app-canvas); }
 .storyboard-state { display: grid; min-height: calc(100vh - 210px); place-items: center; align-content: center; gap: 8px; color: #686ef1; text-align: center; }
 .storyboard-state__spinner { animation: spin 1s linear infinite; }
 .storyboard-state strong { color: #454a59; font-size: 14px; }

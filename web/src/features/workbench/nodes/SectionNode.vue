@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
+import { ElPopover } from 'element-plus';
 import type { NodeProps } from '@vue-flow/core';
-import { Layers3, Minimize2, MoreVertical, Palette, Trash2 } from 'lucide-vue-next';
+import { Layers3, Minimize2, MoreVertical, Ungroup } from 'lucide-vue-next';
 import { computed, inject, ref } from 'vue';
+import WorkbenchColorPicker from '../components/WorkbenchColorPicker.vue'
+import { DEFAULT_SECTION_COLOR } from '../graph/nodeAppearance'
 import { workbenchSectionActionsKey } from '../interaction/sectionActions';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
@@ -13,36 +16,18 @@ const store = useWorkbenchStore();
 const sectionActions = inject(workbenchSectionActionsKey, null);
 const saving = ref(false);
 const error = ref('');
-const previewedColor = ref('');
 const detailsOpen = ref(false);
-const color = computed(() => previewedColor.value || (typeof props.data.color === 'string' ? props.data.color : '#31558f'));
+const color = computed(() => (typeof props.data.color === 'string' && props.data.color) || DEFAULT_SECTION_COLOR);
 const description = computed(() => typeof props.data.description === 'string' ? props.data.description : '');
 const memberCount = computed(() => Array.isArray(props.data.node_keys) ? props.data.node_keys.length : 0);
 const backgroundStyle = computed(() => ({
   '--workbench-section-color': color.value,
-  'background-color': `${color.value}20`,
-  'border-color': `${color.value}78`,
 }));
 
-function previewColor(event: Event) {
-  const nextColor = (event.target as HTMLInputElement).value;
-  error.value = '';
-  previewedColor.value = nextColor;
-  store.updateNodeDraft(props.id, { color: nextColor });
-}
-
-async function saveColor() {
-  saving.value = true;
-  try {
-    await store.flushNodeDraft(props.id);
-    previewedColor.value = '';
-  }
-  catch (reason) {
-    error.value = reason instanceof Error ? reason.message : tr('分区颜色保存失败');
-  }
-  finally {
-    saving.value = false;
-  }
+function rename(event: Event) {
+  const input = event.target as HTMLInputElement
+  store.renameSection(props.id, input.value)
+  input.value = store.nodeByKey(props.id)?.title || ''
 }
 
 function updateDescription(event: Event) {
@@ -88,19 +73,29 @@ async function fitToContent() {
 <template>
   <section class="workbench-section" :class="{ 'is-selected': selected, 'is-drop-target': data.drop_candidate === true }" :style="backgroundStyle" :aria-label="tr('{p0}，包含 {p1} 个节点', { p0: data.title || '画布分区', p1: memberCount })">
     <div v-if="selected" class="workbench-section__toolbar nodrag nowheel" role="toolbar" :aria-label="tr('分区操作')" @pointerdown.stop @click.stop>
-      <button type="button" :aria-label="tr('删除分区')" :title="tr('删除分区（不会删除内部节点）')" @click="deleteSection">
-        <Trash2 :size="17" aria-hidden="true" />
+      <button type="button" :aria-label="tr('取消编组')" :title="tr('删除分区（不会删除内部节点）')" @click="deleteSection">
+        <Ungroup :size="17" aria-hidden="true" />
       </button>
-      <label class="workbench-section__color-control" :title="tr('分区背景颜色')">
-        <Palette :size="17" aria-hidden="true" />
-        <input type="color" :value="color" :disabled="saving" :aria-label="tr('修改分区颜色')" @input="previewColor" @change="saveColor">
-      </label>
+      <WorkbenchColorPicker :color="color" :label="tr('修改分区颜色')" @change="store.setNodeColors([props.id], $event)" />
       <button type="button" :aria-label="tr('重新包裹内部节点')" :title="tr('重新包裹内部节点')" :disabled="memberCount === 0" @click="fitToContent">
         <Minimize2 :size="17" aria-hidden="true" />
       </button>
-      <button type="button" :aria-label="tr('分区更多设置')" :title="tr('更多设置')" :class="{ 'is-active': detailsOpen }" @click="detailsOpen = !detailsOpen">
-        <MoreVertical :size="17" aria-hidden="true" />
-      </button>
+      <ElPopover trigger="click" placement="top" :width="260" :show-arrow="false" popper-class="workbench-color-popover"
+        @show="detailsOpen = true" @hide="detailsOpen = false">
+        <template #reference>
+          <button type="button" :aria-label="tr('分区更多设置')" :title="tr('更多设置')" aria-haspopup="dialog" :aria-expanded="detailsOpen">
+            <MoreVertical :size="17" aria-hidden="true" />
+          </button>
+        </template>
+        <div class="workbench-group-editor" role="dialog" :aria-label="tr('分区更多设置')" @pointerdown.stop @click.stop>
+          <label>{{ tr('组名') }}
+            <input :value="String(data.title || '')" maxlength="100" @change="rename" @keydown.enter.prevent="($event.target as HTMLInputElement).blur()">
+          </label>
+          <label>{{ tr('分区文字说明') }}
+            <textarea :value="description" maxlength="2000" rows="3" @input="updateDescription" @blur="saveDescription" />
+          </label>
+        </div>
+      </ElPopover>
     </div>
     <header :title="tr('拖动节点进入分区可加入，拖出分区可移除；拖动标题栏可移动整个分区')">
       <Layers3 :size="16" aria-hidden="true" />
@@ -108,18 +103,7 @@ async function fitToContent() {
       <span>{{ memberCount }} {{ tr('个节点') }}</span>
       <span v-if="selected" class="workbench-section__membership-hint">{{ tr('拖入加入 · 拖出移除') }}</span>
     </header>
-    <textarea
-      v-if="selected && detailsOpen"
-      class="workbench-section__description nodrag nowheel"
-      :value="description"
-      maxlength="2000"
-      :aria-label="tr('分区文字说明')"
-      :placeholder="tr('添加分区说明…')"
-      @input="updateDescription"
-      @blur="saveDescription"
-      @keydown.stop
-    />
-    <p v-else-if="description" class="workbench-section__description-text">
+    <p v-if="description" class="workbench-section__description-text">
       {{ description }}
     </p>
     <p v-if="error" class="workbench-section__error" role="alert">
@@ -127,3 +111,23 @@ async function fitToContent() {
     </p>
   </section>
 </template>
+
+<style scoped>
+.workbench-section {
+  background-color: color-mix(in srgb, var(--workbench-section-color) 14%, transparent);
+  border-color: color-mix(in srgb, var(--workbench-section-color) 65%, var(--app-border));
+}
+.workbench-group-editor, .workbench-group-editor label { display: grid; gap: 6px; }
+.workbench-group-editor { gap: 12px; color: var(--app-text-secondary); }
+.workbench-group-editor :is(input, textarea) {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--app-text);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-strong);
+  border-radius: 6px;
+}
+.workbench-group-editor :focus-visible { outline: 2px solid var(--app-accent); outline-offset: 1px; }
+</style>

@@ -863,7 +863,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
 }
 .workbench-asset-variant-popover > header {
   justify-content: space-between;
-  color: #eee8e1;
+  color: var(--app-text);
   font-size: 12px;
 }
 .workbench-asset-variant-popover button {
@@ -871,22 +871,22 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
   min-width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid #4a433d;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: #aaa39c;
-  background: #292522;
+  color: var(--app-text-secondary);
+  background: var(--app-fill-subtle);
   cursor: pointer;
 }
 .workbench-asset-variant-popover button:hover,
 .workbench-asset-variant-popover button:focus-visible {
-  border-color: #8f76d8;
-  color: #eee8e1;
+  border-color: var(--app-accent);
+  color: var(--app-text);
   outline: none;
 }
 .workbench-asset-variant-popover button.is-danger:hover,
 .workbench-asset-variant-popover button.is-danger:focus-visible {
-  border-color: #b96666;
-  color: #ef9a9a;
+  border-color: var(--creation-danger);
+  color: var(--creation-danger);
 }
 .workbench-asset-variant-popover button:disabled {
   cursor: not-allowed;
@@ -900,18 +900,18 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
 .workbench-asset-variant-popover__create input {
   height: 34px;
   padding: 0 9px;
-  border: 1px solid #48413b;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: #eee9e4;
+  color: var(--app-text);
   outline: none;
-  background: #131210;
+  background: var(--app-surface-muted);
 }
 .workbench-asset-variant-popover__create button {
   min-width: 58px;
   padding: 0 10px;
 }
 .workbench-asset-variant-popover > small {
-  color: #817870;
+  color: var(--app-text-secondary);
   font-size: 10px;
   line-height: 1.45;
 }

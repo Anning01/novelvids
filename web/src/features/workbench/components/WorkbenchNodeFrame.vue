@@ -17,7 +17,6 @@ import {
   Film,
   Info,
   Layers3,
-  Palette,
   Pin,
   ScanFace,
   StickyNote,
@@ -31,6 +30,7 @@ import { isPinnedNode, nextPinnedNodeZIndex, nextRegularNodeZIndex } from '../gr
 import { workbenchKeyboardConnectorKey } from '../keyboard/keyboardConnection'
 import { useWorkbenchStore } from '../store/workbenchStore'
 import type { WorkbenchNodeData, WorkbenchNodeKind } from '../types/workbenchTypes'
+import WorkbenchColorPicker from './WorkbenchColorPicker.vue'
 import NodeInfoPanel from './NodeInfoPanel.vue'
 
 interface FrameData extends WorkbenchNodeData {
@@ -55,9 +55,7 @@ const props = withDefaults(defineProps<{
 const keyboardConnector = inject(workbenchKeyboardConnectorKey, null)
 const store = useWorkbenchStore()
 const infoOpen = ref(false)
-const paletteOpen = ref(false)
 const actionError = ref('')
-const markerColors = ['#a995ff', '#df7f73', '#dfb75f', '#70a98a', '#6d99c7', '#d584b8']
 
 const kind = computed(() => (props.data.kind ?? 'unsupported') as WorkbenchNodeKind)
 const liveNode = computed(() => store.nodeByKey(props.id))
@@ -123,21 +121,7 @@ async function updateUi(patch: Record<string, unknown>) {
   }
   catch (error) {
     actionError.value = error instanceof Error ? error.message : tr('节点设置保存失败')
-    paletteOpen.value = false
   }
-}
-
-function previewCustomColor(event: Event) {
-  store.updateNodeUi(props.id, { ...nodeUi.value, color: (event.target as HTMLInputElement).value })
-}
-
-function beginCustomColor() {
-  store.checkpoint()
-}
-
-function saveCustomColor(event: Event) {
-  paletteOpen.value = false
-  void updateUi({ color: (event.target as HTMLInputElement).value })
 }
 
 async function deleteNode() {
@@ -172,13 +156,8 @@ async function togglePinned() {
 
 function toggleInfo() {
   infoOpen.value = !infoOpen.value
-  paletteOpen.value = false
 }
 
-function togglePalette() {
-  paletteOpen.value = !paletteOpen.value
-  infoOpen.value = false
-}
 </script>
 
 <template>
@@ -195,7 +174,7 @@ function togglePalette() {
     :style="markerColor ? { '--workbench-node-marker': markerColor } : undefined"
     :aria-label="tr('{p0}节点', { p0: data.title || '未命名' })"
   >
-    <div v-if="selected" class="workbench-node-context nodrag nowheel" role="toolbar" :aria-label="tr('{p0}节点操作', { p0: data.title || '未命名' })" @pointerdown.stop @click.stop>
+    <div v-if="selected && store.selectedNodeKeys.length <= 1" class="workbench-node-context nodrag nowheel" role="toolbar" :aria-label="tr('{p0}节点操作', { p0: data.title || '未命名' })" @pointerdown.stop @click.stop>
       <button type="button" :aria-label="tr('删除选中节点')" :title="tr('删除')" :disabled="!canDelete" @click="deleteNode">
         <Trash2 :size="16" aria-hidden="true" />
       </button>
@@ -204,9 +183,7 @@ function togglePalette() {
         <Info :size="16" aria-hidden="true" />
       </button>
       <slot name="toolbar-actions" />
-      <button type="button" :aria-label="tr('设置节点背景颜色')" :title="tr('背景颜色')" :class="{ 'is-active': paletteOpen }" @click="togglePalette">
-        <Palette class="workbench-node-context__palette-icon" :style="markerColor ? { color: markerColor } : undefined" :size="17" aria-hidden="true" />
-      </button>
+      <WorkbenchColorPicker :color="markerColor" :label="tr('设置节点背景颜色')" @change="store.setNodeColors([props.id], $event)" />
       <button type="button" :aria-label="pinned ? tr('取消固钉选中节点') : tr('固钉选中节点到最上层')" :title="pinned ? tr('取消固钉') : tr('固钉到最上层')" :class="{ 'is-active': pinned }" @click="togglePinned">
         <Pin :size="16" :fill="pinned ? 'currentColor' : 'none'" aria-hidden="true" />
       </button>
@@ -218,14 +195,7 @@ function togglePalette() {
         <Ban :size="16" aria-hidden="true" />
       </button>
 
-      <div v-if="paletteOpen" class="workbench-node-context__popover workbench-node-context__palette" :aria-label="tr('节点背景颜色选项')">
-        <button v-for="color in markerColors" :key="color" type="button" :aria-label="tr('使用背景颜色 {p0}', { p0: color })" :style="{ background: color }" @click="updateUi({ color }); paletteOpen = false" />
-        <label class="workbench-node-context__custom-color" :title="tr('自定义背景颜色')">
-          <span class="sr-only">{{ tr('自定义背景颜色') }}</span>
-          <input type="color" :value="markerColor || '#a995ff'" :aria-label="tr('自定义背景颜色')" @pointerdown="beginCustomColor" @input="previewCustomColor" @change="saveCustomColor">
-        </label>
-        <button type="button" class="is-clear" :aria-label="tr('清除节点背景颜色')" @click="updateUi({ color: '' }); paletteOpen = false">×</button>
-      </div>
+
     </div>
 
     <NodeInfoPanel v-if="infoOpen && liveNode" :node="liveNode" :action-error="actionError" @close="infoOpen = false" />

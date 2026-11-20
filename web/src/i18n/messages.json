@@ -1,4 +1,10 @@
 {
+  "canvas_groups": {
+    "编组": "Group",
+    "取消编组": "Ungroup",
+    "组名": "Group name",
+    "设置所选节点分组颜色": "Set color for selected nodes"
+  },
   "permanent_deletion": {
     "永久删除视频": "Permanently delete video",
     "永久删除成片": "Permanently delete finished video",
