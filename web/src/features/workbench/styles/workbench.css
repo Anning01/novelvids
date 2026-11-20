@@ -19,6 +19,7 @@
   --vf-accent: var(--app-accent);
   --vf-accent-hover: var(--app-accent);
   --vf-danger: var(--creation-danger);
+  --wb-scroll-thumb: color-mix(in srgb, var(--app-text-secondary) 78%, var(--app-surface));
   /* Handles, wires and category badges use consistent hues against either canvas. */
   --wb-asset: color-mix(in srgb, #9d7acc 75%, var(--app-text));
   --wb-sequence: color-mix(in srgb, #6d99c7 75%, var(--app-text));
@@ -1833,7 +1834,7 @@
 }
 .workbench-scroll-region,
 .workbench-field textarea {
-  scrollbar-color: #5a544e #1b1917;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-scroll-region::-webkit-scrollbar,
@@ -1844,17 +1845,18 @@
 .workbench-scroll-region::-webkit-scrollbar-track,
 .workbench-field textarea::-webkit-scrollbar-track {
   border-radius: 999px;
-  background: var(--app-surface);
+  background: transparent;
 }
 .workbench-scroll-region::-webkit-scrollbar-thumb,
 .workbench-field textarea::-webkit-scrollbar-thumb {
-  border: 2px solid var(--app-border);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
-  background: var(--app-fill-subtle);
+  background-color: var(--wb-scroll-thumb);
 }
 .workbench-scroll-region::-webkit-scrollbar-thumb:hover,
 .workbench-field textarea::-webkit-scrollbar-thumb:hover {
-  background: var(--app-surface-hover);
+  background-color: var(--app-text-secondary);
 }
 .workbench-field input[type='checkbox'] {
   width: 18px;
@@ -3201,7 +3203,7 @@
   overflow-y: hidden;
   gap: 6px;
   white-space: nowrap;
-  scrollbar-color: #5b524a transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-toolbar__scroll::-webkit-scrollbar {
@@ -3209,7 +3211,7 @@
 }
 .workbench-toolbar__scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: var(--app-fill-subtle);
+  background-color: var(--wb-scroll-thumb);
 }
 .workbench-toolbar__scroll:focus-visible {
   border-radius: 9px;
@@ -3449,7 +3451,7 @@
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
   scroll-snap-type: x proximity;
-  scrollbar-color: #5a544e transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-prompt-references {
@@ -3607,7 +3609,7 @@
   padding: 0;
   font-size: 14px;
   line-height: 1.8;
-  scrollbar-color: #5a544e transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
 }
 .workbench-prompt-panel .workbench-mention-editor__input::-webkit-scrollbar-track {
   background: transparent;

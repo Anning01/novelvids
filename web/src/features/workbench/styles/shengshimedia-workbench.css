@@ -591,6 +591,7 @@
   pointer-events: none;
 }
 .workbench-prompt-panel {
+  container-type: inline-size;
   position: fixed;
   z-index: 80;
   display: flex;
@@ -659,7 +660,7 @@
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
   scroll-snap-type: x proximity;
-  scrollbar-color: #5a544e transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-prompt-references {
@@ -839,7 +840,7 @@
   padding: 10px 14px 10px 10px;
   font-size: 14px;
   line-height: 1.8;
-  scrollbar-color: #5a544e transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
 }
 .workbench-prompt-panel .workbench-mention-editor__input::-webkit-scrollbar-track {
   background: transparent;
@@ -993,6 +994,44 @@
     flex: 1 1 100%;
   }
   .workbench-prompt-panel__footer-actions {
+    width: 100%;
+  }
+}
+/* Keep asset controls readable as the anchored panel narrows, even on a wide screen. */
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer {
+  flex: none;
+  flex-flow: row wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px 8px;
+}
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start {
+  display: contents;
+}
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start > .media-generation-model-selector {
+  flex: 1 1 12rem;
+  width: auto;
+  min-width: min(11rem, 100%);
+  max-width: 22rem;
+}
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start > :is(.image-parameters, .digital-human-generation-control) {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+}
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-actions {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+.workbench-prompt-panel__footer-start .digital-human-generation-control__clear { min-width: 0; }
+@container (max-width: 27rem) {
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-actions {
+    flex: 1 0 100%;
+  }
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__primary-action {
     width: 100%;
   }
 }
@@ -1494,7 +1533,7 @@
 }
 .workbench-scroll-region,
 .workbench-field textarea {
-  scrollbar-color: #5a544e #1b1917;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-scroll-region::-webkit-scrollbar,
@@ -1505,17 +1544,18 @@
 .workbench-scroll-region::-webkit-scrollbar-track,
 .workbench-field textarea::-webkit-scrollbar-track {
   border-radius: 999px;
-  background: var(--app-surface);
+  background: transparent;
 }
 .workbench-scroll-region::-webkit-scrollbar-thumb,
 .workbench-field textarea::-webkit-scrollbar-thumb {
-  border: 2px solid var(--app-border);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
-  background: var(--app-fill-subtle);
+  background-color: var(--wb-scroll-thumb);
 }
 .workbench-scroll-region::-webkit-scrollbar-thumb:hover,
 .workbench-field textarea::-webkit-scrollbar-thumb:hover {
-  background: var(--app-surface-hover);
+  background-color: var(--app-text-secondary);
 }
 .workbench-field input[type='checkbox'] {
   width: 18px;
@@ -2733,7 +2773,7 @@
   overflow-y: hidden;
   gap: 6px;
   white-space: nowrap;
-  scrollbar-color: #5b524a transparent;
+  scrollbar-color: var(--wb-scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 .workbench-toolbar__scroll::-webkit-scrollbar {
@@ -2741,7 +2781,7 @@
 }
 .workbench-toolbar__scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: var(--app-fill-subtle);
+  background-color: var(--wb-scroll-thumb);
 }
 .workbench-toolbar__scroll:focus-visible {
   border-radius: 9px;

@@ -47,6 +47,11 @@ describe('workbenchPromptEditorPanel positioning', () => {
     anchorRect = DOMRect.fromRect({ x: 200, y: 150, width: 350, height: 300 });
     await waitFor(() => expect(panel).toHaveStyle({ top: '456px', left: '119px' }));
 
+    anchorRect = DOMRect.fromRect({ x: -300, y: 150, width: 350, height: 300 });
+    await waitFor(() => expect(panel).toHaveStyle({ left: '12px' }));
+    anchorRect = DOMRect.fromRect({ x: 1250, y: 150, width: 350, height: 300 });
+    await waitFor(() => expect(panel).toHaveStyle({ left: '756px' }));
+
     view.unmount();
     anchor.remove();
   });

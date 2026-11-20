@@ -49,4 +49,22 @@ function select(value: string) {
 .media-generation-model-selector {
   min-width: 0;
 }
+/* The options can be wider than the selected model's trigger. */
+.media-generation-model-selector :deep(.workbench-select__content) {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(30rem, calc(100vw - 32px));
+}
+.workbench-prompt-panel .media-generation-model-selector :deep(.workbench-select__content) {
+  max-width: max(100%, min(30rem, calc(100cqw - 4rem)));
+}
+.media-generation-model-selector :deep(.workbench-select__option-label) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.media-generation-model-selector :deep(.workbench-select__item) {
+  height: auto;
+  min-height: 34px;
+  text-align: start;
+}
 </style>

@@ -113,7 +113,8 @@ function updatePosition() {
   const anchorRect = anchor.getBoundingClientRect();
   const gap = 6;
   const width = Math.min(960, Math.max(360, window.innerWidth * 0.4), window.innerWidth - viewportPadding * 2);
-  const left = anchorRect.left + anchorRect.width / 2 - width / 2;
+  const centeredLeft = anchorRect.left + (anchorRect.width - width) / 2;
+  const left = Math.max(viewportPadding, Math.min(centeredLeft, window.innerWidth - width - viewportPadding));
   const top = anchorRect.bottom + gap;
   const availableHeight = Math.max(160, window.innerHeight - top - viewportPadding);
   const height = Math.min(availableHeight, Math.max(320, window.innerHeight * 0.4));
