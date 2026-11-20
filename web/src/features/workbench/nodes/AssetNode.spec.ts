@@ -333,13 +333,16 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   expect(wrapper.find('[aria-label="替换资产图片"]').exists()).toBe(true)
   await wrapper.get('[aria-label="管理衍生形态"]').trigger('click')
   expect(wrapper.find('[role="dialog"][aria-label="衍生形态管理"]').exists()).toBe(true)
+  const toggle = wrapper.get('.workbench-asset-image-count').element
   const canvasKeydown = vi.fn()
   wrapper.element.addEventListener('keydown', canvasKeydown)
   await wrapper.get('.workbench-asset-image-count').trigger('keydown', { key: ' ', code: 'Space' })
   expect(canvasKeydown).not.toHaveBeenCalled()
   await wrapper.get('[aria-label="展开三图角色的 3 张图片"]').trigger('click')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(true)
-  expect(wrapper.findAll('.workbench-media-gallery__row').length).toBeGreaterThan(0)
+  expect(wrapper.get('.workbench-asset-image-count').element).toBe(toggle)
+  expect(wrapper.get('.workbench-asset-image-count').attributes('aria-expanded')).toBe('true')
+  expect(wrapper.get('.workbench-asset-image-stage .workbench-asset-gallery').findAll('article')).toHaveLength(3)
   const nodeData = wrapper.props().data
   await wrapper.get('.workbench-node-content').trigger('focusout')
   expect(save).not.toHaveBeenCalled()

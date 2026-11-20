@@ -24,7 +24,6 @@ import ProjectAssetPicker from '../components/ProjectAssetPicker.vue'
 import type { ReusableAssetChoice } from '../components/reusableAsset'
 import { assetTypeIconFor, assetTypePresentationOptions, editableAssetTypeOptions } from '../components/assetTypePresentation'
 import { disambiguateMaterialMentionNames, materialMentionAssetCategory } from '../components/materialMentionTypes'
-import { useWorkbenchNodeDimensionSync } from '../composables/useWorkbenchNodeDimensionSync'
 import {
   assetImageMediaMetadata,
   assetImageCandidates,
@@ -41,7 +40,7 @@ import {
 import { registerWorkbenchPromptAction } from '../prompt/promptActionRegistry'
 import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/promptEditor'
-import { balanceMediaGalleryRows, containedAspectRatioSize, mediaAspectRatioCss, mediaGalleryItemWidth } from '../graph/mediaAspectRatio'
+import { containedAspectRatioSize, mediaAspectRatioCss } from '../graph/mediaAspectRatio'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -187,22 +186,6 @@ function assetImageAspectRatio(image: { key: string; url: string } | null | unde
   return config.value.aspectRatio
 }
 const primaryImageAspectRatio = computed(() => assetImageAspectRatio(primaryImage.value))
-function assetGalleryItemStyle(image: { key: string; url: string }) {
-  const ratio = assetImageAspectRatio(image)
-  return {
-    '--workbench-asset-image-aspect-ratio': mediaAspectRatioCss(ratio),
-    '--workbench-asset-gallery-item-width': `${mediaGalleryItemWidth(ratio)}px`,
-  }
-}
-const assetGalleryRows = computed(() => balanceMediaGalleryRows(
-  assetImages.value,
-  assetImageAspectRatio,
-  { targetRowWidth: 1280, maxItemsPerRow: 4 },
-))
-const assetGalleryLayoutSignature = computed(() => assetImages.value
-  .map(image => `${image.key}:${assetImageAspectRatio(image)}`)
-  .join('|'))
-useWorkbenchNodeDimensionSync(props.id, () => `${imageGalleryExpanded.value}:${assetGalleryLayoutSignature.value}`)
 const imageDownloadFilename = computed(() => {
   const extension = imageMetadata.value.mimeType?.includes('webp')
     ? 'webp'
@@ -730,9 +713,9 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
       </template>
       <div class="workbench-node-content">
         <div
-          v-if="hasImagePreview && !imageGalleryExpanded"
+          v-if="hasImagePreview"
           class="workbench-asset-image-stage"
-          :class="{ 'is-multi-image': hasMultipleImages }"
+          :class="{ 'is-multi-image': hasMultipleImages, 'is-gallery-open': imageGalleryExpanded }"
           :style="assetImageStageStyle"
         >
           <span
@@ -755,41 +738,32 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             v-if="hasMultipleImages"
             type="button"
             class="workbench-asset-image-count nodrag"
+            :class="{ 'workbench-asset-gallery__collapse': imageGalleryExpanded }"
             :aria-expanded="imageGalleryExpanded"
-            :aria-label="tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
+            :aria-label="imageGalleryExpanded
+              ? tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })
+              : tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
             @keydown.space.stop
-            @click.stop="imageGalleryExpanded = true"
+            @click.stop="imageGalleryExpanded = !imageGalleryExpanded"
           >
-            <Maximize2 :size="17" aria-hidden="true" />
-            <span>{{ assetImages.length }}{{ tr('张') }}</span>
+            <Minimize2 v-if="imageGalleryExpanded" :size="17" aria-hidden="true" />
+            <Maximize2 v-else :size="17" aria-hidden="true" />
+            <span v-if="imageGalleryExpanded">{{ tr('收起') }}</span>
+            <span v-else>{{ assetImages.length }}{{ tr('张') }}</span>
           </button>
-        </div>
-        <section
-          v-if="hasMultipleImages && imageGalleryExpanded"
-          class="workbench-asset-gallery nodrag"
-          role="region"
-          :aria-label="tr('{p0}图片列表', { p0: assetName })"
-          @pointerdown.stop
-        >
-          <button
-            type="button"
-            class="workbench-asset-gallery__collapse"
-            :aria-label="tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
+          <section
+            v-if="hasMultipleImages && imageGalleryExpanded"
+            class="workbench-asset-gallery nodrag nowheel"
+            role="region"
+            :aria-label="tr('{p0}图片列表', { p0: assetName })"
             @pointerdown.stop
-            @keydown.space.stop
-            @click.stop="imageGalleryExpanded = false"
           >
-            <Minimize2 :size="17" aria-hidden="true" />
-            <span>{{ tr('收起') }}</span>
-          </button>
-          <div v-for="row in assetGalleryRows" :key="row.map(image => image.key).join('|')" class="workbench-media-gallery__row">
             <article
-              v-for="image in row"
+              v-for="image in assetImages"
               :key="image.key"
               class="workbench-asset-gallery__item"
               :class="{ 'is-primary': imageIsPrimary(image) }"
-              :style="assetGalleryItemStyle(image)"
               role="button"
               :tabindex="imageIsPrimary(image) ? -1 : 0"
               :aria-label="imageIsPrimary(image) ? tr('{p0}主图', { p0: assetName }) : tr('设{p0}{p1}为主图', { p0: assetName, p1: imageRoleLabel(image) })"
@@ -815,8 +789,8 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
                 </button>
               </div>
             </article>
-          </div>
-        </section>
+          </section>
+        </div>
         <AssetDefaultImage
           v-if="showDefaultVisualImage"
           :icon="assetTypeIconFor(assetTypeValue)"
