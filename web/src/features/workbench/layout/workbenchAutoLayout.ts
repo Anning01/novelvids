@@ -1,3 +1,5 @@
+import { isPinnedNode } from '../graph/nodeLayering'
+import { boundsOf, median, near, nearestFreeBox, neighborhoods, type LayoutBox } from './neighborhoods'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes';
 
 export const WORKBENCH_OVERVIEW_VIEWPORT = { x: 40, y: 40, zoom: 0.4 } as const;
@@ -98,51 +100,70 @@ export function workbenchLayoutBand(node: WorkbenchNode) {
   return 'main';
 }
 
-/**
- * Treat background sections as atomic layout units. Members retain their
- * relative positions so arranging the canvas never tears a section apart.
- */
+export function protectedLayoutKeys(nodes: WorkbenchNode[], extra?: ReadonlySet<string>) {
+  const fixed = new Set(extra)
+  for (const node of nodes) {
+    if (node.kind === 'section') for (const key of sectionMemberKeys(node)) fixed.add(key)
+    if (['section', 'chapter', 'note'].includes(node.kind) || isPinnedNode(node) || node.data.ui?.locked === true)
+      fixed.add(node.key)
+  }
+  return fixed
+}
+
+/** Retain authored groups in world coordinates; arrange only their surroundings. */
 export function buildWorkbenchGroupedAutoLayout(
   nodes: WorkbenchNode[],
   edges: WorkbenchEdge[] = [],
   options: WorkbenchAutoLayoutOptions = {},
-) {
-  const nodeByKey = new Map(nodes.map(node => [node.key, node]));
-  const sections = nodes.filter(node => node.kind === 'section');
-  const groupedMemberKeys = new Set(sections.flatMap(sectionMemberKeys));
-  const layoutUnits = nodes.filter(node =>
-    node.kind === 'section'
-    || (!['chapter', 'note'].includes(node.kind) && !groupedMemberKeys.has(node.key)),
-  );
-  const unitLayout = buildWorkbenchAutoLayout(layoutUnits, edges, options);
-  const result: Record<string, Point> = {};
-  for (const [nodeKey, position] of Object.entries(unitLayout)) {
-    const node = nodeByKey.get(nodeKey);
-    if (!node)
-      continue;
-    result[nodeKey] = position;
-    if (node.kind !== 'section')
-      continue;
-    const offset = {
-      x: position.x - node.position.x,
-      y: position.y - node.position.y,
-    };
-    for (const memberKey of sectionMemberKeys(node)) {
-      const member = nodeByKey.get(memberKey);
-      if (member) {
-        result[memberKey] = {
-          x: member.position.x + offset.x,
-          y: member.position.y + offset.y,
-        };
-      }
+): Record<string, Point> {
+  const gapX = options.columnGap ?? DEFAULT_COLUMN_GAP, gapY = options.rowGap ?? DEFAULT_ROW_GAP
+  const boxes = new Map(nodes.map(node => [node.key, { ...node.position, ...nodeSize(node, options.sizes ?? {}) }]))
+  const fixed = protectedLayoutKeys(nodes, options.fixedNodeKeys)
+  const memberSections = new Map<string, LayoutBox>()
+  const occupied: LayoutBox[] = []
+  for (const node of nodes) {
+    if (node.kind !== 'section') continue
+    for (const key of sectionMemberKeys(node)) {
+      memberSections.set(key, boxes.get(node.key)!)
     }
   }
-  for (const key of options.fixedNodeKeys ?? []) {
-    const node = nodeByKey.get(key);
-    if (node)
-      result[key] = { ...node.position };
+  for (const node of nodes) {
+    if (!fixed.has(node.key)) continue
+    const box = boxes.get(node.key)!
+    occupied.push(box)
   }
-  return result;
+  const chapter = nodes.find(node => node.kind === 'chapter')
+  const chapterBox = chapter && boxes.get(chapter.key)
+  const results: Record<string, Point> = {}
+  for (const group of neighborhoods(nodes.filter(node => !fixed.has(node.key)), edges, boxes, workbenchLayoutLane, gapX, gapY)) {
+    const local = buildWorkbenchAutoLayout(group.nodes, group.edges, { ...options, origin: { x: 0, y: 0 } })
+    const footprint = boundsOf(group.nodes.map(node => ({ ...boxes.get(node.key)!, ...local[node.key]! })))
+    const offsets: Point[] = []
+    for (const edge of group.anchors) {
+      const after = fixed.has(edge.source)
+      const fixedKey = after ? edge.source : edge.target, freeKey = after ? edge.target : edge.source
+      const anchor = boxes.get(fixedKey)!, free = boxes.get(freeKey)!, point = local[freeKey]!
+      const section = memberSections.get(fixedKey) ?? anchor
+      const x = after ? Math.max(anchor.x + anchor.width, section.x + section.width) + gapX
+        : Math.min(anchor.x, section.x) - gapX - free.width
+      offsets.push({ x: x - point.x, y: anchor.y + (anchor.height - free.height) / 2 - point.y })
+    }
+    if (!offsets.length) {
+      for (const node of group.nodes) offsets.push({ x: node.position.x - local[node.key]!.x, y: node.position.y - local[node.key]!.y })
+    }
+    let preferred = { x: footprint.x + median(offsets.map(p => p.x)), y: footprint.y + median(offsets.map(p => p.y)) }
+    if (options.origin && !group.anchors.length) preferred = options.origin
+    else if (chapterBox && !group.anchors.length && group.nodes.some(node => near(boxes.get(node.key)!, chapterBox, 0, 0))) {
+      preferred = { x: chapterBox.x + chapterBox.width + gapX, y: chapterBox.y }
+    }
+    const placed = nearestFreeBox({ ...footprint, ...preferred }, occupied, gapX, gapY)
+    occupied.push(placed)
+    for (const node of group.nodes) results[node.key] = {
+      x: placed.x + local[node.key]!.x - footprint.x,
+      y: placed.y + local[node.key]!.y - footprint.y,
+    }
+  }
+  return results
 }
 
 function orderedHeaderBandNames(names: string[]) {
@@ -454,6 +475,51 @@ function reduceEdgeCrossings(
   }
 }
 
+/** As in shengshimedia, transpose adjacent cards only when the order removes crossings. */
+function transposeCrossedNeighbors(columns: WorkbenchNode[][], incoming: Map<string, Set<string>>, outgoing: Map<string, Set<string>>) {
+  const ranks = new Map<string, { lane: number; row: number }>()
+  columns.forEach((column, lane) => column.forEach((node, row) => ranks.set(node.key, { lane, row })))
+  const neighborRows = (key: string, lane: number) => {
+    const byLane = new Map<number, number[]>()
+    for (const neighbor of new Set([...incoming.get(key)!, ...outgoing.get(key)!])) {
+      const rank = ranks.get(neighbor)!
+      if (rank.lane === lane) continue
+      const rows = byLane.get(rank.lane) ?? []
+      rows.push(rank.row)
+      byLane.set(rank.lane, rows)
+    }
+    return byLane
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    let changed = false
+    columns.forEach((column, lane) => {
+      if (column.length < 2 || column.every(node => workbenchLayoutFamily(node) === 'shot')) return
+      const neighbors = column.map(node => neighborRows(node.key, lane))
+      for (let i = 1; i < column.length; i++) {
+        let improvement = 0
+        for (const [otherLane, upper] of neighbors[i - 1]!) {
+          const lower = neighbors[i]!.get(otherLane)
+          if (!lower) continue
+          upper.sort((a, b) => a - b); lower.sort((a, b) => a - b)
+          let less = 0, equalEnd = 0
+          for (const row of upper) {
+            while (less < lower.length && lower[less]! < row) less++
+            while (equalEnd < lower.length && lower[equalEnd]! <= row) equalEnd++
+            improvement += less - (lower.length - equalEnd)
+          }
+        }
+        if (improvement <= 0) continue
+        const upper = column[i - 1]!, lower = column[i]!
+        column[i - 1] = lower; column[i] = upper
+        ranks.get(lower.key)!.row = i - 1; ranks.get(upper.key)!.row = i
+        const saved = neighbors[i - 1]!; neighbors[i - 1] = neighbors[i]!; neighbors[i] = saved
+        changed = true
+      }
+    })
+    if (!changed) break
+  }
+}
+
 /**
  * Rule-driven layered layout. Node families always receive distinct columns;
  * relationship affinity orders those columns, while measured dimensions and
@@ -516,6 +582,7 @@ export function buildWorkbenchAutoLayout(
   enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
   reduceEdgeCrossings(orderedColumns, incoming, outgoing, connectionCounts);
   enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
+  transposeCrossedNeighbors(orderedColumns, incoming, outgoing)
   const columns = orderedColumns.flatMap((column) => {
     const family = workbenchLayoutFamily(column[0]!);
     return (family === 'shot' || family === 'result')
@@ -540,6 +607,26 @@ export function buildWorkbenchAutoLayout(
       y += sizes[node.key]!.height + rowGap;
     }
   });
+  // Align partial columns (e.g. only some shots have a result) to connected card centers.
+  // Reserve space for the remaining rows so alignment never breaks sequence or packing.
+  const columnOf = new Map(columns.flatMap((column, index) => column.map(node => [node.key, index] as const)))
+  const align = (column: WorkbenchNode[], links: Map<string, Set<string>>) => {
+    if (column.every(node => workbenchLayoutFamily(node) === 'shot')) return
+    let top = mainOriginY
+    let space = layoutHeight - columnHeights[columnOf.get(column[0]!.key)!]!
+    for (const node of column) {
+      const centers = [...links.get(node.key)!].filter(key => columnOf.get(key) !== columnOf.get(node.key))
+        .map(key => positions[key]!.y + sizes[key]!.height / 2)
+      const height = sizes[node.key]!.height
+      const ideal = centers.length ? median(centers) - height / 2 : positions[node.key]!.y
+      const extra = Math.max(0, Math.min(space, ideal - top))
+      positions[node.key]!.y = top + extra
+      space -= extra
+      top += extra + height + rowGap
+    }
+  }
+  for (const column of [...columns].reverse()) align(column, outgoing)
+  for (const column of columns) align(column, incoming)
   let footerOriginY = mainOriginY + layoutHeight + rowGap;
   for (const bandName of footerBandNames) {
     const members = bandNodes.filter(node => workbenchLayoutBand(node) === bandName);

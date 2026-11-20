@@ -5,6 +5,8 @@
     "文件“{p0}”上传失败：{p1}": "Could not upload “{p0}”: {p1}"
   },
   "canvas_groups": {
+    "画布已整齐，无需移动节点": "Canvas is already arranged",
+    "保留分组，就近整理相连节点": "Keep groups in place and arrange connected nodes nearby",
     "分组设置": "Group settings",
     "编组": "Group",
     "取消编组": "Ungroup",

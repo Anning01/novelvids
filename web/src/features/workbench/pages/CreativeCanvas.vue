@@ -19,10 +19,12 @@ import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
 import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
+import { WireObstacles } from '../edges/edgeRouting'
+import { wireObstaclesKey } from '../edges/useWorkbenchWire'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
 import OutputBindingEdge from '../edges/OutputBindingEdge.vue'
 import ShotSequenceEdge from '../edges/ShotSequenceEdge.vue'
-import { buildWorkbenchGroupedAutoLayout } from '../layout/workbenchAutoLayout'
+import { buildWorkbenchGroupedAutoLayout, protectedLayoutKeys } from '../layout/workbenchAutoLayout'
 import { canvasZoomModifier } from '../interaction/canvasZoomModifier'
 import { selectionAutoPanDelta, selectionRectAfterAutoPan } from '../interaction/selectionAutoPan'
 import { workbenchSectionActionsKey } from '../interaction/sectionActions'
@@ -162,6 +164,21 @@ const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
+provide(wireObstaclesKey, computed(() => new WireObstacles(getNodes.value.flatMap(node => {
+  const { width, height } = node.dimensions
+  if (!width || !height || node.hidden) return []
+  const { x, y } = node.computedPosition
+  return [{ key: node.id, left: x - 8, right: x + width + 8, top: y - 36, bottom: y + height + 8,
+    members: node.type === 'section' ? new Set<string>(node.data.node_keys ?? []) : undefined }]
+}))))
+const highlightedWireNodes = computed(() => {
+  const keys = new Set(store.selectedNodeKeys)
+  for (const key of store.selectedNodeKeys) {
+    const node = store.nodeByKey(key)
+    if (node?.kind === 'section') for (const member of sectionMemberKeys(node)) keys.add(member)
+  }
+  return visibleStoreEdges.value.some(edge => keys.has(edge.source) || keys.has(edge.target)) ? keys : null
+})
 const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map((item) => {
   const handles = canonicalEdgeHandles(item)
   return {
@@ -170,6 +187,9 @@ const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map((item) => {
     target: item.target,
     type: item.type,
     selected: store.selectedEdgeKeys.includes(item.key),
+    class: highlightedWireNodes.value
+      ? (highlightedWireNodes.value.has(item.source) || highlightedWireNodes.value.has(item.target) ? 'is-related-wire' : 'is-muted-wire')
+      : undefined,
     sourceHandle: handles.sourceHandle,
     targetHandle: handles.targetHandle,
   }
@@ -671,27 +691,28 @@ function startSelectionAutoPan(event: MouseEvent) {
   selectionAutoPanFrame = window.requestAnimationFrame(runSelectionAutoPan)
 }
 async function autoArrange() {
-  store.checkpoint()
   const { height } = canvasSize()
   const measuredSizes = Object.fromEntries(getNodes.value.flatMap((item) => {
     const { width, height } = item.dimensions
     return width > 0 && height > 0 ? [[item.id, { width, height } satisfies NodeSize]] : []
   }))
-  const fixedNodeKeys = new Set(store.nodes
-    .filter(node => node.zIndex >= 1_000_000 || (node.data.ui as Record<string, unknown> | undefined)?.locked === true)
-    .map(node => node.key))
+  const fixedNodeKeys = protectedLayoutKeys(store.nodes)
   const positions = buildWorkbenchGroupedAutoLayout(visibleStoreNodes.value, visibleStoreEdges.value, {
     sizes: measuredSizes,
     maxColumnHeight: Math.max(1100, height * 2.2),
     fixedNodeKeys,
   })
-  for (const [nodeKey, position] of Object.entries(positions)) {
-    const item = store.nodeByKey(nodeKey)
-    if (!item) continue
-    store.updateNodeLayout(nodeKey, position, item.size, item.zIndex)
+  const changed = store.nodes.filter(node => {
+    const next = positions[node.key]
+    return next && (Math.abs(node.position.x - next.x) > 0.01 || Math.abs(node.position.y - next.y) > 0.01)
+  })
+  if (!changed.length) {
+    notice.info(tr('画布已整齐，无需移动节点'))
+    return
   }
+  store.checkpoint()
+  for (const node of changed) node.position = positions[node.key]!
   await nextTick()
-  await fitView({ padding: 0.08, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 240 })
   store.viewport = getViewport()
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
   store.persistLayout()

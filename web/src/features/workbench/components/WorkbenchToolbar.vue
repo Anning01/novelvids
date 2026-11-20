@@ -197,7 +197,7 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
       <button class="workbench-toolbar__button" :class="{ 'workbench-toolbar__button--icon': !canCreateSection }" type="button" aria-keyshortcuts="Control+G Meta+G" :aria-label="tr('为所选节点添加背景分区')" :title="tr('多选节点后添加背景分区')" :disabled="running || !canCreateSection" @click="$emit('createSection')">
         <Group :size="16" aria-hidden="true" /><span v-if="canCreateSection">{{ tr('编组') }}</span>
       </button>
-      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('自动整理布局')" :title="tr('按连接关系分列并自动避让')" :disabled="running" @click="$emit('auto-arrange')">
+      <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('自动整理布局')" :title="tr('保留分组，就近整理相连节点')" :disabled="running" @click="$emit('auto-arrange')">
         <LayoutGrid :size="16" aria-hidden="true" />
       </button>
       <button class="workbench-toolbar__button workbench-toolbar__button--icon" type="button" :aria-label="tr('删除所选')" :title="tr('删除所选（Delete）')" :disabled="running || !hasSelection" @click="$emit('deleteSelection')">

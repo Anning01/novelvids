@@ -2630,6 +2630,12 @@
   border-color: color-mix(in srgb, var(--creation-success) 42%, transparent);
   background: color-mix(in srgb, var(--creation-success) 42%, transparent);
 }
+.viral-workbench-canvas .vue-flow__edge-path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.viral-workbench-canvas .vue-flow__edge.is-muted-wire .vue-flow__edge-path { opacity: .28; }
+.viral-workbench-canvas .vue-flow__edge.is-related-wire .vue-flow__edge-path { opacity: 1; stroke-width: 2; }
 .viral-workbench-canvas .vue-flow__edge:hover .vue-flow__edge-path,
 .viral-workbench-canvas .vue-flow__edge.selected .vue-flow__edge-path,
 .viral-workbench-canvas .vue-flow__edge:focus .vue-flow__edge-path {

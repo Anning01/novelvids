@@ -13,6 +13,7 @@ vi.mock('../runtime/workbenchFlowRuntime', async original => ({
   useWorkbenchFlow: () => ({
     screenToFlowCoordinate: toCanvasPoint,
     findNode: () => undefined,
+    getNodes: { value: [] },
     getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
     vueFlowRef: { value: null },
   }),
