@@ -59,7 +59,7 @@ import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
 import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
 import './noop.css'
 
-const props = withDefaults(defineProps<{ novelId: number; chapterId: number; aspectRatio?: string; resolution?: string }>(), {
+const props = withDefaults(defineProps<{ novelId: number; chapterId: number; bootstrap?: ReturnType<typeof api.workbenchBootstrap>; aspectRatio?: string; resolution?: string }>(), {
   aspectRatio: '9:16',
   resolution: '720p',
 })
@@ -738,23 +738,32 @@ async function restoreViewport() {
   saveWorkbenchViewport(workspaceKey, store.viewport, bounds)
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', handleKeydown); window.addEventListener('keyup', handleKeyup)
+const loadError = ref('')
+let mounted = false
+
+async function openCanvas() {
+  loadError.value = ''
   try {
     const capabilityRequest = api.workbenchCapabilities().catch(() => null)
-    await store.load(props.novelId, props.chapterId)
+    await store.load(props.novelId, props.chapterId, props.bootstrap)
     const capabilityResponse = await capabilityRequest
-    if (capabilityResponse) capabilities.value = capabilityResponse.data
+    if (mounted && capabilityResponse) capabilities.value = capabilityResponse.data
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : tr('工作区加载失败'))
+    if (mounted) loadError.value = error instanceof Error ? error.message : tr('工作区加载失败')
   }
+}
+onMounted(() => {
+  mounted = true
+  window.addEventListener('keydown', handleKeydown); window.addEventListener('keyup', handleKeyup)
+  void openCanvas()
 })
-onBeforeUnmount(() => { store.cancelPendingWork(); stopSelectionAutoPan(); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('keyup', handleKeyup) })
+onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectionAutoPan(); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('keyup', handleKeyup) })
 </script>
 
 <template>
   <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">{{ tr('正在加载工作区…') }}</div>
+    <div v-else-if="loadError" class="workbench-state" role="alert">{{ loadError }} <AppButton @click="openCanvas">{{ tr('重新加载') }}</AppButton></div>
     <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
       <Background variant="lines" color="#2b2926" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />

@@ -8,6 +8,12 @@ const release = JSON.parse(readFileSync(new URL('../release.json', import.meta.u
 const build = randomUUID()
 export default defineConfig({
   define: { 'import.meta.env.VITE_STUDIO_BUILD': JSON.stringify(build) },
+  // Shared icons otherwise become dozens of tiny requests when opening the canvas.
+  build: {
+    rolldownOptions: {
+      output: { codeSplitting: { groups: [{ name: 'shared-icons', test: /[/\\]lucide-vue-next[/\\]/, minShareCount: 2 }] } },
+    },
+  },
   server: {
     port: 3000,
     host: '0.0.0.0',

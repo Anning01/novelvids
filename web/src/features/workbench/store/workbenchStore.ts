@@ -202,14 +202,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         if (!current && legacy) localStorage.setItem(this.layoutKey(), serializeWorkbenchState(saved))
       } catch { /* ignore invalid local layout */ }
     },
-    async load(novelId: number, chapterId: number) {
+    async load(novelId: number, chapterId: number, bootstrap?: ReturnType<typeof api.workbenchBootstrap>) {
       const epoch = this.loadEpoch.begin()
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
       this.removedAgentDrafts = {}
       this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.busyComposerKeys = []; this.pollingVideoIds = []; this.pollingRemakeTaskId = null; this.projectConfig = defaultProjectConfig(); this.remakeSource = null; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [bootstrapResponse, videoConfigResponse, imageConfigResponse] = await Promise.all([
-          api.workbenchBootstrap(novelId, chapterId),
+          bootstrap ?? api.workbenchBootstrap(novelId, chapterId),
           api.videoGenerationModels(),
           api.imageGenerationModels(),
         ])
