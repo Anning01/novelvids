@@ -86,3 +86,25 @@ it('draws elliptical grids with independent densities and preserves saved legacy
   await wrapper.setProps({ modelValue: JSON.parse(JSON.stringify(saved)) })
   expect(wrapper.get('[aria-label="图片批注画布"]').findAll('polyline')).toHaveLength(14 + 46)
 })
+
+it('returns to the centered fit view when resetting, switching images, or reopening', async () => {
+  const wrapper = mount(ImageAnnotationDialog, {
+    props: { open: true, imageUrl: '/media/first.png', modelValue: [] },
+    global: { stubs: { Teleport: true } },
+  })
+  const zoomIn = () => wrapper.get('[aria-label="放大图片"]').trigger('click')
+  const surfaceStyle = () => wrapper.get('.image-annotation-dialog__surface').attributes('style')
+  const initialStyle = surfaceStyle()
+  await zoomIn()
+  expect(surfaceStyle()).not.toBe(initialStyle)
+  await wrapper.get('[aria-label="重置图片视图"]').trigger('click')
+  expect(surfaceStyle()).toBe(initialStyle)
+  await zoomIn()
+  await wrapper.setProps({ imageUrl: '/media/second.png' })
+  expect(surfaceStyle()).toBe(initialStyle)
+  await zoomIn()
+  await wrapper.setProps({ open: false })
+  await wrapper.setProps({ open: true })
+  expect(surfaceStyle()).toBe(initialStyle)
+  wrapper.unmount()
+})

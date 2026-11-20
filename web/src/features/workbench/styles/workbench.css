@@ -4344,6 +4344,7 @@
   z-index: 10000010;
   inset: 0;
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: 24px;
   background: rgb(8 7 6 / 82%);
@@ -4351,7 +4352,9 @@
 }
 .image-annotation-dialog {
   width: min(1180px, 100%);
-  height: min(820px, calc(100vh - 48px));
+  height: min(820px, 100%);
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -4413,6 +4416,7 @@
 }
 .image-annotation-dialog__toolbar {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: 12px;
@@ -4478,6 +4482,8 @@
   text-align: center;
 }
 .image-annotation-dialog__viewport {
+  container-type: size;
+  min-width: 0;
   min-height: 0;
   display: grid;
   place-items: center;
@@ -4497,15 +4503,14 @@
 }
 .image-annotation-dialog__surface {
   position: relative;
-  max-width: 100%;
-  max-height: 100%;
   transform-origin: center;
   transition: transform 120ms ease-out;
 }
 .image-annotation-dialog__surface img {
   display: block;
-  max-width: calc(100vw - 110px);
-  max-height: calc(100vh - 250px);
+  /* The image sizes the SVG overlay. Both fit inside the padded editing area. */
+  max-width: 100cqw;
+  max-height: 100cqh;
   border-radius: 6px;
   object-fit: contain;
   box-shadow: 0 18px 48px rgb(0 0 0 / 48%);
@@ -4593,11 +4598,11 @@
 
 @media (max-width: 720px) {
   .image-annotation-backdrop { padding: 8px; }
-  .image-annotation-dialog { height: calc(100vh - 16px); }
+  .image-annotation-dialog { height: 100%; }
   .image-annotation-dialog__toolbar { align-items: flex-start; flex-wrap: wrap; }
   .image-annotation-dialog__tools { width: 100%; overflow-x: auto; }
   .image-annotation-dialog__actions { margin-left: 0; }
-  .image-annotation-dialog__surface img { max-width: calc(100vw - 44px); }
+  .image-annotation-dialog__viewport { padding: 12px; }
   .media-picker-backdrop { padding: 10px; }
   .media-picker { max-height: calc(100vh - 20px); }
   .media-picker-grid { grid-template-columns: 1fr; }
@@ -4659,3 +4664,14 @@
   cursor: pointer;
 }
 .viral-workbench-canvas .workbench-toolbar__scroll > .workbench-color-trigger:hover { background: var(--app-surface-hover); color: var(--app-text); }
+
+@media (max-height: 500px) {
+  .image-annotation-backdrop { padding: 8px; }
+  .image-annotation-dialog > header, .image-annotation-dialog > footer { padding: 6px 12px; }
+  .image-annotation-dialog__viewport { padding: 8px; }
+  .image-annotation-dialog__toolbar { flex-wrap: nowrap; align-items: center; overflow-x: auto; padding: 5px 10px; }
+  .image-annotation-dialog__toolbar > * { flex: none; }
+  .image-annotation-dialog__tools { width: auto; overflow: visible; }
+  .image-annotation-dialog__tools button { min-width: 34px; padding: 0 7px; }
+  .image-annotation-dialog__tools button span { display: none; }
+}
