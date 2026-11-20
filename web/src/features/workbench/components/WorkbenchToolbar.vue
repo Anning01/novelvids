@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { imageUploadAccept, videoUploadAccept } from '../interaction/canvasMediaFiles'
 import { tr } from '@/i18n'
 
 import {
@@ -187,8 +188,8 @@ function emitFiles(kind: 'image' | 'video' | 'audio', event: Event) {
       </Transition>
     </div>
 
-    <input ref="imageInput" class="workbench-toolbar__file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple :aria-label="tr('选择上传图片文件')" @change="emitFiles('image', $event)">
-    <input ref="videoInput" class="workbench-toolbar__file-input" type="file" accept="video/mp4,video/quicktime,.mp4,.mov" multiple :aria-label="tr('选择上传视频文件')" @change="emitFiles('video', $event)">
+    <input ref="imageInput" class="workbench-toolbar__file-input" type="file" :accept="imageUploadAccept" multiple :aria-label="tr('选择上传图片文件')" @change="emitFiles('image', $event)">
+    <input ref="videoInput" class="workbench-toolbar__file-input" type="file" :accept="videoUploadAccept" multiple :aria-label="tr('选择上传视频文件')" @change="emitFiles('video', $event)">
     <input ref="audioInput" class="workbench-toolbar__file-input" type="file" accept="audio/wav,audio/x-wav,audio/mpeg,.wav,.mp3" multiple :aria-label="tr('选择上传音频文件')" @change="emitFiles('audio', $event)">
 
     <div class="workbench-toolbar__scroll" tabindex="0" role="group" :aria-label="tr('画布节点与编辑工具，可横向滚动')">

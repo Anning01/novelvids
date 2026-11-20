@@ -635,14 +635,17 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return [...unique.values()]
     },
     async uploadMedia(kind: 'image_media' | 'video_media' | 'audio_media', file: File, position?: Point) {
+      const epoch = this.loadEpoch.snapshot()
       if (kind === 'video_media' && /\.(mp4|mov)$/i.test(file.name)) {
         const resource = await libraryApi.upload(file, 0, undefined, true)
+        this.loadEpoch.assertCurrent(epoch)
         const item = this.addUploadedMedia(kind, { filename: resource.filename, original_filename: file.name, content_type: resource.content_type }, position)
         item.data = { ...item.data, url: resource.url, upload_source_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
         this.persistLayout()
         return item
       }
       const uploaded = await api.upload(file)
+      this.loadEpoch.assertCurrent(epoch)
       return this.addUploadedMedia(kind, {
         filename: uploaded.filename,
         original_filename: uploaded.original_filename || file.name,
@@ -650,7 +653,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }, position)
     },
     async uploadImageAsset(file: File, position?: Point) {
+      const epoch = this.loadEpoch.snapshot()
       const uploaded = await api.upload(file)
+      this.loadEpoch.assertCurrent(epoch)
       const originalFilename = uploaded.original_filename || file.name
       const canonicalName = mediaTitle(originalFilename)
       const created = (await api.createAsset({
@@ -668,6 +673,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           annotations: [],
         }),
       })).data
+      this.loadEpoch.assertCurrent(epoch)
       this.assets.push(created)
       this.rebuildGraph()
       const item = this.nodeByKey(`asset-${created.id}`) || null

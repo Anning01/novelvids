@@ -287,3 +287,26 @@ it('keeps an existing asset type explicit when replacing its image', async () =>
     },
   })
 })
+
+it('does not create an asset in the next chapter when an upload finishes after leaving the canvas', async () => {
+  let release!: (value: Awaited<ReturnType<typeof api.upload>>) => void
+  const created = createAssetMock.mock.calls.length
+  uploadMock.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+  const pending = store.uploadImageAsset(new File(['x'], 'sample.png', { type: 'image/png' }))
+  store.cancelPendingWork()
+  store.chapterId++
+  release({ filename: 'sample.png' } as Awaited<ReturnType<typeof api.upload>>)
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  expect(createAssetMock.mock.calls).toHaveLength(created)
+})
+
+it('ignores a video upload that completes after a chapter switch', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof libraryApi.upload>>) => void
+  vi.mocked(libraryApi.upload).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  const pending = store.uploadMedia('video_media', new File(['video'], 'clip.mov', { type: 'video/quicktime' }))
+  store.cancelPendingWork()
+  store.chapterId++
+  finish({ id: 42 } as Awaited<ReturnType<typeof libraryApi.upload>>)
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  expect(store.manualNodes).toHaveLength(0)
+})

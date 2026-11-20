@@ -1,4 +1,9 @@
 {
+  "canvas_file_drop": {
+    "松开即可将图片或视频添加到画布": "Drop to add images or videos to the canvas",
+    "“{p0}”不是支持的图片或视频格式": "“{p0}” is not a supported image or video format",
+    "文件“{p0}”上传失败：{p1}": "Could not upload “{p0}”: {p1}"
+  },
   "canvas_groups": {
     "分组设置": "Group settings",
     "编组": "Group",

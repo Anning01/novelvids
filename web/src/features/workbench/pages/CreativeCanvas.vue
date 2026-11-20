@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
+import { droppedMediaKind } from '../interaction/canvasMediaFiles'
+import { isAbortError } from '../execution/workbenchAsync'
 
 import type { Connection, Edge, Node, NodeChange, NodeDragEvent, NodeTypesObject, OnConnectStartParams } from '@vue-flow/core'
 import type { CompatibleNodeCreation, WorkbenchConnectionOrigin, WorkbenchNodeCreationCandidate } from '../graph/nodeCreationRules'
@@ -552,15 +554,58 @@ async function addAsset() {
   const created = await store.addEmptyAsset(visibleNodePosition({ width: 520, height: 293 }))
   if (created) await ensureNodeVisible(created.key)
 }
-async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File) {
+async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File, position?: Point) {
   const size = kind === 'audio_media' ? { width: 420, height: 170 } : kind === 'image_media' ? { width: 520, height: 360 } : { width: 360, height: 340 }
   try {
     const created = kind === 'image_media'
-      ? await store.uploadImageAsset(file, visibleNodePosition(size))
-      : await store.uploadMedia(kind, file, visibleNodePosition(size))
-    if (created) await ensureNodeVisible(created.key)
+      ? await store.uploadImageAsset(file, position ?? visibleNodePosition(size))
+      : await store.uploadMedia(kind, file, position ?? visibleNodePosition(size))
+    if (created && !position) await ensureNodeVisible(created.key)
+    return created
   } catch (error) {
-    notice.error(error instanceof Error ? error.message : tr('媒体上传失败'))
+    if (!isAbortError(error) && mounted) notice.error(tr('文件“{p0}”上传失败：{p1}', { p0: file.name, p1: error instanceof Error ? error.message : tr('媒体上传失败') }))
+  }
+}
+const fileDragDepth = ref(0)
+const uploadingFiles = ref(0)
+const canDropFiles = computed(() => !store.loading && !loadError.value)
+const DROP_NODE_GAP = 32
+
+function dragFiles(event: DragEvent) {
+  const transfer = event.dataTransfer
+  if (!transfer?.types.includes('Files')) return
+  event.preventDefault()
+  transfer.dropEffect = canDropFiles.value ? 'copy' : 'none'
+  if (canDropFiles.value && event.type === 'dragenter') fileDragDepth.value++
+}
+
+async function dropFiles(event: DragEvent) {
+  fileDragDepth.value = 0
+  const transfer = event.dataTransfer
+  if (!transfer?.types.includes('Files')) return
+  event.preventDefault()
+  if (!canDropFiles.value) return
+  const files = Array.from(transfer.files)
+  const epoch = store.loadEpoch.snapshot()
+  let position = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+  for (const file of files) {
+    if (!mounted || !store.loadEpoch.isCurrent(epoch)) break
+    const kind = droppedMediaKind(file)
+    if (!kind) {
+      notice.error(tr('“{p0}”不是支持的图片或视频格式', { p0: file.name }))
+      continue
+    }
+    uploadingFiles.value++
+    try {
+      const node = await uploadMedia(kind, file, position)
+      if (node && mounted && store.loadEpoch.isCurrent(epoch)) {
+        await nextTick()
+        const element = vueFlowRef.value?.querySelector<HTMLElement>(`.vue-flow__node[data-id="${CSS.escape(node.key)}"]`)
+        position = { x: position.x + (element?.offsetWidth || canvasNodeSize(node).width) + DROP_NODE_GAP, y: position.y }
+      }
+    } finally {
+      uploadingFiles.value--
+    }
   }
 }
 function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
@@ -768,7 +813,9 @@ onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectio
 </script>
 
 <template>
-  <main class="viral-workbench-page" @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
+  <main class="viral-workbench-page"
+    @dragenter="dragFiles" @dragover="dragFiles" @dragleave="fileDragDepth = Math.max(0, fileDragDepth - 1)" @drop="dropFiles"
+    @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">{{ tr('正在加载工作区…') }}</div>
     <div v-else-if="loadError" class="workbench-state" role="alert">{{ loadError }} <AppButton @click="openCanvas">{{ tr('重新加载') }}</AppButton></div>
     <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
@@ -783,5 +830,24 @@ onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectio
       <p class="workbench-keyboard-status" role="status" :aria-label="tr('键盘连线状态')" aria-live="polite">{{ keyboardStatus }}</p>
       <div v-if="visibleStoreNodes.length === 0" class="workbench-empty" role="status"><span>{{ tr('画布还是空的') }}</span><AppButton type="button" @click="addShot">{{ tr('添加第一个视频') }}</AppButton></div>
     </VueFlow>
+    <div v-if="canDropFiles && fileDragDepth" class="canvas-file-drop" aria-hidden="true">
+      <span>{{ tr('松开即可将图片或视频添加到画布') }}</span>
+    </div>
+    <div v-if="uploadingFiles" role="status" class="canvas-upload-status">{{ tr('上传中…') }}</div>
   </main>
 </template>
+
+<style scoped>
+.viral-workbench-page { position: relative; }
+.canvas-file-drop {
+  position: absolute; z-index: 40; inset: 6px; display: grid; place-items: center;
+  border: 2px dashed var(--app-accent); border-radius: 12px;
+  background: color-mix(in srgb, var(--app-accent) 7%, transparent);
+  pointer-events: none;
+}
+.canvas-file-drop span, .canvas-upload-status {
+  padding: 7px 14px; border: 1px solid var(--app-border-strong); border-radius: 9px;
+  background: var(--app-surface); color: var(--app-text); box-shadow: var(--app-shadow);
+}
+.canvas-upload-status { position: absolute; z-index: 40; top: 12px; left: 50%; transform: translateX(-50%); pointer-events: none; }
+</style>

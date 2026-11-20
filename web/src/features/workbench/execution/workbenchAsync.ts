@@ -72,6 +72,10 @@ export class WorkbenchLoadEpoch {
     return epoch === this.value
   }
 
+  assertCurrent(epoch: number) {
+    if (!this.isCurrent(epoch)) throw abortError()
+  }
+
   snapshot() { return this.value }
 }
 
