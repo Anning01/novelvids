@@ -17,7 +17,7 @@ from tortoise.transactions import atomic, in_transaction
 from auth.models import RechargeOrder, Team, TeamMember, User
 from config import settings
 from services import balance, invites
-from services.team_lifecycle import archive_team, require_unarchived
+from services.team_lifecycle import ARCHIVED_TEAM_STATUS, archive_team, require_unarchived
 from services.team_provisioning import create_owned_team
 from services.wechat_pay import WeChatPayError, wechat_pay_service
 from utils.enums import TeamRoleEnum
@@ -557,7 +557,7 @@ class TeamController:
     # ---- 团队（超管） ----
 
     async def teams(self, page: int, page_size: int) -> dict:
-        query = Team.all()
+        query = Team.exclude(status=ARCHIVED_TEAM_STATUS)
         total = await query.count()
         teams = await query.order_by("-id").offset((page - 1) * page_size).limit(page_size)
         owner_ids = {team.owner_user_id for team in teams if team.owner_user_id}

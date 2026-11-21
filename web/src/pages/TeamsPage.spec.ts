@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import TeamsPage from './TeamsPage.vue'
 import { api } from '@/api'
+import { resolveAppConfirm } from '@/shared/confirmDialog'
 
 function mountPage() {
   const router = createRouter({
@@ -148,15 +149,18 @@ describe('TeamsPage', () => {
   })
 })
 
-it('displays archived teams and keeps their administrative mutation controls out of the row', async () => {
-  vi.spyOn(api, 'teams').mockResolvedValue({data: {items: [
-    {id: 4, name: '旧团队', balance: 15, status: 2, owner_user_id: null, member_count: 0},
-  ],pagination: {total: 1}}} as never)
+it('refreshes the list after dissolution and removes the team row', async () => {
+  const team = { id: 4, name: '旧团队', balance: 15, status: 1, member_count: 1 }
+  vi.spyOn(api, 'teams')
+    .mockResolvedValueOnce({ data: { items: [team], pagination: { total: 1 } } } as never)
+    .mockResolvedValue({ data: { items: [], pagination: { total: 0 } } } as never)
+  const archive = vi.spyOn(api, 'archiveTeam').mockResolvedValue({ data: null } as never)
   const wrapper = mountPage()
   await flushPromises()
-  const row = wrapper.get('tbody tr')
-  expect(row.text()).toContain('已归档')
-  expect(row.text()).toContain('15.00')
-  expect(row.find('button').exists()).toBe(false)
+  await wrapper.get('tbody tr').findAll('button').find(button => button.text() === '解散团队')!.trigger('click')
+  resolveAppConfirm(true)
+  await flushPromises()
+  expect(archive).toHaveBeenCalledWith(team.id)
+  expect(wrapper.find('tbody tr').exists()).toBe(false)
   wrapper.unmount()
 })

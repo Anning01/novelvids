@@ -293,6 +293,21 @@ async def test_team_archive_is_super_only_idempotent_and_terminal(client, user_w
 
 
 @pytest.mark.asyncio
+async def test_archived_teams_leave_the_list_and_page_count(client, user_world):
+    headers = _auth(user_world["token"])
+    active = user_world["team"]
+    stopped = await Team.create(name="暂停使用", status=0)
+    archived = await Team.create(name="已解散")
+    assert (await client.delete(f"/api/team/teams/{archived.id}", headers=headers)).json()["code"] == 0
+    for page, expected in enumerate(([stopped.id], [active.id], []), start=1):
+        response = await client.get("/api/team/teams", params={"page": page, "page_size": 1}, headers=headers)
+        data = response.json()["data"]
+        assert [item["id"] for item in data["items"]] == expected
+        assert data["pagination"]["total"] == data["pagination"]["pages"] == 2
+    assert await Team.filter(id=archived.id, status=2).exists()
+
+
+@pytest.mark.asyncio
 async def test_failed_user_removal_rolls_back_archive(client, user_world, monkeypatch):
     from controllers.user import user_controller
     team, user = user_world["team"], user_world["alice"]
