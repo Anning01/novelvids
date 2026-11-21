@@ -192,8 +192,6 @@ class Settings:
     REMAKE_MEDIA_SSH_HOST = os.getenv("REMAKE_MEDIA_SSH_HOST", "").strip()
     REMAKE_MEDIA_WORKER_PATH = os.getenv("REMAKE_MEDIA_WORKER_PATH", "/opt/novelvids-media-worker").strip()
     REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
-    # New projects split long takes into short ordered blocks. Zero explicitly selects sequential shots.
-    REMAKE_SHOT_BLOCK_SIZE = max(0, int(os.getenv("REMAKE_SHOT_BLOCK_SIZE", "5")))
     # Leave cores for the application; a small server can explicitly reserve more via the override.
     _default_media_slots = min(4, max(1, (os.cpu_count() or 2) // 2))
     REMAKE_MEDIA_CONCURRENCY = max(1, int(os.getenv("REMAKE_MEDIA_CONCURRENCY", str(_default_media_slots))))

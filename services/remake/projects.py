@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from config import settings
-
 from utils.messages import localized_message
 
 from services.language import configured_language
@@ -228,10 +226,8 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
-                            "remake_context_version": 2,
+                            "remake_context_version": 3,
                             "source_checksum": source.checksum,
-                            "remake_block_size": settings.REMAKE_SHOT_BLOCK_SIZE,
-                            "remake_episode_count": len(prepared),
                             **({"catalog_seed_task_id": str(created[0][1].id),
                                 "catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),

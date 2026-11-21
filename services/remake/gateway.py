@@ -72,6 +72,7 @@ class RemakeVideoAnalysisGateway:
             "completion_tokens": 0,
             "total_tokens": 0,
         }
+        self.first_request_started_at: float | None = None
         self.timings: list[dict[str, Any]] = []
 
     async def analyze_many(
@@ -86,7 +87,7 @@ class RemakeVideoAnalysisGateway:
         completed_results: dict[int, dict] | None = None,
         held_shots: frozenset[int] = frozenset(),
         continuity_language: str | None = None,
-        block_size: int = 0,
+        block_size: int | None = 0,
         draft_results: dict | None = None,
         audit_results: dict | None = None,
     ) -> list[dict[str, Any]]:
@@ -129,8 +130,10 @@ class RemakeVideoAnalysisGateway:
                     await on_completed(completed, len(paths))
             return result
 
-        if continuity_language and block_size > 1 and len(paths) > block_size and (self.config.concurrency > 1 or draft_results) and not held_shots:
-            from services.remake.shot_blocks import confirmed_blocks
+        use_parallel_shots = block_size is None and len(paths) > 1
+        use_legacy_blocks = block_size is not None and block_size > 1 and len(paths) > block_size
+        if continuity_language and (use_parallel_shots or use_legacy_blocks) and (self.config.concurrency > 1 or draft_results) and not held_shots:
+            from services.remake.shot_blocks import confirmed_blocks, confirmed_parallel_shots
             from services.creation_agent.skill_execution import current_execution
             from services.creation_agent.operation_receipts import execute_step
             from prompts.remake import shot_continuity
@@ -159,13 +162,16 @@ class RemakeVideoAnalysisGateway:
                     context = context_builder(i) if context_builder else {}
                     facts = continuity_audit_facts(i, previous, candidate, context, continuity_language)
                     kept = await self.analyze_one(index=i, path=paths[i - 1],
-                        prompt=continuity_audit_instruction(continuity_language), schema_name="shot_continuity_check",
+                        prompt=continuity_audit_instruction(continuity_language, parallel_drafts=use_parallel_shots),
+                        schema_name="shot_continuity_check",
                         response_schema=RemakeContinuityVerdict.model_json_schema(), context=facts)
                 return RemakeContinuityVerdict.model_validate({k: kept[k] for k in ("consistent", "reason")}).consistent
 
             execution = current_execution.get()
             shared_window = execution and execution.params.get("remake_context_version", 0) >= 2
-            result = await confirmed_blocks(len(paths), block_size, capacity=None if shared_window else self.config.concurrency,
+            scheduler = confirmed_parallel_shots if use_parallel_shots else confirmed_blocks
+            args = (len(paths),) if use_parallel_shots else (len(paths), block_size)
+            result = await scheduler(*args, capacity=None if shared_window else self.config.concurrency,
                 language=continuity_language, confirmed=dict(saved), drafts=dict(draft_results or {}),
                 run=generate, promote=promote, report=on_completed, audit=audit)
             return [{**value, "shot_index": i, "file": paths[i - 1].name} for i, value in enumerate(result, 1)]
@@ -228,6 +234,8 @@ class RemakeVideoAnalysisGateway:
 
     async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft):
         started_at = self.clock()
+        if self.first_request_started_at is None:
+            self.first_request_started_at = started_at
         from prompts.remake import render_remake_request
         from utils.prompt_language import task_language
         from services.creation_agent.skill_execution import current_execution
@@ -391,6 +399,7 @@ class RemakeVideoAnalysisGateway:
             "index": index,
             "schema_name": schema_name,
             "duration_ms": duration_ms,
+            "start_offset_ms": round((started_at - self.first_request_started_at) * 1000),
             "attempts": attempts,
             "status": status,
         }

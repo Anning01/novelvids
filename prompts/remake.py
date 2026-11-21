@@ -228,7 +228,13 @@ def continuity_audit_facts(index, previous, draft, context, language):
     }
 
 
-def continuity_audit_instruction(language):
+def continuity_audit_instruction(language, *, parallel_drafts=False):
+    if parallel_drafts:
+        return ("对照相邻两镜的初稿摘要和本镜原片。检查本镜是否准确承接所给上一镜末态，是否错误重复或漏掉动作、对白和旁白。"
+                "保留原片有意回放和跨切点的真实语音。只返回本镜能否按原样保留及简短依据。" if language == "zh" else
+                "Compare the adjacent drafts using this clip and its audio. Check the transition from the supplied "
+                "previous ending for missing or repeated actions and speech. Preserve intentional replays and speech "
+                "that crosses the cut. Return whether this draft can stand unchanged and a short reason.")
     if language == "zh":
         return ("仅校对当前候选与真实上一镜的衔接。以附带的本镜原片和原声为准。核对已完成动作、人物/道具状态、"
                 "对白与旁白是否被错误重演或漏掉；保留原片刻意回放及跨切口的真实语音。只返回是否可以原样保留及简短依据。")

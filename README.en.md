@@ -102,7 +102,7 @@ Watch the tutorial to learn how to use NovelVids. For finished creations, see th
 | A revision in mind | Ask the assistant to change selected objects, inspect diffs and recorded changes, and undo supported edits |
 | Generated footage | Track tasks and versions, connect shots, assemble episodes and optionally enhance resolution |
 
-You can also use **Remake studio** to analyze reference videos you are authorized to use and turn their shots into an editable project. New analyses process five-shot blocks concurrently and carry context within each block. A block boundary is checked against its confirmed predecessor. Episodes share model capacity and back off on rate limits. Set `REMAKE_SHOT_BLOCK_SIZE` to change the block length, or to `0` for sequential shots within each episode.
+You can also use **Remake studio** to analyze reference videos you are authorized to use and turn their shots into an editable project. Ready shots enter a common queue bounded by the selected model’s concurrency. Adjacent drafts can be checked in parallel. Shots are confirmed in order, with corrections based on the actual preceding shot. A single model slot uses sequential continuity directly. Episodes share capacity and back off on rate limits.
 
 ### Why a workspace?
 

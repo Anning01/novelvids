@@ -112,3 +112,26 @@ async def test_pressure_in_one_block_preserves_later_independent_drafts():
         await confirmed_blocks(9,3,capacity=2,language='en',confirmed=confirmed,drafts=drafts,
                                run=run,promote=promote,report=None)
     assert set(confirmed)=={1,2,3} and set(drafts)=={7,8,9}
+
+
+@pytest.mark.asyncio
+async def test_parallel_cut_checks_overlap_and_repaired_endings_invalidate_only_dependent_results():
+    from services.remake.shot_blocks import confirmed_parallel_shots
+    checked_later = asyncio.Event()
+    repairs = []
+    async def run(i, previous, draft):
+        if previous:
+            repairs.append((i, previous['actions']))
+        return {'actions': ['changed' if previous and i == 2 else str(i)]}
+    async def audit(i, previous, candidate):
+        if i == 2:
+            await asyncio.wait_for(checked_later.wait(), 1)
+        elif i == 4:
+            checked_later.set()
+        return i != 2
+    async def promote(i, data):
+        return data
+    result = await confirmed_parallel_shots(5, capacity=4, language='zh', confirmed={}, drafts={},
+                                            run=run, audit=audit, promote=promote, report=None)
+    assert repairs == [(2, ['1']), (3, ['changed'])]
+    assert result[1]['actions'] == ['changed']

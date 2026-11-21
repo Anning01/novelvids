@@ -130,7 +130,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     storyboard_strategy=project.storyboard_strategy,
                     aspect_ratio=project.aspect_ratio or '16:9',
                     **({"scene_cache": cache} if execution else {}),
-                    **({"source": source} if request_params.get("remake_context_version") in (1, 2) else {}),
+                    **({"source": source} if request_params.get("remake_context_version") in (1, 2, 3) else {}),
                 )
                 async def persist():
                     summary = await self.persistence.persist(

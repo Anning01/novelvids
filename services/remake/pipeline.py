@@ -219,6 +219,8 @@ class RemakeDecompositionPipeline:
         completed = {i: saved[f'model:remake:RemakeShot:{i}'] for i in range(1, len(scene_paths) + 1)
                      if f'model:remake:RemakeShot:{i}' in saved}
         held = frozenset(execution.params.get("held_shots", [])) - completed.keys() if execution else set()
+        params = execution.params if execution else {}
+        block_size = None if params.get("remake_context_version", 0) >= 3 else params.get("remake_block_size", 0)
         shots_started = time.monotonic()
         raw_prompts = await gateway.analyze_many(
             scene_paths,
@@ -230,7 +232,7 @@ class RemakeDecompositionPipeline:
                                           **({'source_interval': ranges[scene_paths[index - 1].name]}
                                              if scene_paths[index - 1].name in ranges else {})},
             **({'continuity_language': language,
-                'block_size': execution.params.get('remake_block_size', 0) if execution else 0,
+                'block_size': block_size,
                 'audit_results': {i: saved[f'model:structured:RemakeContinuityVerdict:{i}'] for i in range(1, len(scene_paths) + 1)
                                  if f'model:structured:RemakeContinuityVerdict:{i}' in saved},
                 'draft_results': {i: saved[f'model:remake:RemakeShot:draft-{i}'] for i in range(1, len(scene_paths) + 1)
@@ -242,12 +244,14 @@ class RemakeDecompositionPipeline:
         if held:
             await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
             raise RemakeAwaitingResults("剩余片段未完成，可以重试")
+        phase_times["shot_analysis_ms"] = round((time.monotonic() - shots_started) * 1000)
         speech_reviews = []
         if execution and execution.params.get("remake_context_version", 0) >= 2:
             from services.remake.speech_boundary import repeated_lines, review_speech
             if any(list(repeated_lines(a,b)) for a,b in zip(raw_prompts,raw_prompts[1:])):
                 await _report(progress, 87, "reviewing_continuity")
-                raw_prompts, speech_reviews = await review_speech(raw_prompts, scene_paths, gateway, saved, language)
+                raw_prompts, speech_reviews = await timed("speech_review_ms", lambda: review_speech(
+                    raw_prompts, scene_paths, gateway, saved, language))
         prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
             strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 

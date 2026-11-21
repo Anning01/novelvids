@@ -89,3 +89,59 @@ async def confirmed_blocks(count, block_size, *, capacity, language, confirmed, 
         if isinstance(result, BaseException):
             raise result
     return [confirmed[i] for i in range(1, count + 1)]
+
+
+async def confirmed_parallel_shots(count, *, capacity, language, confirmed, drafts, run, promote, report, audit):
+    """Schedule all drafts, then check each cut as soon as its two original drafts exist."""
+    slots = asyncio.Semaphore(capacity) if capacity is not None else None
+    fatal = None
+
+    async def model_step(fn, *args):
+        nonlocal fatal
+        async with slots if slots is not None else nullcontext():
+            if fatal is not None:
+                raise fatal
+            try:
+                return await fn(*args)
+            except Exception as exc:
+                if not provider_pressure(exc):
+                    fatal = exc
+                raise
+
+    async def initial(i):
+        # Use the same immutable draft on retries even when its final version was corrected.
+        if i in drafts:
+            return drafts[i]
+        if i in confirmed:
+            return confirmed[i]
+        return await model_step(run, i, None, i != 1)
+
+    originals = {i: asyncio.create_task(initial(i)) for i in range(1, count + 1)}
+
+    async def check(i):
+        previous, candidate = await asyncio.gather(originals[i - 1], originals[i])
+        return await model_step(audit, i, previous, candidate)
+
+    checks = {i: asyncio.create_task(check(i)) for i in range(2, count + 1) if i not in confirmed}
+    try:
+        for i, future in originals.items():
+            if i in confirmed:
+                continue
+            candidate = await future
+            if i == 1:
+                value = candidate
+            else:
+                previous = confirmed[i - 1]
+                original = await originals[i - 1]
+                same_ending = shot_continuity(previous, i - 1, language) == shot_continuity(original, i - 1, language)
+                if await checks[i] and same_ending:
+                    value = await promote(i, candidate)
+                else:
+                    value = await model_step(run, i, previous, False)
+            confirmed[i] = value
+            if report:
+                await report(len(confirmed), count)
+    finally:
+        # Drain accepted requests and retain their receipts even if an earlier cut failed.
+        await asyncio.gather(*originals.values(), *checks.values(), return_exceptions=True)
+    return [confirmed[i] for i in range(1, count + 1)]

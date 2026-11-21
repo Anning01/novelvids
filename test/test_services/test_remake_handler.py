@@ -107,7 +107,8 @@ async def test_handler_preserves_actionable_worker_failure_without_persisting(tm
 
 
 @pytest.mark.asyncio
-async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_billing_metadata(tmp_path: Path):
+@pytest.mark.parametrize("version", [None, 1, 2, 3])
+async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_billing_metadata(tmp_path: Path, version):
     novel, chapter, source, task = await _records(tmp_path)
     source_path = tmp_path / "source.mp4"
     source_path.write_bytes(b"video")
@@ -140,9 +141,11 @@ async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_bil
             "remake_source_id": source.id,
             "team_id": None,
             "attempt": 1,
+            **({"remake_context_version": version, "source_checksum": source.checksum} if version else {}),
         }
     )
 
+    assert pipeline.calls[0].get("source") == (source if version else None)
     await task.refresh_from_db()
     await source.refresh_from_db()
     assert task.stage == "persisting"

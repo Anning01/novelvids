@@ -24,7 +24,7 @@ class AnalysisWindow:
         self.foreground = deque()
         self.background = deque()
         self.active = 0
-        self.width = 2
+        self.width = None
         self.successes = 0
         self.epoch = 0
         self.cooldown_until = 0.0
@@ -47,8 +47,9 @@ class AnalysisWindow:
         admitted = notified = success = False
         epoch = 0
         async with self.changed:
-            if not self.active and not self.foreground and not self.background and self.clock() - self.last_finish > 60:
-                self.width, self.successes = 2, 0
+            if not self.epoch or (not self.active and not self.foreground and not self.background
+                                      and self.clock() - self.last_finish > 60 and self.clock() >= self.cooldown_until):
+                self.width, self.successes = ceiling, 0
             queue.append(token)
         try:
             while not admitted:

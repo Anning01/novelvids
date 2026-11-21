@@ -386,7 +386,10 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     assert await RemakeSource.filter(novel_id=result["novel_id"]).count() == 3
     assert len({item["task_id"] for item in result["sources"]}) == 3
     for item in result["sources"]:
-        assert (await AiTask.get(id=item["task_id"])).request_params["model_config_id"] == selected.id
+        params = (await AiTask.get(id=item["task_id"])).request_params
+        assert params["model_config_id"] == selected.id
+        assert params["remake_context_version"] == 3
+        assert "remake_block_size" not in params
     for upload in (first, second, third):
         await upload.refresh_from_db()
         assert upload.status == "committed"
