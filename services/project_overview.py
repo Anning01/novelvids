@@ -10,16 +10,18 @@ from models.asset_variant import AssetVariant
 from models.audio_reference import AudioReference
 from models.chapter import Chapter
 from models.novel import CLIP_AUTHOR, Novel
+from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
 from schemas.project_overview import (
-    ClipOverview, ProjectOverview, ProjectOverviewItem, ProjectOverviewSummary, ProjectProduction,
+    ClipOverview, ProjectOverview, ProjectOverviewItem, ProjectOverviewSummary, ProjectProduction, RemakeOverview,
 )
 from services.oss import normalize_media_url, resolve_media_url
 from services.cover_derivatives import image_derivative_reference
 from services.video.poster import video_media_url
 from services.finished_episodes import completed_edit_rows
 from services.audio_references import audio_reference_accessible
+from utils.enums import TaskStatusEnum
 
 
 def _mapping(value):
@@ -132,6 +134,22 @@ async def _load_project_overview(team_id: int | None) -> ProjectOverview:
 
     def touch(project_id, value):
         metrics[project_id].latest_activity_at = max(metrics[project_id].latest_activity_at, value)
+
+    remakes = {p["id"]: RemakeOverview() for p in projects if p["workflow_kind"] == "remake"}
+    if remakes:
+        sources = await RemakeSource.filter(novel_id__in=list(remakes), chapter_id__in=[c["id"] for c in chapters]).values(
+            "novel_id", "media_status", "updated_at", "analysis_task__status", "analysis_task__updated_at",
+        )
+        for source in sources:
+            key = source["novel_id"]
+            remake = remakes[key]
+            remake.source_count += 1
+            status = source["analysis_task__status"]
+            if status == TaskStatusEnum.completed or (status is None and source["media_status"] == "completed"):
+                remake.analyzed_count += 1
+            touch(key, source["updated_at"])
+            if source["analysis_task__updated_at"]:
+                touch(key, source["analysis_task__updated_at"])
 
     asset_projects = {asset["id"]: asset["novel_id"] for asset in assets}
     for project in projects:
@@ -248,6 +266,9 @@ async def _load_project_overview(team_id: int | None) -> ProjectOverview:
         metric.video_seconds = round(metric.video_seconds, 3)
         metric.finished_seconds = round(metric.finished_seconds, 3)
         metric.state = "ready" if metric.completed_episode_count else "in_progress" if metric.shot_count or metric.asset_count else "not_started"
+        remake = remakes.get(project["id"])
+        if remake and remake.source_count and metric.state == "not_started":
+            metric.state = "in_progress"
         clip = clips.get(project["id"])
         if clip:
             image = clip_images.get(project["id"])
@@ -261,7 +282,7 @@ async def _load_project_overview(team_id: int | None) -> ProjectOverview:
             elif clip.kind == "video" and metric.completed_shot_count:
                 metric.state = "ready"
         items.append(ProjectOverviewItem.model_validate({
-            **project, "tags": project["tags"] or [], "production": metric, "clip": clip,
+            **project, "tags": project["tags"] or [], "production": metric, "clip": clip, "remake": remake,
         }))
     items.sort(key=lambda item: (item.production.latest_activity_at, item.id), reverse=True)
     return ProjectOverview(items=items, summary=ProjectOverviewSummary(

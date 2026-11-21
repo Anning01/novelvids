@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clapperboard, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Sparkles, Upload, X } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Clapperboard, Clock3, Coins, Film, FolderOpen, Image, Info, Plus, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-vue-next'
 import { exportProject, importProject } from '@/features/project-transfer/transfer'
 import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { tr } from '@/i18n'
@@ -28,8 +28,8 @@ const search = ref('')
 type SourceFilter = 'all' | ReturnType<typeof projectSource>
 const sourceStorageKey = 'projects-source-filter'
 const savedSource = sessionStorage.getItem(sourceStorageKey)
-const sourceFilter = ref<SourceFilter>(savedSource === 'series' || savedSource === 'clip' ? savedSource : 'all')
-const sourceOptions = ['all', 'series', 'clip'] as const
+const sourceFilter = ref<SourceFilter>(savedSource === 'series' || savedSource === 'clip' || savedSource === 'remake' ? savedSource : 'all')
+const sourceOptions = ['all', 'series', 'clip', 'remake'] as const
 const typeFilter = ref('all')
 const mediaFilter = ref('all')
 const stateFilter = ref('all')
@@ -46,7 +46,7 @@ const filtered = computed(() => {
   return sourceItems.value.filter(project => (
     (!keyword || project.name.toLocaleLowerCase().includes(keyword))
     && (sourceFilter.value !== 'clip' || mediaFilter.value === 'all' || project.clip?.kind === mediaFilter.value)
-    && (sourceFilter.value === 'clip' || typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
+    && (sourceFilter.value === 'clip' || sourceFilter.value === 'remake' || typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
     && (stateFilter.value === 'all' || project.production.state === stateFilter.value)
   )).sort((left, right) => {
     if (sort.value === 'name') return left.name.localeCompare(right.name)
@@ -71,6 +71,7 @@ const runtime = computed(() => projectRuntime(seriesSummary.value?.finished_seco
 const costHint = computed(() => auth.role === 'creator' ? tr('仅本人已入账费用') : tr('当前项目已入账费用'))
 const stats = computed(() => {
   const items = sourceItems.value
+  const remakes = items.filter(item => projectSource(item) === 'remake')
   const clips = items.filter(item => projectSource(item) === 'clip')
   const count = (key: string, label: string, value: number, icon: typeof Image, hint = '') => ({ key, label, value: projectNumber(value), unit: '', icon, hint })
   const result = [count('projects', tr('作品总数'), items.length, FolderOpen)]
@@ -78,9 +79,14 @@ const stats = computed(() => {
     result.push(count('images', tr('图片'), clips.filter(p => p.clip?.kind === 'image' || p.clip?.kind === 'gif').length, Image, tr('含 GIF 动图')),
       count('videos', tr('视频'), clips.filter(p => p.clip?.kind === 'video').length, Clapperboard),
       count('ready', tr('已有结果'), clips.filter(p => p.production.state === 'ready').length, Sparkles))
-  } else if (sourceFilter.value === 'all' && clips.length) {
-    result.push(count('series', tr('剧集项目'), items.length - clips.length, BookOpen),
+  } else if (sourceFilter.value === 'remake') {
+    result.push(count('sources', tr('原片数量'), remakes.reduce((n, p) => n + (p.remake?.source_count ?? 0), 0), Film),
+      count('analyzed', tr('已拆解原片'), remakes.reduce((n, p) => n + (p.remake?.analyzed_count ?? 0), 0), Clapperboard),
+      count('shots', tr('分镜数'), remakes.reduce((n, p) => n + p.production.shot_count, 0), Image))
+  } else if (sourceFilter.value === 'all' && (clips.length || remakes.length)) {
+    result.push(count('series', tr('剧集项目'), items.length - clips.length - remakes.length, BookOpen),
       count('clips', tr('首页单次创作'), clips.length, Sparkles),
+      ...(remakes.length ? [count('remakes', tr('重制工坊'), remakes.length, Film)] : []),
       count('ready', tr('已有结果'), items.filter(p => p.production.state === 'ready').length, Clapperboard))
   } else {
     result.push(count('chapters', tr('累计章节'), seriesSummary.value?.chapter_count ?? 0, BookOpen, tr('已有文字章节')),
@@ -100,7 +106,7 @@ const mediaOptions = computed(() => [
 ])
 const typeOptions = computed(() => [
   { value: 'all', label: tr('全部类型') }, { value: 'agent', label: tr('AI 创作') },
-  { value: 'manual', label: tr('手动创作') }, { value: 'remake', label: tr('视频重制') },
+  { value: 'manual', label: tr('手动创作') },
   { value: 'script', label: tr('小说 / 剧本') },
 ])
 const stateOptions = computed(() => [
@@ -161,6 +167,8 @@ function resetFilters() {
   typeFilter.value = 'all'
   mediaFilter.value = 'all'
   stateFilter.value = 'all'
+  sort.value = 'updated'
+  page.value = 1
 }
 
 const filePicker = ref<HTMLInputElement | null>(null)
@@ -279,16 +287,19 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
       <div class="project-sources" role="group" :aria-label="tr('作品来源')">
         <button v-for="source in sourceOptions" :key="source" type="button" :aria-pressed="sourceFilter === source" @click="sourceFilter = source">
           <Clapperboard v-if="source === 'series'" :size="15" aria-hidden="true" />
+          <Film v-if="source === 'remake'" :size="15" aria-hidden="true" />
           <Sparkles v-if="source === 'clip'" :size="15" aria-hidden="true" />
           {{ source === 'all' ? tr('全部') : projectSourceLabel(source) }}
         </button>
       </div>
       <div class="projects-library__filters">
         <label class="projects-search"><Search :size="17" aria-hidden="true" /><span class="projects-sr-only">{{ tr('搜索项目名称') }}</span><input v-model="search" type="search" :placeholder="tr('搜索项目名称')"><button v-if="search" type="button" :aria-label="tr('清空搜索')" @click="search = ''"><X :size="14" aria-hidden="true" /></button></label>
-        <AppSelect v-if="sourceFilter !== 'clip'" v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
-        <AppSelect v-else v-model="mediaFilter" :options="mediaOptions" :ariaLabel="tr('创作类型')" />
+        <AppSelect v-if="sourceFilter === 'series' || sourceFilter === 'all'" v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
+        <AppSelect v-else-if="sourceFilter === 'clip'" v-model="mediaFilter" :options="mediaOptions" :ariaLabel="tr('创作类型')" />
         <AppSelect v-model="stateFilter" :options="stateOptions" :ariaLabel="tr('创作状态')" />
         <AppSelect v-model="sort" :options="sortOptions" :ariaLabel="tr('项目排序')" />
+        <AppButton class="projects-library__reset" variant="ghost" size="sm" :disabled="!hasFilters && mediaFilter === 'all' && sort === 'updated' && page === 1"
+          @click="resetFilters"><RotateCcw :size="14" aria-hidden="true" />{{ tr('重置筛选') }}</AppButton>
       </div>
     </div>
 
@@ -371,6 +382,7 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-search input::-webkit-search-cancel-button { display: none; }
 .projects-search button { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--app-text-secondary); background: var(--app-surface-muted); cursor: pointer; }
 .projects-search button:focus-visible { outline: 2px solid var(--app-accent); }
+.projects-library__reset { white-space: nowrap; }
 .projects-library__filters :deep(.app-select) { min-width: 0; flex: 0 0 124px; }
 .projects-library__filters :deep(.app-select__trigger) { height: 40px; }
 .project-sources { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface-muted); }
@@ -388,6 +400,12 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-page__summary-skeleton span { min-height: 119px; border-radius: 16px; background: var(--app-surface-muted); }
 .projects-page__loading p { padding: 35px; color: var(--app-text-secondary); font-size: 13px; text-align: center; }
 .projects-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container projects (min-width: 1101px) {
+  .projects-summary:has(.is-remakes) { grid-auto-columns: minmax(0,1fr); grid-template-columns: none; grid-auto-flow: column; }
+}
+@container projects (max-width: 420px) {
+  .project-sources { width: 100%; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
 @container projects (min-width: 1800px) { .projects-library__grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @container projects (max-width: 1160px) { .projects-library__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .projects-summary__item { padding: 17px; gap: 11px; } }
 @container projects (max-width: 1100px) { .projects-summary.has-cost, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

@@ -13,6 +13,7 @@ export function projectKindLabel(project: Novel) {
 }
 
 export function projectSourceLabel(source: ReturnType<typeof projectSource>) {
+  if (source === 'remake') return tr('重制工坊')
   return source === 'clip' ? tr('首页单次创作') : tr('剧集项目')
 }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Image, Sparkles, Trash2 } from 'lucide-vue-next'
+import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Film, Image, Sparkles, Trash2 } from 'lucide-vue-next'
 import { mediaUrl } from '@/api'
 import { fallbackImage } from '@/shared/mediaFallback'
 import { tr } from '@/i18n'
@@ -70,7 +70,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </script>
 
 <template>
-  <article class="project-overview-card" :class="{ 'is-deleting': deleting, 'is-clip': source === 'clip' }" :aria-labelledby="`project-title-${project.id}`">
+  <article class="project-overview-card" :class="{ 'is-deleting': deleting, 'is-clip': source === 'clip', 'is-remake': source === 'remake' }" :aria-labelledby="`project-title-${project.id}`">
     <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="exportOnly ? undefined : tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
       <template v-if="source === 'clip'">
         <div class="clip-preview">
@@ -89,6 +89,20 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
             <time :datetime="project.production.latest_activity_at" :title="tr('最近更新')">{{ projectDate(project.production.latest_activity_at) }}</time>
           </div>
         </div>
+      </template>
+      <template v-else-if="source === 'remake'">
+        <header class="remake-heading">
+          <span class="project-overview-card__source is-remake"><Film :size="14" aria-hidden="true" />{{ projectSourceLabel(source) }}</span>
+          <h2 :id="`project-title-${project.id}`" :title="project.name">{{ project.name }}</h2>
+          <p class="project-overview-card__metadata">{{ [stateLabel, metadata].filter(Boolean).join(' · ') }}</p>
+        </header>
+        <dl :id="`project-progress-${project.id}`" class="remake-stages">
+          <div><dt>{{ tr('原片拆解') }}</dt><dd>{{ project.remake ? `${project.remake.analyzed_count} / ${project.remake.source_count}` : '—' }}</dd>
+            <progress v-if="project.remake?.source_count" :value="project.remake.analyzed_count" :max="project.remake.source_count" :aria-label="tr('原片拆解')" /></div>
+          <div><dt>{{ tr('分镜视频') }}</dt><dd>{{ project.production.completed_shot_count }} / {{ project.production.shot_count }}</dd>
+            <progress v-if="project.production.shot_count" :value="project.production.completed_shot_count" :max="project.production.shot_count" :aria-label="tr('分镜视频')" /></div>
+        </dl>
+        <div class="clip-activity"><span>{{ tr('最近更新') }}</span><time :datetime="project.production.latest_activity_at">{{ projectDate(project.production.latest_activity_at) }}</time></div>
       </template>
       <div v-else class="project-overview-card__identity">
         <ProjectCover :max-width="108" class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
@@ -148,6 +162,15 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </template>
 
 <style scoped>
+.project-overview-card.is-remake { align-self: start; }
+.remake-heading { padding-right: 22px; }
+.project-overview-card .remake-heading h2 { min-height: 0; }
+.project-overview-card__source.is-remake { color: var(--creation-warning); background: color-mix(in srgb,var(--creation-warning) 12%,var(--app-surface)); }
+.remake-stages { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; padding: 14px; margin: 16px 0 12px; border-radius: 9px; background: var(--app-surface-muted); }
+.remake-stages dt { color: var(--app-text-secondary); font-size: 12px; }
+.remake-stages dd { margin: 4px 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+.remake-stages progress { display: block; width: 100%; height: 6px; accent-color: var(--creation-warning); }
+.is-remake .project-overview-card__stats { margin-top: 0; border: 0; padding-top: 0; }
 .is-clip.project-overview-card { align-self: start; overflow: visible; }
 .is-clip .project-overview-card__link { padding: 0; }
 .clip-preview { position: relative; display: grid; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; place-items: center; border-radius: 17px 17px 0 0; color: var(--creation-success); background: color-mix(in srgb,var(--creation-success) 10%,var(--app-surface-muted)); }

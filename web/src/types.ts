@@ -77,6 +77,7 @@ export interface ProjectProduction {
   state: 'not_started' | 'in_progress' | 'ready'
 }
 export interface ProjectOverviewItem extends Novel {
+  remake?: { source_count: number; analyzed_count: number } | null
   production: ProjectProduction
   clip?: { kind?: 'image' | 'gif' | 'video' | null; resolution?: string | null; preview?: string | null; thumbnail?: string | null } | null
 }

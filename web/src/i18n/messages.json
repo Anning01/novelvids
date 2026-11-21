@@ -4162,6 +4162,10 @@
     "也可以将文件拖拽到这里": "You can also drag files here"
   },
   "project_overview": {
+    "原片数量": "Source videos",
+    "已拆解原片": "Sources analyzed",
+    "分镜数": "Shots",
+    "原片拆解": "Source analysis",
     "已有结果": "Results available",
     "含 GIF 动图": "Includes animated GIFs",
     "剧集项目": "Series project",

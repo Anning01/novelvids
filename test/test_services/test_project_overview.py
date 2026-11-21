@@ -234,3 +234,26 @@ async def test_legacy_clip_without_settings_still_lists_without_exposing_private
     item = (await project_overview()).items[0]
     assert item.clip.kind is None and item.clip.preview is None
     assert "project_setting" not in item.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_remake_summary_counts_only_its_own_sources_and_current_analysis():
+    from test.test_services.test_remake_progress import create_source
+    from utils.enums import TaskStatusEnum
+
+    remake = await Novel.create(name="Remake", workflow_kind="remake", team_id=7)
+    await create_source(remake, 1, status=TaskStatusEnum.completed, stage="completed", progress=100)
+    running = await create_source(remake, 2, status=TaskStatusEnum.running, stage="analyzing", progress=20)
+    # A new analysis takes precedence over a previously completed media status.
+    running.media_status = "completed"
+    await running.save()
+    legacy = await create_source(remake, 3, status=None, stage="", progress=0)
+    legacy.media_status = "completed"
+    await legacy.save()
+    other = await Novel.create(name="Other", workflow_kind="remake", team_id=8)
+    await create_source(other, 1, status=None, stage="", progress=0)
+    overview = await project_overview(7)
+    assert len(overview.items) == 1
+    item = overview.items[0]
+    assert item.remake.source_count == 3 and item.remake.analyzed_count == 2
+    assert item.production.state == "in_progress"

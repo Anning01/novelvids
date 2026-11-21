@@ -52,7 +52,8 @@ export function readShortDramaSettings(project: ProjectSettingsSource): ShortDra
   }
 }
 
-export function projectSource(project: Pick<Novel, 'author'>) {
+export function projectSource(project: Pick<Novel, 'author' | 'workflow_kind'>) {
+  if (project.workflow_kind === 'remake') return 'remake'
   return project.author === '片段创作' ? 'clip' : 'series'
 }
 
