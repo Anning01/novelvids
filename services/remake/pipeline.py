@@ -133,6 +133,11 @@ class RemakeDecompositionPipeline:
             finally:
                 phase_times[name] = round((time.monotonic() - started) * 1000)
 
+        single_wave = bool(continuous and execution and execution.params.get("remake_context_version") == 5)
+        initial_catalog = []
+        if single_wave:
+            initial_catalog = await checkpoint("remake:catalog", lambda: remake_result_persistence.project_catalog(source))
+
         async def extract():
             raw = raw_assets
             context = {}
@@ -140,7 +145,7 @@ class RemakeDecompositionPipeline:
             if continuous:
                 if execution and "remake:catalog" not in saved:
                     await remake_result_persistence.wait_for_seed(execution.params.get("catalog_seed_task_id"), source)
-                identity_catalog = await checkpoint("remake:catalog", lambda: remake_result_persistence.project_catalog(source))
+                identity_catalog = initial_catalog if single_wave else await checkpoint("remake:catalog", lambda: remake_result_persistence.project_catalog(source))
                 context = {"context": project_asset_context(identity_catalog, language)}
             if raw is None:
                 raw = await gateway.analyze_one(
@@ -155,7 +160,14 @@ class RemakeDecompositionPipeline:
             if continuous:
                 if execution and "remake:bindings" not in saved:
                     await remake_result_persistence.wait_for_seed(execution.params.get("catalog_previous_task_id"), source)
-                return await checkpoint("remake:bindings", lambda: remake_result_persistence.bind_assets(source, normalized, identity_catalog))
+                bound = await checkpoint("remake:bindings", lambda: remake_result_persistence.bind_assets(source, normalized, identity_catalog))
+                if single_wave:
+                    aliases = {item["project_asset_id"]: item["aliases"] for item in identity_catalog}
+                    for group, items in normalized.items():
+                        source_names = {item["id"]: item["name"] for item in items}
+                        for item in bound[group]:
+                            item["source_names"] = [source_names[item["id"]], *aliases.get(item.get("project_asset_id"), [])]
+                return bound
             return normalized
 
         directory = scene_cache or work_dir / "scenes"
@@ -180,9 +192,30 @@ class RemakeDecompositionPipeline:
                 write_scene_manifest(scene_cache, paths, lengths)
             return paths, lengths
 
+        async def timeline(paths, lengths):
+            evidence = await finish_thread(clip_evidence, directory, paths, lengths)
+            async def snapshot_timeline():
+                return evidence
+            if await checkpoint("remake:timeline", snapshot_timeline) != evidence:
+                raise RemakePipelineError(localized_message('切片内容或边界已变化，不能复用旧分镜'))
+            return evidence
+
+        async def report_scene_progress(completed: int, total: int) -> None:
+            await _report(progress, min(87, 55 + round(completed * 32 / max(1, total))), "generating_storyboards")
+
+        async def split_and_analyze():
+            from services.remake.single_wave import analyze_source_shots
+            paths, lengths = await timed("media_ms", split)
+            evidence = await timeline(paths, lengths)
+            results = await timed("shot_analysis_ms", lambda: analyze_source_shots(
+                paths, lengths, evidence, gateway, strategy, saved, report_scene_progress, initial_catalog))
+            return paths, lengths, results
+
+        shots_started = time.monotonic()
         if continuous:
             # Drain both branches before removing local or remote media on an error.
-            branches = [asyncio.create_task(timed(name, fn)) for name, fn in (("assets_ms", extract), ("media_ms", split))]
+            media_branch = timed("shot_branch_ms", split_and_analyze) if single_wave else timed("media_ms", split)
+            branches = [asyncio.create_task(timed("assets_ms", extract)), asyncio.create_task(media_branch)]
             try:
                 artifacts = await asyncio.gather(*branches, return_exceptions=True)
             finally:
@@ -190,63 +223,56 @@ class RemakeDecompositionPipeline:
             for artifact in artifacts:
                 if isinstance(artifact, BaseException):
                     raise artifact
-            assets, (scene_paths, durations) = artifacts
+            assets, media_results = artifacts
+            scene_paths, durations = media_results[:2]
         else:
             assets = await extract()
             await _report(progress, 42, "detecting_scenes")
             scene_paths, durations = await split()
 
         ranges = {}
-        if continuous:
-            evidence = await finish_thread(clip_evidence, directory, scene_paths, durations)
-            async def snapshot_timeline():
-                return evidence
-            expected = await checkpoint("remake:timeline", snapshot_timeline)
-            if expected != evidence:
-                raise RemakePipelineError(localized_message('切片内容或边界已变化，不能复用旧分镜'))
+        if continuous and not single_wave:
+            evidence = await timeline(scene_paths, durations)
             ranges = {name: item["interval"] for name, item in evidence.items() if item["interval"] is not None}
         catalog = compact_catalog(assets, snapshot=snapshot, language=language)
-        await _report(progress, 55, "generating_storyboards")
-
-        async def report_scene_progress(completed: int, total: int) -> None:
-            progress_value = 55 + round((completed * 32) / max(1, total))
-            await _report(
-                progress,
-                min(87, progress_value),
-                "generating_storyboards",
-            )
+        if not single_wave:
+            await _report(progress, 55, "generating_storyboards")
 
         completed = {i: saved[f'model:remake:RemakeShot:{i}'] for i in range(1, len(scene_paths) + 1)
                      if f'model:remake:RemakeShot:{i}' in saved}
         held = frozenset(execution.params.get("held_shots", [])) - completed.keys() if execution else set()
         params = execution.params if execution else {}
         block_size = None if params.get("remake_context_version", 0) >= 3 else params.get("remake_block_size", 0)
-        shots_started = time.monotonic()
-        raw_prompts = await gateway.analyze_many(
-            scene_paths,
-            prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
-            schema_name="professional_video_prompt_material",
-            response_schema=RemakeShot.model_json_schema(),
-            context_builder=lambda index: {'assets': catalog, 'duration_seconds': durations[index - 1],
-                                          'storyboard_strategy': strategy,
-                                          **({'source_interval': ranges[scene_paths[index - 1].name]}
-                                             if scene_paths[index - 1].name in ranges else {})},
-            **({'continuity_language': language,
-                'block_size': block_size,
-                'audit_results': {i: saved[f'model:structured:RemakeContinuityVerdict:{i}'] for i in range(1, len(scene_paths) + 1)
-                                 if f'model:structured:RemakeContinuityVerdict:{i}' in saved},
-                'draft_results': {i: saved[f'model:remake:RemakeShot:draft-{i}'] for i in range(1, len(scene_paths) + 1)
-                                  if f'model:remake:RemakeShot:draft-{i}' in saved}} if continuous else {}),
-            on_completed=report_scene_progress,
-            **({"held_shots": held} if held else {}),
-            **({"completed_results": completed} if completed else {}),
-        )
-        if held:
-            await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
-            raise RemakeAwaitingResults("剩余片段未完成，可以重试")
-        phase_times["shot_analysis_ms"] = round((time.monotonic() - shots_started) * 1000)
+        if single_wave:
+            from services.remake.single_wave import bind_shot_references
+            raw_prompts = bind_shot_references(media_results[2], assets)
+        else:
+            shots_started = time.monotonic()
+            raw_prompts = await gateway.analyze_many(
+                scene_paths,
+                prompt="" if execution else render_remake_prompt("shots", task_language.get() or "zh"),
+                schema_name="professional_video_prompt_material",
+                response_schema=RemakeShot.model_json_schema(),
+                context_builder=lambda index: {'assets': catalog, 'duration_seconds': durations[index - 1],
+                                              'storyboard_strategy': strategy,
+                                              **({'source_interval': ranges[scene_paths[index - 1].name]}
+                                                 if scene_paths[index - 1].name in ranges else {})},
+                **({'continuity_language': language,
+                    'block_size': block_size,
+                    'audit_results': {i: saved[f'model:structured:RemakeContinuityVerdict:{i}'] for i in range(1, len(scene_paths) + 1)
+                                     if f'model:structured:RemakeContinuityVerdict:{i}' in saved},
+                    'draft_results': {i: saved[f'model:remake:RemakeShot:draft-{i}'] for i in range(1, len(scene_paths) + 1)
+                                      if f'model:remake:RemakeShot:draft-{i}' in saved}} if continuous else {}),
+                on_completed=report_scene_progress,
+                **({"held_shots": held} if held else {}),
+                **({"completed_results": completed} if completed else {}),
+            )
+            if held:
+                await _report(progress, 55 + round(32 * len(raw_prompts) / len(scene_paths)), "needs_review")
+                raise RemakeAwaitingResults("剩余片段未完成，可以重试")
+            phase_times["shot_analysis_ms"] = round((time.monotonic() - shots_started) * 1000)
         speech_reviews = []
-        if execution and execution.params.get("remake_context_version", 0) >= 2:
+        if not single_wave and execution and execution.params.get("remake_context_version", 0) >= 2:
             from services.remake.speech_boundary import repeated_lines, review_speech
             if any(list(repeated_lines(a,b)) for a,b in zip(raw_prompts,raw_prompts[1:])):
                 await _report(progress, 87, "reviewing_continuity")
@@ -277,6 +303,9 @@ class RemakeDecompositionPipeline:
                 round((self.clock() - pipeline_started_at) * 1000),
             ),
         }
+        if single_wave:
+            metadata["pipeline"] = "parallel_source_shots"
+            metadata["unresolved_reference_count"] = sum(len(shot.get("unresolved_asset_refs", [])) for shot in raw_prompts)
         if continuous:
             phase_times["shot_batch_ms"] = round((time.monotonic() - shots_started) * 1000)
             metadata["phase_times"] = phase_times

@@ -107,7 +107,7 @@ async def test_handler_preserves_actionable_worker_failure_without_persisting(tm
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("version", [None, 1, 2, 3])
+@pytest.mark.parametrize("version", [None, 1, 2, 3, 5])
 async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_billing_metadata(tmp_path: Path, version):
     novel, chapter, source, task = await _records(tmp_path)
     source_path = tmp_path / "source.mp4"

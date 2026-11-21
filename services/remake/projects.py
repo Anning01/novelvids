@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from time import time
 from datetime import datetime, timezone
 
 from tortoise.exceptions import IntegrityError
@@ -22,6 +23,7 @@ from schemas.remake import RemakeProjectCreate
 from services.balance import ensure_solvent
 from services.project_config import validate_project_config
 from services.remake.episodes import validate_episode_batch
+from services.remake.deadline import batch_deadline
 from services.remake.uploads import RemakeUploadService, remake_upload_service
 from services.remake.history_snapshot import (
     RemakeHistorySnapshotService,
@@ -101,6 +103,7 @@ class RemakeProjectService:
         user_id: int | None,
         allow_all_history: bool,
     ) -> dict:
+        submitted_at = time()
         payload_hash = self._payload_hash(payload)
         existing = await Novel.get_or_none(creation_idempotency_key=str(payload.idempotency_key))
         if existing is not None:
@@ -147,6 +150,8 @@ class RemakeProjectService:
             user_id=user_id,
             allow_all_history=allow_all_history,
         )
+        # Count upload time for a fresh batch; historical inputs begin at submission.
+        deadline_at = batch_deadline(prepared, submitted_at)
         descriptions = {
             "single_upload": "重制工坊 · 单视频",
             "folder_upload": "重制工坊 · 文件夹多集",
@@ -226,10 +231,10 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
-                            "remake_context_version": 3,
+                            "remake_context_version": 5,
+                            "remake_deadline_at": deadline_at,
                             "source_checksum": source.checksum,
-                            **({"catalog_seed_task_id": str(created[0][1].id),
-                                "catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
+                            **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
@@ -300,7 +305,6 @@ class RemakeProjectService:
             return [self._upload_item(upload, media, 1)], []
 
         if payload.source_mode == "folder_upload":
-            uploads = []
             seen_tokens = set()
             for source_input in payload.sources:
                 if source_input.episode_number is None or source_input.upload_token is None or source_input.source_chapter_id is not None:
@@ -308,14 +312,22 @@ class RemakeProjectService:
                 if source_input.upload_token in seen_tokens:
                     raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('同一上传 token 不能重复使用'))
                 seen_tokens.add(source_input.upload_token)
+
+            async def ready(source_input):
                 upload = await self.upload_service.get_ready(source_input.upload_token, team_id=team_id, user_id=user_id)
-                uploads.append((upload.original_filename, source_input.episode_number, (upload, source_input)))
+                return upload.original_filename, source_input.episode_number, (upload, source_input)
+
+            uploads = await asyncio.gather(*(ready(item) for item in payload.sources))
             batch, missing = validate_episode_batch(uploads)
-            prepared = []
-            for item in batch:
+
+            async def prepare(item):
+                from services.remake.media_capacity import media_capacity
                 upload, _ = item.value
-                media = await self.upload_service.revalidate(upload)
-                prepared.append(self._upload_item(upload, media, item.episode_number))
+                async with media_capacity():
+                    media = await self.upload_service.revalidate(upload)
+                return self._upload_item(upload, media, item.episode_number)
+
+            prepared = await asyncio.gather(*(prepare(item) for item in batch))
             warnings = ([{"code": "REMAKE_EPISODE_GAPS", "missing_episode_numbers": missing}] if missing else [])
             return prepared, warnings
 
@@ -448,6 +460,7 @@ class RemakeProjectService:
                 stage=stage,
                 progress=progress,
                 request_params={
+                    **({"remake_deadline_at": batch_deadline([])} if previous_params.get("remake_context_version") == 5 else {}),
                     **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,

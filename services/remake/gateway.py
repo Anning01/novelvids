@@ -204,6 +204,7 @@ class RemakeVideoAnalysisGateway:
         context: str | dict[str, Any] = "",
         include_segment_metadata: bool = True,
         draft: bool = False,
+        previous_path: Path | None = None,
     ) -> dict[str, Any]:
         from contextlib import nullcontext
         from services.creation_agent.skill_execution import current_execution
@@ -224,15 +225,20 @@ class RemakeVideoAnalysisGateway:
             gate = window.admit(max(1, int(self.config.concurrency or 1)), draft=draft,
                                 notify=announce if schema_name == "professional_video_prompt_material" else None)
         async with gate:
+            deadline = getattr(execution, "params", {}).get("remake_deadline_at")
+            if deadline is not None and time.time() >= deadline:
+                raise RemakeVideoAnalysisError(localized_message("五分钟内未完成，已停止后续请求并保留已返回的分镜"),
+                                              error_code="REMAKE_DEADLINE_EXCEEDED")
             try:
                 return await self._request_one(index=index, path=path, prompt=prompt, schema_name=schema_name,
-                    response_schema=response_schema, context=context, include_segment_metadata=include_segment_metadata, draft=draft)
+                    response_schema=response_schema, context=context, include_segment_metadata=include_segment_metadata, draft=draft,
+                    **({"previous_path": previous_path} if previous_path is not None else {}))
             except RemakeVideoAnalysisError as exc:
                 if window and provider_pressure(exc):
                     await window.slow_down(15)
                 raise
 
-    async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft):
+    async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft, previous_path=None):
         started_at = self.clock()
         if self.first_request_started_at is None:
             self.first_request_started_at = started_at
@@ -248,13 +254,15 @@ class RemakeVideoAnalysisGateway:
             audit = schema_name in {'shot_continuity_check', 'shot_speech_evidence'}
             schema = {"shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
-            if getattr(self.config, "api_protocol", None) == "novelvids":
-                mime = self._video_mime(path)
-                url = await self._platform_video_url(path, execution.params.get("team_id"))
-                video_content = VideoUrl(url=url, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
-            else:
-                video_bytes, mime = await asyncio.to_thread(self._read_video, path)
-                video_content = BinaryContent(data=video_bytes, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
+            async def source_media(media_path):
+                if getattr(self.config, "api_protocol", None) == "novelvids":
+                    mime = self._video_mime(media_path)
+                    url = await self._platform_video_url(media_path, execution.params.get("team_id"))
+                    return VideoUrl(url=url, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
+                data, mime = await asyncio.to_thread(self._read_video, media_path)
+                return BinaryContent(data=data, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
+
+            media = await asyncio.gather(*(source_media(p) for p in (previous_path, path) if p is not None))
             from services.model_concurrency import capacity_observer
             from models.agent_operation import AgentOperation
             receipt_segment = f"draft-{index}" if draft else index
@@ -263,7 +271,13 @@ class RemakeVideoAnalysisGateway:
                     key=f"capacity:remake:{receipt_segment}", defaults={"state": state})
             async def validate_shot(output):
                 from services.remake.storyboards import prepare_remake_prompt
-                prepare_remake_prompt(output.model_dump(), context["assets"], execution.snapshot, execution.language,
+                catalog = context["assets"]
+                if context_version == 5:
+                    catalog = [{"id": ref.asset_id, "name": ref.asset_name, "type": ref.asset_type, "description": ""}
+                               for ref in output.asset_refs]
+                    if len({item["id"] for item in catalog}) != len(catalog):
+                        raise ValueError("Shot-local asset IDs must be unique")
+                prepare_remake_prompt(output.model_dump(), catalog, execution.snapshot, execution.language,
                                       strategy_key=context["storyboard_strategy"], duration_seconds=context["duration_seconds"])
 
             from prompts.remake import continuity_instruction, identity_instruction
@@ -271,6 +285,9 @@ class RemakeVideoAnalysisGateway:
             context_version = getattr(execution, 'params', {}).get('remake_context_version', 0)
             if context_version >= 2 and not audit:
                 extra = identity_instruction(execution.language) if schema is RemakeAssets else continuity_instruction(execution.language)
+            if context_version == 5 and schema is RemakeShot:
+                from prompts.remake import independent_shot_instruction
+                extra = independent_shot_instruction(execution.language)
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
             try:
                 result = await execution.generate(
@@ -278,7 +295,7 @@ class RemakeVideoAnalysisGateway:
                     context if audit else {'segment': index, 'assets': context, 'output_kind': schema_name},
                     schema,
                     model_config=self.config,
-                    media=[video_content],
+                    media=media,
                     **({"additional_instructions": extra} if extra else {}),
                     **({"receipt_segment": f"draft-{index}"} if draft else {}),
                     **({"output_validator": validate_shot} if schema is RemakeShot and context_version else {}),

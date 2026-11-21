@@ -9,6 +9,7 @@ from utils.messages import localized_message
 
 _SEGMENT = re.compile(r'(?:第\s*(\d+)\s*个视频片段|Video segment\s+(\d+))', re.I)
 _SERVICE_ERRORS = {
+    "REMAKE_DEADLINE_EXCEEDED": "五分钟内未完成，已停止后续请求并保留已返回的分镜。",
     'REMAKE_ANALYSIS_AUTH_FAILED': '视频分析服务未通过身份验证，请联系管理员检查模型密钥。',
     'REMAKE_MODEL_UNAVAILABLE': '请联系管理员配置可用的视频分析模型，然后重试。',
     'REMAKE_ANALYSIS_MODEL_NOT_FOUND': '请联系管理员配置可用的视频分析模型，然后重试。',

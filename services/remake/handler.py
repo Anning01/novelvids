@@ -7,6 +7,8 @@ from utils.messages import localized_message
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import shutil
+import asyncio
+import time
 from services.remake.checkpoints import scene_cache_directory
 from typing import Any, Awaitable, Callable
 
@@ -63,8 +65,36 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
         self.materializer = materializer
         self.pipeline = pipeline
         self.persistence = persistence
+        self._cleanup_tasks = set()
 
     async def execute(self, request_params: dict) -> dict:
+        deadline = request_params.get("remake_deadline_at")
+        if deadline is None:
+            return await self._execute(request_params)
+        remaining = deadline - time.time()
+        if remaining > 0:
+            work = asyncio.create_task(self._execute(request_params))
+            try:
+                done, _ = await asyncio.wait({work}, timeout=remaining)
+                if done:
+                    return await work
+            finally:
+                if not work.done():
+                    # Native media cleanup owns the temporary directory. Cancel all paid
+                    # work immediately without making the customer wait for ffmpeg to exit.
+                    self._cleanup_tasks.add(work)
+                    work.add_done_callback(self._cleanup_finished)
+                    work.cancel()
+        await RemakeSource.filter(id=request_params["remake_source_id"], novel_id=request_params["novel_id"]).update(media_status="failed")
+        raise RemakeDecompositionError(error_code="REMAKE_DEADLINE_EXCEEDED",
+            message=localized_message("五分钟内未完成，已停止后续请求并保留已返回的分镜"))
+
+    def _cleanup_finished(self, task):
+        self._cleanup_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def _execute(self, request_params: dict) -> dict:
         task_id = request_params.get("ai_task_id")
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
@@ -130,7 +160,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     storyboard_strategy=project.storyboard_strategy,
                     aspect_ratio=project.aspect_ratio or '16:9',
                     **({"scene_cache": cache} if execution else {}),
-                    **({"source": source} if request_params.get("remake_context_version") in (1, 2, 3) else {}),
+                    **({"source": source} if request_params.get("remake_context_version") in (1, 2, 3, 5) else {}),
                 )
                 async def persist():
                     summary = await self.persistence.persist(

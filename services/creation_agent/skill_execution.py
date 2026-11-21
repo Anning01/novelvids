@@ -486,7 +486,7 @@ class SkillExecution:
                         model=recorded,
                         event_stream_handler=tool_activity,
                         usage_limits=UsageLimits(
-                            request_limit=limits.request_limit,
+                            request_limit=1 if skill == "remake" and self.params.get("remake_context_version") == 5 else limits.request_limit,
                             tool_calls_limit=limits.tool_calls_limit,
                             total_tokens_limit=limits.total_tokens_limit,
                         ),

@@ -251,3 +251,14 @@ def speech_boundary_instruction(language):
     return ("Listen only to this clip's audio. Two neighboring drafts contain the same line. Return only the words "
             "of that line actually heard here, in order. Do not complete words from lingering subtitles or context. "
             "Use an empty string if the line is clearly absent. Mark uncertain if inaudible or indeterminate.")
+
+
+def independent_shot_instruction(language):
+    if language == 'zh':
+        return ('所附最后一段视频是本镜原片。若有两段，第一段只供判断上一镜已发生的动作、对白和末态。'
+                '只写目标片段实际发生和听到的内容，镜内时间从零计。保留真正重演的动作，跨切口的话按目标原声归属。'
+                '项目目录仅供辨认。引用写出可确认的名称、类型和本镜内唯一标识；新出场主体也按所见记录。遵循现有输出协议，同一事实只描述一次。')
+    return ('The last video is the target shot. If two are attached, the first shows only the preceding action, '
+            'speech and ending state. Describe only what the target actually shows and sounds, starting at time zero. '
+            'Keep genuine replays and attribute speech across the cut by its audio. Use the project catalog for '
+            'recognition. Give each reference its observed name, type and a unique shot-local ID. Follow the output contract without restating facts.')

@@ -342,3 +342,67 @@ def test_damaged_or_invalid_clip_manifest_is_not_used(tmp_path, entries):
     (tmp_path/'bad.mp4').write_bytes(b'x')
     (tmp_path/'manifest.json').write_text(json.dumps(entries))
     assert read_scene_manifest(tmp_path) is None
+
+
+@pytest.mark.asyncio
+async def test_new_batch_dispatches_every_shot_before_assets_or_previous_shots_finish(tmp_path,monkeypatch):
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+    from models.ai_task import AiTask
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.persistence import remake_result_persistence
+
+    counts = (35, 35, 33)
+    all_started = asyncio.Event()
+    calls = []
+    sources = [SimpleNamespace(episode_number=i+1) for i in range(len(counts))]
+    monkeypatch.setattr(remake_result_persistence, "project_catalog", AsyncMock(return_value=[]))
+    tasks = [await AiTask.create(task_type=6, status=2) for _ in counts]
+    class Detector:
+        def split_timeline(self, path, out):
+            out.mkdir(parents=True)
+            paths = [out/f'scene-{i:03d}.mp4' for i in range(1, counts[int(path.stem)]+1)]
+            for clip in paths:
+                clip.write_bytes(b'clip')
+            (out/'boundaries.json').write_text(json.dumps({p.name:{'start_seconds':i*4, 'end_seconds':(i+1)*4}
+                                                           for i,p in enumerate(paths)}))
+            return paths
+    bind = AsyncMock(side_effect=lambda source, assets, catalog: assets)
+    monkeypatch.setattr(remake_result_persistence,'bind_assets',bind)
+    monkeypatch.setattr('services.remake.pipeline.media_session', lambda: __import__('contextlib').nullcontext(None))
+
+    class Gateway(_Gateway):
+        async def analyze_one(self, **kw):
+            calls.append(kw)
+            if len(calls)==sum(counts)+len(counts):
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(),5)
+            if kw['schema_name']=='global_key_assets':
+                return {'characters':[{'name':'将军','description':'已登记'}],'scenes':[],'objects':[]}
+            i=kw['index']
+            assert (kw['previous_path'].name if kw['previous_path'] else None)==(f'scene-{i-1:03d}.mp4' if i>1 else None)
+            assert 'previous_shot' not in kw['context']
+            return remake_shot(i,4,[{'asset_id':f'local-{i}','asset_name':'将军','asset_type':'character'}])
+        async def analyze_many(self, paths, **kwargs):
+            pytest.fail('No draft, audit, or serial repair loop may run')
+
+    async def episode(e):
+        video=tmp_path/f'{e}.mp4'
+        video.write_bytes(b'video')
+        execution=SimpleNamespace(params={'task_id':str(tasks[e].id),'remake_context_version':5},
+                                  snapshot=synthetic_snapshot(), language='zh')
+        token=current_execution.set(execution)
+        try:
+            pipeline=RemakeDecompositionPipeline(scene_detector=Detector(),gateway_factory=lambda _:Gateway(),
+                                                 prepare_video=lambda p,*a,**kw:p)
+            return await pipeline.run(source=sources[e],source_path=video,work_dir=tmp_path/f'work-{e}',
+                                      model_config=SimpleNamespace(id=1,model='mock',concurrency=100))
+        finally:
+            current_execution.reset(token)
+    results=await asyncio.gather(*(episode(e) for e in range(len(counts))))
+    assert len(calls)==106
+    for count,result in zip(counts,results,strict=True):
+        assert [r['shot_index'] for r in result.prompt_document['prompts']]==list(range(1,count+1))
+        assert all(r['asset_refs'][0]['asset_id']=='character-001' for r in result.prompt_document['prompts'])
+        assert result.metadata['pipeline']=='parallel_source_shots'

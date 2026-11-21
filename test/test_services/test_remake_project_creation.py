@@ -388,7 +388,8 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     for item in result["sources"]:
         params = (await AiTask.get(id=item["task_id"])).request_params
         assert params["model_config_id"] == selected.id
-        assert params["remake_context_version"] == 3
+        assert params["remake_context_version"] == 5
+        assert "catalog_seed_task_id" not in params and params["remake_deadline_at"] > 0
         assert "remake_block_size" not in params
     for upload in (first, second, third):
         await upload.refresh_from_db()
