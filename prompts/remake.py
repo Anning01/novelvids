@@ -262,3 +262,17 @@ def independent_shot_instruction(language):
             'speech and ending state. Describe only what the target actually shows and sounds, starting at time zero. '
             'Keep genuine replays and attribute speech across the cut by its audio. Use the project catalog for '
             'recognition. Give each reference its observed name, type and a unique shot-local ID. Follow the output contract without restating facts.')
+
+
+
+def parallel_identity_instruction(language):
+    if language == "zh":
+        return ("各集同时分析。跨集身份若能从原片明确确认，在 visual_fields 的 cross_episode_identity 记录关系及有名对象："
+                "人物用 spouse:配偶姓名、parent:孩子姓名、child:父母姓名、sibling:兄弟姐妹姓名。"
+                "地点仅用 address:确切地址，道具仅用 serial:原片可见的唯一编号。换装仍沿用同一身份。"
+                "通用称呼、外貌、颜色、款式和猜测均不作为凭据，缺乏依据时省略该字段。")
+    return ("Episodes are analyzed independently. Only for a source-confirmed identity, put cross_episode_identity "
+            "in visual_fields. For people use spouse:<spouse name>, parent:<child name>, child:<parent name>, "
+            "or sibling:<sibling name>. Keep it through outfit changes. "
+            "For places use address:<exact address>; for objects use serial:<visible unique serial>. "
+            "Omit the field if evidence is missing. Generic roles, appearance, color or product style do not identify a subject.")

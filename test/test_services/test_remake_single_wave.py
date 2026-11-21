@@ -132,3 +132,10 @@ async def test_expired_queued_shot_never_contacts_the_model(tmp_path, monkeypatc
         call.assert_not_awaited()
     finally:
         current_execution.reset(token)
+
+
+def test_same_asset_alias_with_different_case_is_still_unambiguous():
+    asset = {'id': 'prop1', 'name': 'Key Card', 'aliases': ['key card']}
+    ref = {'asset_type': 'object', 'asset_name': 'KEY CARD', 'asset_id': 'local-1'}
+    shot, = bind_shot_references([{'asset_refs': [ref]}], {'objects': [asset]})
+    assert [r['asset_id'] for r in shot['asset_refs']] == ['prop1']

@@ -65,15 +65,22 @@ class RemakeResultPersistence:
                  "aliases": row["aliases"] or [], "visual_identity": _asset_visual_content(row["description"])[:350]}
                 for row in rows if row["asset_type"] in types]
 
-    async def bind_assets(self, source, assets, catalog):
+    async def bind_assets(self, source, assets, catalog, *, use_identity_evidence=False):
         """Resolve episode-local reference IDs before shot generation, in one short project transaction."""
         seen_ids = {item["project_asset_id"] for item in catalog}
         async with in_transaction() as connection:
             await Novel.filter(id=source.novel_id).using_db(connection).select_for_update().get()
             rows = await Asset.filter(novel_id=source.novel_id).using_db(connection).order_by("id")
             by_name = {(row.asset_type, row.canonical_name): row for row in rows}
+            from services.remake.identity_evidence import identity_anchor, identity_name
+            characters = {identity_name(named_form(p["name"])[0]) for p in assets.get("characters", [])}
+            characters.update(identity_name(p["name"]) for p in catalog if p.get("type") == "character")
+            witnessed = {}
             aliases = {}
             for row in rows:
+                metadata = row.metadata or {}
+                if anchor := metadata.get("remake_identity_anchor"):
+                    witnessed.setdefault((row.asset_type, metadata.get("remake_identity_name", row.canonical_name), anchor), []).append(row)
                 for alias in row.aliases or []:
                     aliases.setdefault((row.asset_type, alias), set()).add(row.canonical_name)
             canonical = {}
@@ -84,16 +91,21 @@ class RemakeResultPersistence:
                     names = aliases.get((kind.value, name), set())
                     # An existing fully qualified historical asset remains addressable by its original ID.
                     name, form = (name, "") if (kind.value, name) in by_name else named_form(name)
-                    existing = by_name.get((kind.value, name))
+                    anchor = identity_anchor(candidate, group, characters - {identity_name(name)}) if use_identity_evidence else None
+                    matches = witnessed.get((kind.value, name, anchor), [])
+                    original_name = name
+                    existing = matches[0] if len(matches) == 1 else by_name.get((kind.value, name))
                     if existing is None and len(names) == 1:
                         existing = by_name[(kind.value, next(iter(names)))]
                     ambiguous = len(names - {name}) > 0 if existing and existing.canonical_name == name else len(names) > 1
+                    if len(matches) > 1 or (existing and anchor and (existing.metadata or {}).get("remake_identity_anchor") not in (None, anchor)):
+                        ambiguous = True
                     if candidate.get("identity_review") and existing:
                         ambiguous = True
                     known_label = existing.metadata.get("remake_label") if existing and isinstance(existing.metadata, dict) else None
                     if kind == AssetTypeEnum.person and known_label and candidate.get("label") and known_label != candidate["label"]:
                         ambiguous = True
-                    if existing and existing.id not in seen_ids and (kind == AssetTypeEnum.item or existing.description != candidate["description"]):
+                    if existing and existing.id not in seen_ids and len(matches) != 1 and (kind == AssetTypeEnum.item or existing.description != candidate["description"]):
                         # Another episode introduced this name after extraction. Name alone is not an identity.
                         ambiguous = True
                     if ambiguous:
@@ -106,6 +118,8 @@ class RemakeResultPersistence:
                         name = base[:100 - len(suffix)] + suffix
                         existing = None
                     item = {**candidate, "name": existing.canonical_name if existing else name}
+                    if anchor:
+                        item.update(remake_identity_anchor=anchor, remake_identity_name=original_name)
                     if form:
                         item["form_name"] = form
                     if ambiguous:
@@ -239,6 +253,8 @@ class RemakeResultPersistence:
                             "remake_source_ids": [source.id],
                             "remake_reference_id": reference_id,
                             "remake_label": str(item.get("label", "")),
+                            **({k: item[k] for k in ("remake_identity_anchor", "remake_identity_name")}
+                               if item.get("remake_identity_anchor") else {}),
                             **({"identity_review": True} if item.get("identity_review") else {}),
                         },
                     )

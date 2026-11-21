@@ -23,7 +23,7 @@ async def task_history(params):
         old = task.request_params or {}
         if any(old.get(k) != params.get(k) for k in
                ('remake_source_id', 'chapter_id', 'novel_id', 'team_id', 'user_id', 'prompt_language', 'model_config_id',
-                'remake_context_version', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
+                'remake_context_version', 'remake_identity_evidence', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
             break
         yield task
         previous_id = old.get('retry_of_task_id')

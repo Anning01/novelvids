@@ -339,3 +339,48 @@ async def test_simultaneous_homonyms_in_one_episode_survive_normalization():
     assert len(bound) == 2 and bound[0]['project_asset_id'] != bound[1]['project_asset_id']
     assert bound[1]['identity_review']
     assert (await Asset.get(id=bound[1]['project_asset_id'])).metadata['identity_review']
+
+
+@pytest.mark.asyncio
+async def test_parallel_inventories_share_confirmed_relationship_and_distinguish_a_homonym():
+    from types import SimpleNamespace
+    first = await _source()
+    svc = RemakeResultPersistence()
+    sources = [first]
+    for i in (2,3,4):
+        chapter = await Chapter.create(novel_id=first.novel_id, number=i, name=str(i), content='')
+        sources.append(SimpleNamespace(novel_id=first.novel_id, chapter_id=chapter.id, id=first.id+i, episode_number=i))
+
+    async def bind(source, form, counterpart):
+        assets = _assets(f'第{source.episode_number}集的独立设定')
+        person = assets['characters'][0]
+        witness = {**person, 'id': 'character-002', 'name': counterpart}
+        person.update(name='文静#'+form, visual_fields={'cross_episode_identity':'spouse:'+counterpart})
+        assets['characters'].append(witness)
+        result = await svc.bind_assets(source, assets, [], use_identity_evidence=True)
+        return result['characters'][0]
+
+    a = await bind(sources[0], '居家形态', '建平')
+    b = await bind(sources[1], '花店形态', '建平')
+    c = await bind(sources[2], '花店形态', '孟川')
+    d = await bind(sources[3], '舞台形态', '孟川')
+    assert a['project_asset_id'] == b['project_asset_id'] != c['project_asset_id'] == d['project_asset_id']
+    assert a['project_variant_id'] != b['project_variant_id']
+
+
+def test_identity_evidence_uses_typed_source_facts_and_stays_out_of_visual_prompts():
+    from prompts.remake import parallel_identity_instruction
+    from services.remake.identity_evidence import identity_anchor
+    from services.remake.asset_validation import render_remake_assets
+    from test.remake_fixtures import design_fields
+    def item(value):
+        return {'name':'甲','description':'人物设定','visual_fields':{**design_fields(),'cross_episode_identity':value}}
+    assert identity_anchor(item('spouse:乙'), 'characters', {'乙'}) == 'spouse:乙'
+    assert identity_anchor(item('spouse:某人'), 'characters', {'乙'}) is None
+    assert identity_anchor(item('spouse:乙'), 'objects', {'乙'}) is None
+    assert identity_anchor(item('serial:AX-391'), 'objects', set()) == 'serial:ax-391'
+    assert identity_anchor(item('红色'), 'objects', set()) is None
+    rendered = render_remake_assets({'characters':[item('spouse:乙')]},synthetic_snapshot(),'zh','9:16')
+    assert 'cross_episode_identity' not in rendered['characters'][0]['description']
+    for language in ('zh','en'):
+        assert 'cross_episode_identity' in parallel_identity_instruction(language)

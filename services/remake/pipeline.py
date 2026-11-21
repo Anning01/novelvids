@@ -160,7 +160,9 @@ class RemakeDecompositionPipeline:
             if continuous:
                 if execution and "remake:bindings" not in saved:
                     await remake_result_persistence.wait_for_seed(execution.params.get("catalog_previous_task_id"), source)
-                bound = await checkpoint("remake:bindings", lambda: remake_result_persistence.bind_assets(source, normalized, identity_catalog))
+                options = {"use_identity_evidence": True} if single_wave and execution.params.get("remake_identity_evidence") else {}
+                bound = await checkpoint("remake:bindings", lambda: remake_result_persistence.bind_assets(
+                    source, normalized, identity_catalog, **options))
                 if single_wave:
                     aliases = {item["project_asset_id"]: item["aliases"] for item in identity_catalog}
                     for group, items in normalized.items():

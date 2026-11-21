@@ -285,6 +285,9 @@ class RemakeVideoAnalysisGateway:
             context_version = getattr(execution, 'params', {}).get('remake_context_version', 0)
             if context_version >= 2 and not audit:
                 extra = identity_instruction(execution.language) if schema is RemakeAssets else continuity_instruction(execution.language)
+            if context_version == 5 and schema is RemakeAssets and execution.params.get("remake_identity_evidence"):
+                from prompts.remake import parallel_identity_instruction
+                extra += "\n" + parallel_identity_instruction(execution.language)
             if context_version == 5 and schema is RemakeShot:
                 from prompts.remake import independent_shot_instruction
                 extra = independent_shot_instruction(execution.language)

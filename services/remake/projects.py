@@ -232,6 +232,7 @@ class RemakeProjectService:
                         request_params={
                             **workflow,
                             "remake_context_version": 5,
+                            "remake_identity_evidence": True,
                             "remake_deadline_at": deadline_at,
                             "source_checksum": source.checksum,
                             **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
@@ -461,7 +462,7 @@ class RemakeProjectService:
                 progress=progress,
                 request_params={
                     **({"remake_deadline_at": batch_deadline([])} if previous_params.get("remake_context_version") == 5 else {}),
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_identity_evidence", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

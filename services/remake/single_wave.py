@@ -43,8 +43,8 @@ def bind_shot_references(shots, assets):
             names = {asset['name'], *(asset.get('aliases') or []), *(asset.get('source_names') or [])}
             if asset.get('form_name'):
                 names.add(asset['name'].partition('#')[0])
-            for name in names:
-                by_name[kind, name.strip().casefold()].append(asset)
+            for name in {value.strip().casefold() for value in names}:
+                by_name[kind, name].append(asset)
     bound = []
     for shot in shots:
         resolved, missing = [], []
