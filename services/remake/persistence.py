@@ -88,6 +88,11 @@ class RemakeResultPersistence:
                     if existing is None and len(names) == 1:
                         existing = by_name[(kind.value, next(iter(names)))]
                     ambiguous = len(names - {name}) > 0 if existing and existing.canonical_name == name else len(names) > 1
+                    if candidate.get("identity_review") and existing:
+                        ambiguous = True
+                    known_label = existing.metadata.get("remake_label") if existing and isinstance(existing.metadata, dict) else None
+                    if kind == AssetTypeEnum.person and known_label and candidate.get("label") and known_label != candidate["label"]:
+                        ambiguous = True
                     if existing and existing.id not in seen_ids and (kind == AssetTypeEnum.item or existing.description != candidate["description"]):
                         # Another episode introduced this name after extraction. Name alone is not an identity.
                         ambiguous = True

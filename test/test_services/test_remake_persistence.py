@@ -324,3 +324,18 @@ async def test_named_outfits_reuse_subject_and_persist_the_confirmed_variant_on_
     await svc.persist(source=source, assets=bound, prompt_document={'prompts':[_prompt(1)]},pipeline_metadata={})
     scene = await Scene.get(chapter_id=source.chapter_id)
     assert scene.metadata['asset_variant_ids'][str(variant.asset_id)] == [variant.id]
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_homonyms_in_one_episode_survive_normalization():
+    from services.remake.prompt_render import normalize_global_assets
+    source = await _source()
+    one = _assets("值班青年")["characters"][0]
+    two = _assets("另一名年长访客")["characters"][0]
+    # The model's local reference IDs are assigned during normalization.
+    rows = [{k:v for k,v in item.items() if k != 'id'} for item in (one,two,two)]
+    normalized = normalize_global_assets({'characters':rows}, separate_conflicts=True)
+    bound = (await RemakeResultPersistence().bind_assets(source, normalized, []))['characters']
+    assert len(bound) == 2 and bound[0]['project_asset_id'] != bound[1]['project_asset_id']
+    assert bound[1]['identity_review']
+    assert (await Asset.get(id=bound[1]['project_asset_id'])).metadata['identity_review']

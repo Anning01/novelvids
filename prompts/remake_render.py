@@ -11,20 +11,23 @@ from prompts.labels import prompt_label
 
 
 def normalize_global_assets(
-    raw: dict[str, Any], language: str = "zh"
+    raw: dict[str, Any], language: str = "zh", *, separate_conflicts: bool = False
 ) -> dict[str, list[dict[str, Any]]]:
     return {
-        "characters": _deduplicate_assets(raw.get("characters"), "character", language),
-        "scenes": _deduplicate_assets(raw.get("scenes"), "scene", language),
-        "objects": _deduplicate_assets(raw.get("objects"), "object", language),
+        "characters": _deduplicate_assets(raw.get("characters"), "character", language, separate_conflicts),
+        "scenes": _deduplicate_assets(raw.get("scenes"), "scene", language, separate_conflicts),
+        "objects": _deduplicate_assets(raw.get("objects"), "object", language, separate_conflicts),
     }
 
 
 def _deduplicate_assets(
-    value: Any, prefix: str, language: str = "zh"
+    value: Any, prefix: str, language: str = "zh", separate_conflicts: bool = False
 ) -> list[dict[str, Any]]:
     unique: dict[str, dict[str, Any]] = {}
-    for item in value if isinstance(value, list) else []:
+    items = value if isinstance(value, list) else []
+    reserved = {_normalize(item.get("name")) for item in items if isinstance(item, dict)}
+    identities = set()
+    for item in items:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name", "")).strip()
@@ -34,6 +37,21 @@ def _deduplicate_assets(
         cleaned = {**item, "name": name}
         if "label" in cleaned:
             cleaned["label"] = {"person": "人物", "animal": "动物", "group": "群像"}.get(cleaned["label"], cleaned["label"])
+        if separate_conflicts:
+            signature = (key, cleaned.get("label"), str(cleaned.get("description", "")).strip())
+            if signature in identities:
+                continue
+            identities.add(signature)
+            if key in unique:
+                number = 2
+                while True:
+                    suffix = f" · 候选{number}" if language == "zh" else f" · candidate {number}"
+                    distinct = name[:100 - len(suffix)] + suffix
+                    key = _normalize(distinct)
+                    if key not in reserved and key not in unique:
+                        break
+                    number += 1
+                cleaned.update(name=distinct, identity_review=True)
         existing = unique.get(key)
         if existing is None or len(str(cleaned.get("description", ""))) > len(
             str(existing.get("description", ""))

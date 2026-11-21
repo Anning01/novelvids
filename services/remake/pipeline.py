@@ -150,7 +150,8 @@ class RemakeDecompositionPipeline:
                     include_segment_metadata=False, **context)
             if not execution:
                 raw = render_remake_assets(raw, snapshot, language, aspect_ratio)
-            normalized = normalize_global_assets(raw, language)
+            normalized = normalize_global_assets(raw, language, separate_conflicts=bool(
+                continuous and (not execution or execution.params.get("remake_context_version", 0) >= 2)))
             if continuous:
                 if execution and "remake:bindings" not in saved:
                     await remake_result_persistence.wait_for_seed(execution.params.get("catalog_previous_task_id"), source)
