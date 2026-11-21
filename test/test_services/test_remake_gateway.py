@@ -635,3 +635,66 @@ async def test_three_ready_episodes_share_selected_model_limit_without_a_shot_gr
     assert peak == limit and window_for(1234).active == 0
     assert shots == 103 and checks == (0 if limit == 1 else 100)
     print(f'schedule_replay slots={limit} peak={peak} shots={shots} checks={checks} elapsed={monotonic()-started:.3f}s')
+
+
+@pytest.mark.asyncio
+async def test_parallel_retry_uses_each_failed_requests_own_evidence(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from uuid import uuid4, uuid5
+    from exceptions.remake import RemakeError
+    from models.agent_operation import AgentOperation
+    from models.ai_task import AiTask
+    from models.creation_agent import AgentConversation, AgentMessage
+    from models.novel import Novel
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.checkpoints import reconcile_retry
+
+    monkeypatch.setattr("services.remake.analysis_capacity.AnalysisWindow.slow_down", AsyncMock())
+    novel = await Novel.create(name="parallel retry", workflow_kind="remake")
+    conversation = await AgentConversation.create(novel=novel)
+    task = await AiTask.create(task_type=6, status=4, request_params={"remake_context_version": 3},
+                               error_message="Only one error reached the parent")
+    gateway = RemakeVideoAnalysisGateway(_config(concurrency=3), client=_Client([]))
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"clip")
+
+    async def failed_call(i, schema, detail):
+        segment = str(i)
+        kwargs = {}
+        if schema == "professional_video_prompt_material":
+            segment = "draft-" + segment
+            key = f"model:remake:RemakeShot:{segment}"
+            kwargs["draft"] = True
+        else:
+            key = f"model:structured:RemakeContinuityVerdict:{segment}"
+        receipt = await AgentOperation.create(task=task, key=key, state="uncertain", external=True)
+        child = await AiTask.create(id=uuid5(task.id, key), task_type=8, status=4)
+        await AgentMessage.create(task=child, conversation=conversation, role="assistant", request_id=uuid4(),
+                                  request_hash="", usage={"calls": [{"status": "failed"}]})
+        execution = SimpleNamespace(params={"task_id": str(task.id), "remake_context_version": 3},
+                                    language="zh", generate=AsyncMock(side_effect=RuntimeError(detail)))
+        token = current_execution.set(execution)
+        try:
+            with pytest.raises(RemakeVideoAnalysisError):
+                await gateway.analyze_one(index=i, path=path, prompt="", schema_name=schema,
+                                          response_schema={}, context={"segment": i}, **kwargs)
+        finally:
+            current_execution.reset(token)
+        return receipt
+
+    draft, audit = await asyncio.gather(
+        failed_call(3, "professional_video_prompt_material", "System protection triggered by request burst."),
+        failed_call(4, "shot_continuity_check", "Unable to handle additional requests due to server overload."))
+    await reconcile_retry(task)
+    for receipt in (draft, audit):
+        await receipt.refresh_from_db()
+        assert receipt.state == "failed" and receipt.result["retryable"]
+
+    # A lost connection on the same shot as the last parent error is still ambiguous.
+    lost = await failed_call(3, "shot_continuity_check", "Connection dropped while reading response")
+    task.error_message = "第 3 个视频片段分析失败：System protection triggered by request burst."
+    await task.save()
+    with pytest.raises(RemakeError):
+        await reconcile_retry(task)
+    await lost.refresh_from_db()
+    assert lost.state == "uncertain"

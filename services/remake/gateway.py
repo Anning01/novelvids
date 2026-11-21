@@ -238,6 +238,7 @@ class RemakeVideoAnalysisGateway:
             self.first_request_started_at = started_at
         from prompts.remake import render_remake_request
         from utils.prompt_language import task_language
+        from services.remake.analysis_capacity import provider_pressure
         from services.creation_agent.skill_execution import current_execution
         execution = current_execution.get()
         if execution:
@@ -301,6 +302,14 @@ class RemakeVideoAnalysisGateway:
                 self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='failed', draft=draft)
                 _log_provider_failure(error, model=str(self.config.model), schema_name=schema_name, attempt=1)
                 message, error_code = _provider_failure(error, index=index)
+                if context_version >= 3 and (getattr(error, "status_code", None) == 429
+                                             or provider_pressure(_extract_error_detail(error))):
+                    # The batch error only names one call. Keep the denial on its exact operation.
+                    domain = "structured" if audit else "remake"
+                    segment = context["segment"] if audit else receipt_segment
+                    key = f"model:{domain}:{schema.__name__}:{segment}"
+                    await AgentOperation.filter(task_id=execution.params["task_id"], key=key,
+                        external=True, state="uncertain").update(result={"provider_capacity_denial": True})
                 raise RemakeVideoAnalysisError(message, error_code=error_code, usage=dict(self.usage)) from None
             finally:
                 capacity_observer.reset(observer)

@@ -53,10 +53,13 @@ async def _rate_limited_outcome(task, receipt, child):
     message = task.error_message or ""
     from services.remake.analysis_capacity import provider_pressure
     # Require this exact segment's terminal error, not a coincidental failure elsewhere in the batch.
-    denied = provider_pressure(message) and (
-        f"第 {segment} 个视频片段分析失败：" in message
-        or re.search(rf"Video segment {segment}\b[^:]*:", message, re.I)
-    )
+    if task.request_params.get("remake_context_version", 0) >= 3:
+        denied = (receipt.result or {}).get("provider_capacity_denial") is True
+    else:
+        denied = provider_pressure(message) and (
+            f"第 {segment} 个视频片段分析失败：" in message
+            or re.search(rf"Video segment {segment}\b[^:]*:", message, re.I)
+        )
     if not denied:
         return None
     record = await AgentMessage.filter(task=child, role="assistant").only("usage").first()
