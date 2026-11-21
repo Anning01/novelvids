@@ -2,11 +2,11 @@
 import { tr } from '@/i18n'
 
 import type { EdgeProps } from '@vue-flow/core';
-import { BaseEdge } from '@vue-flow/core';
-import { useWorkbenchWire } from './useWorkbenchWire';
+import { BaseEdge, getBezierPath } from '@vue-flow/core';
+import { computed } from 'vue';
 
 const props = defineProps<EdgeProps>();
-const path = useWorkbenchWire(props);
+const path = computed(() => getBezierPath(props)[0]);
 </script>
 
 <template>

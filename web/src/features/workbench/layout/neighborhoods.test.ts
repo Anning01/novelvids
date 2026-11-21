@@ -73,3 +73,11 @@ it('leaves an entirely protected canvas untouched, including a pinned card outsi
   pinned.zIndex = 1_000_000; locked.data.ui = { locked: true }
   expect(buildWorkbenchGroupedAutoLayout([group, member, pinned, locked])).toEqual({})
 })
+
+it('keeps linked cards one compact gutter apart while leaving room above the next row', () => {
+  const first = node('a', 'asset', 0, 0), second = node('b', 'asset', 0, 800)
+  const shot = node('shot', 'shot', 1600, 400)
+  const placed = buildWorkbenchGroupedAutoLayout([first, second, shot], [wire('a', 'shot'), wire('b', 'shot')])
+  expect(placed.shot!.x - placed.a!.x - first.size!.width).toBe(72)
+  expect(Math.abs(placed.b!.y - placed.a!.y) - first.size!.height).toBe(96)
+})

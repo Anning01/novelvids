@@ -19,8 +19,6 @@ import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
 import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
-import { WireObstacles } from '../edges/edgeRouting'
-import { wireObstaclesKey } from '../edges/useWorkbenchWire'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
 import OutputBindingEdge from '../edges/OutputBindingEdge.vue'
 import ShotSequenceEdge from '../edges/ShotSequenceEdge.vue'
@@ -164,13 +162,6 @@ const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
-provide(wireObstaclesKey, computed(() => new WireObstacles(getNodes.value.flatMap(node => {
-  const { width, height } = node.dimensions
-  if (!width || !height || node.hidden) return []
-  const { x, y } = node.computedPosition
-  return [{ key: node.id, left: x - 8, right: x + width + 8, top: y - 36, bottom: y + height + 8,
-    members: node.type === 'section' ? new Set<string>(node.data.node_keys ?? []) : undefined }]
-}))))
 const highlightedWireNodes = computed(() => {
   const keys = new Set(store.selectedNodeKeys)
   for (const key of store.selectedNodeKeys) {

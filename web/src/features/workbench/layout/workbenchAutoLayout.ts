@@ -44,8 +44,8 @@ const EDGE_AFFINITY: Record<string, number> = {
 };
 const DEFAULT_NODE_SIZE: NodeSize = { width: 360, height: 280 };
 const DEFAULT_ORIGIN: Point = { x: 80, y: 80 };
-const DEFAULT_COLUMN_GAP = 180;
-const DEFAULT_ROW_GAP = 72;
+const DEFAULT_COLUMN_GAP = 72;
+const DEFAULT_ROW_GAP = 96;
 const BARYCENTRIC_SWEEPS = 4;
 const HEADER_BAND_ORDER: Record<string, number> = {};
 const ASSET_PRELUDE_ORDER: Record<string, number> = {
