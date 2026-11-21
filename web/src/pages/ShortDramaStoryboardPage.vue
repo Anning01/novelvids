@@ -31,7 +31,6 @@ import {
   Trash2,
   Upload,
   UsersRound,
-  Volume2,
   Workflow,
   WandSparkles,
 } from 'lucide-vue-next'
@@ -40,13 +39,14 @@ import AssetCreateDialog from '@/components/AssetCreateDialog.vue'
 import AudioReferencePicker from '@/components/AudioReferencePicker.vue'
 import ChapterDetailDrawer from '@/components/ChapterDetailDrawer.vue'
 import DeferredVideoPlayer from '@/components/DeferredVideoPlayer.vue'
-import SceneAssetActionMenu from '@/components/SceneAssetActionMenu.vue'
+import StoryboardAssetCard from '@/components/StoryboardAssetCard.vue'
+import ImageLightbox from '@/components/ImageLightbox.vue'
 import SceneAssetVariantPicker, { type SceneAssetVariantSelection } from '@/components/SceneAssetVariantPicker.vue'
 import { boundPrompt, cachedModelPrompt, genericPrompt, modelPromptTexts, plainPrompt, resolveModelPrompt } from '@/shared/sceneModelPrompt'
 import { unbindBlocking, withBlockingReference } from '@/shared/sceneBlockingReference'
 import { bindSheet, unbindSheet, includeSheet, sheetReference, SHEET_ID } from '@/shared/storyboardSheetReference'
 import StoryboardSheetCard from '@/components/StoryboardSheetCard.vue'
-import { storyboardGallery, storyboardGalleryKey } from '@/shared/imageGallery'
+import { storyboardGallery, storyboardGalleryKey, type PreviewImage } from '@/shared/imageGallery'
 import { modelImageMentions } from '@/shared/modelImageMentions'
 import ScenePromptEditor, { type ScenePromptMentionOption } from '@/components/ScenePromptEditor.vue'
 import ScenePromptFocusDialog from '@/components/ScenePromptFocusDialog.vue'
@@ -69,7 +69,6 @@ import { api, ApiRequestError, mediaUrl, sleep, retryableStatusError } from '@/a
 import { isAbortError, pollUntilTerminal } from '@/features/workbench/execution/workbenchAsync'
 import { appConfirm } from '@/shared/confirmDialog'
 import { useAuthStore } from '@/features/auth/authStore'
-import { fallbackImage } from '@/shared/mediaFallback'
 import { notice } from '@/shared/notice'
 import { episodeDisplayLabel, stripChapterOrdinal } from '@/shared/chapterTitle'
 import { chapterHasCompletedVideo } from '@/shared/chapterVideoTimeline'
@@ -1093,10 +1092,23 @@ function selectedAssetImage(scene: Scene, asset: Asset) {
 function selectedAssetThumbnail(scene: Scene, asset: Asset) {
   const variant = selectedVariantFor(scene, asset)
   if (variant) return mediaUrl(variant.image_thumbnails?.[0] || variant.images[0] || '')
-  return mediaUrl(asset.main_image_thumbnail
-    || asset.angle_image_1_thumbnail
-    || asset.angle_image_2_thumbnail
-    || selectedAssetImage(scene, asset))
+  if (asset.main_image) return mediaUrl(asset.main_image_thumbnail || asset.main_image)
+  if (asset.angle_image_1) return mediaUrl(asset.angle_image_1_thumbnail || asset.angle_image_1)
+  if (asset.angle_image_2) return mediaUrl(asset.angle_image_2_thumbnail || asset.angle_image_2)
+  return mediaUrl(asset.main_image_thumbnail || asset.angle_image_1_thumbnail || asset.angle_image_2_thumbnail)
+}
+
+const assetPreview = ref<{ current: PreviewImage; images: PreviewImage[] } | null>(null)
+
+function openAssetPreview(scene: Scene, asset: Asset) {
+  const imageFor = (item: Asset): PreviewImage => ({
+    src: selectedAssetImage(scene, item) || selectedAssetThumbnail(scene, item),
+    alt: selectedAssetLabel(scene, item),
+  })
+  const images = assetGroups.value.flatMap(group => selectedAssetsFor(scene, group).map(imageFor)).filter(image => image.src)
+  openAssetPickerKey.value = ''
+  openAssetActionKey.value = ''
+  assetPreview.value = { current: imageFor(asset), images }
 }
 
 function selectedAssetReferenceImages(scene: Scene, asset: Asset) {
@@ -2702,54 +2714,21 @@ onBeforeUnmount(() => {
                 <label><span>{{ tr('分镜描述') }}</span><textarea :value="draftFor(scene).description" rows="5" :placeholder="tr('请输入分镜描述')" @input="updateSceneText(scene, 'description', $event)" /></label>
                 <section v-for="group in assetGroups" :key="group.type" class="shot-assets">
                   <header><span><component :is="group.icon" :size="15" />{{ group.label }}</span><span><small>{{ selectedAssetsFor(scene, group).length }}/{{ group.candidates.reduce((sum, asset) => sum + 1 + (asset.variants?.length || 0), 0) }}</small><AppButton :id="`asset-picker-trigger-${assetPickerKey(scene, group.type)}`" variant="ghost" size="sm" icon-only :aria-label="tr('选择{p0}及衍生状态', { p0: group.label })" @click="toggleAssetPicker(scene, group.type)"><Plus :size="15" /></AppButton></span></header>
-                  <div
-                    v-if="selectedAssetsFor(scene, group).length"
-                    class="selected-assets"
-                    :class="{
-                      'is-person-assets': group.type === AssetTypeEnum.PERSON,
-                      'is-scene-assets': group.type === AssetTypeEnum.SCENE,
-                      'is-prop-assets': group.type === AssetTypeEnum.ITEM,
-                    }"
-                  >
-                    <article v-for="asset in selectedAssetsFor(scene, group)" :key="assetActionKey(scene, asset)" class="selected-asset-row">
-                      <component
-                        :is="group.type === AssetTypeEnum.PERSON ? 'label' : 'span'"
-                        :for="group.type === AssetTypeEnum.PERSON ? assetRowPickerAnchorId(scene, asset) : undefined"
-                        class="asset-thumb"
-                        :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
-                        :data-reference-asset-id="asset.id"
-                      ><component :is="group.icon" :size="16" /><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" @error="fallbackImage($event, selectedAssetImage(scene, asset))" /></component>
-                      <AppButton
-                        :id="assetRowPickerAnchorId(scene, asset)"
-                        variant="soft"
-                        size="sm"
-                        class="asset-name-button"
-                        :active="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id && assetPickerReplaceVariantIds[assetPickerKey(scene, group.type)] === (selectedVariantFor(scene, asset)?.id ?? null)"
-                        :aria-expanded="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerReplaceAssetIds[assetPickerKey(scene, group.type)] === asset.id && assetPickerReplaceVariantIds[assetPickerKey(scene, group.type)] === (selectedVariantFor(scene, asset)?.id ?? null)"
-                        :aria-label="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
-                        :title="tr('替换{p0}', { p0: selectedAssetLabel(scene, asset) })"
-                        @click="toggleAssetReplacementPicker(scene, group.type, asset)"
-                      ><span>{{ selectedAssetLabel(scene, asset) }}</span></AppButton>
-                      <AppButton
-                        v-if="group.type === AssetTypeEnum.PERSON"
-                        variant="soft"
-                        size="sm"
-                        class="asset-voice-button"
-                        :active="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id && assetVoicePickerTarget?.variantId === (selectedVariantFor(scene, asset)?.id ?? null)"
-                        :loading="savingAssetVoiceKey === assetVoicePickerKey(scene, asset)"
-                        :disabled="Boolean(savingAssetVoiceKey)"
-                        :aria-label="tr('为{p0}更换音色', { p0: selectedAssetLabel(scene, asset) })"
-                        :title="tr('更换{p0}的音色', { p0: selectedAssetLabel(scene, asset) })"
-                        @click="openAssetVoicePicker(scene, asset)"
-                      ><Volume2 :size="13" /><span>{{ selectedAssetVoiceLabel(scene, asset) }}</span></AppButton>
-                      <SceneAssetActionMenu
-                        :open="openAssetActionKey === assetActionKey(scene, asset)"
-                        :label="selectedAssetLabel(scene, asset)"
-                        @toggle="toggleAssetActionMenu(scene, asset)"
-                        @edit="editSceneAsset(asset)"
-                        @remove="removeAssetFromScene(scene, asset)"
-                      />
-                    </article>
+                  <div v-if="selectedAssetsFor(scene, group).length" class="selected-assets">
+                    <StoryboardAssetCard v-for="asset in selectedAssetsFor(scene, group)" :key="assetActionKey(scene, asset)"
+                      :asset-id="asset.id" :label="selectedAssetLabel(scene, asset)" :icon="group.icon"
+                      :thumbnail="selectedAssetThumbnail(scene, asset)" :original="selectedAssetImage(scene, asset)"
+                      :highlighted="highlightedReferenceKey === `asset:${scene.id}:${asset.id}`"
+                      :anchor-id="assetRowPickerAnchorId(scene, asset)"
+                      :replacing="openAssetPickerKey === assetPickerKey(scene, group.type) && assetPickerAnchorId(scene, group.type) === assetRowPickerAnchorId(scene, asset)"
+                      :menu-open="openAssetActionKey === assetActionKey(scene, asset)"
+                      :voice-label="group.type === AssetTypeEnum.PERSON ? selectedAssetVoiceLabel(scene, asset) : undefined"
+                      :voice-open="assetVoicePickerTarget?.sceneId === scene.id && assetVoicePickerTarget?.assetId === asset.id && assetVoicePickerTarget?.variantId === asset.sceneVariantId"
+                      :saving-voice="savingAssetVoiceKey === assetVoicePickerKey(scene, asset)" :voice-disabled="Boolean(savingAssetVoiceKey)"
+                      @preview="openAssetPreview(scene, asset)" @replace="toggleAssetReplacementPicker(scene, group.type, asset)"
+                      @voice="openAssetVoicePicker(scene, asset)" @menu="toggleAssetActionMenu(scene, asset)"
+                      @edit="editSceneAsset(asset)" @remove="removeAssetFromScene(scene, asset)"
+                    />
                   </div>
                   <p v-else>{{ tr('暂未选择') }}{{ group.label.replace('分镜', '').replace('出镜', '') }}</p>
                   <SceneAssetVariantPicker
@@ -2947,6 +2926,8 @@ onBeforeUnmount(() => {
       @close="closePromptFocus"
       @update:model-value="updateFocusedPrompt"
     />
+    <ImageLightbox v-if="assetPreview" open :src="assetPreview.current.src" :alt="assetPreview.current.alt"
+      :images="assetPreview.images" @close="assetPreview = null" />
   </main>
 </template>
 
@@ -3022,96 +3003,12 @@ onBeforeUnmount(() => {
 .shot-info-panel textarea { padding: 11px; border-radius: 9px; font-size: 11px; line-height: 1.65; box-shadow: inset 0 0 0 1px #e1e4ec; }
 .shot-info-panel textarea:focus,.prompt-panel textarea:focus { box-shadow: inset 0 0 0 2px rgb(91 92 246 / 14%); }
 .shot-assets { display: grid; gap: 8px; }
-.shot-assets > header { display: flex; align-items: center; justify-content: space-between; color: #525867; font-size: 10px; font-weight: 650; }
+.shot-assets > header { display: flex; align-items: center; justify-content: space-between; color: var(--app-text-secondary); font-size: 11px; font-weight: 650; }
 .shot-assets > header > span { display: inline-flex; align-items: center; gap: 6px; }
 .shot-assets > header > span:last-child { display: flex; align-items: center; gap: 2px; }
-.shot-assets > header small { color: #9a9fac; font-weight: 400; }
+.shot-assets > header small { color: var(--app-text-muted); font-weight: 400; }
 .shot-assets > header button { width: 26px; min-height: 26px; padding: 0; }
-.selected-assets { display: grid; gap: 7px; }
-.selected-asset-row { display: grid; min-width: 0; grid-template-columns: 38px minmax(0,1fr) 30px; align-items: center; gap: 6px; }
-.selected-asset-row > button { min-width: 0; justify-content: flex-start; }
-.selected-asset-row .asset-name-button { height: auto; padding: 7px 9px; color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border); }
-.selected-asset-row .asset-name-button span { overflow-wrap: anywhere; white-space: normal; line-height: 1.4; text-align: left; }
-.selected-asset-row .asset-voice-button { padding-inline: 8px; color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); font-size: 9px; }
-.selected-asset-row .asset-voice-button:hover:not(:disabled),.selected-asset-row .asset-voice-button.is-active { color: #5557ea; background: #ededff; box-shadow: inset 0 0 0 1px rgb(91 92 240 / 12%); }
-.selected-asset-row .asset-voice-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selected-assets.is-scene-assets { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
-.selected-assets.is-scene-assets .selected-asset-row { grid-template-columns: minmax(0,1fr) 30px; align-items: end; }
-.selected-assets.is-scene-assets .asset-thumb { grid-column: 1 / -1; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 10px; }
-.selected-assets.is-scene-assets .asset-name-button { grid-column: 1; }
-.asset-thumb { position: relative; display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
-.asset-thumb.is-reference-highlighted { box-shadow: 0 0 0 3px rgb(255 122 140 / 42%), 0 6px 18px rgb(120 35 52 / 18%); transform: scale(1.04); }
-.asset-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.shot-assets:has(.is-person-assets) > header { color: var(--app-text-secondary); font-size: 11px; }
-.selected-assets.is-person-assets {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 5.5rem), 1fr));
-  gap: 12px 8px;
-}
-.is-person-assets .selected-asset-row {
-  position: relative;
-  grid-template-columns: minmax(0, 1fr) 24px;
-  grid-template-rows: auto 1fr auto;
-  gap: 2px 0;
-  align-items: start;
-}
-.is-person-assets .asset-thumb {
-  grid-area: 1 / 1 / 2 / -1;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 8 / 5;
-  cursor: pointer;
-  color: var(--app-text-muted);
-  background: var(--app-surface-muted);
-}
-.is-person-assets .asset-thumb img { object-fit: contain; }
-.is-person-assets .selected-asset-row .asset-name-button,
-.is-person-assets .selected-asset-row .asset-voice-button {
-  min-height: 24px;
-  justify-content: center;
-  padding: 2px 3px;
-  background: transparent;
-  box-shadow: none;
-}
-.selected-assets.is-person-assets .selected-asset-row .asset-name-button {
-  color: var(--app-text);
-  font-size: 12px;
-  grid-area: 2 / 1 / 3 / -1;
-  margin-inline: 0 24px;
-}
-.is-person-assets .selected-asset-row .asset-name-button span {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  text-align: center;
-}
-.selected-assets.is-person-assets .selected-asset-row .asset-voice-button {
-  font-size: 10px;
-  grid-area: 3 / 1 / 4 / -1;
-  gap: 3px;
-  color: var(--app-text-secondary);
-}
-.is-person-assets .asset-voice-button svg { flex: none; }
-.selected-assets.is-person-assets .selected-asset-row :is(.asset-name-button,.asset-voice-button):is(:hover:not(:disabled),.is-active) {
-  color: var(--app-accent);
-  background: var(--app-accent-soft);
-}
-.is-person-assets .selected-asset-row:has(.asset-name-button:focus-visible) .asset-thumb {
-  outline: 2px solid var(--app-accent);
-  outline-offset: 2px;
-}
-.is-person-assets .scene-asset-actions {
-  grid-area: 2 / 2 / 3 / 3;
-  width: 24px;
-  height: 24px;
-}
-.is-person-assets :deep(.scene-asset-actions__trigger) {
-  width: 24px !important;
-  min-width: 24px !important;
-  min-height: 24px !important;
-  height: 24px;
-}
-.is-person-assets .selected-asset-row:has(.scene-asset-actions__menu) { z-index: 1; }
+.selected-assets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 5.5rem), 1fr)); gap: 12px 8px; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
 .asset-picker { display: grid; max-height: 180px; gap: 4px; overflow-y: auto; padding: 6px; border-radius: 10px; background: #f7f8fb; }
 .asset-picker button { width: 100%; justify-content: flex-start; color: #646a79; }

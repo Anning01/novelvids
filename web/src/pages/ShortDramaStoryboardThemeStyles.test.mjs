@@ -13,8 +13,7 @@ describe('分镜页面深色主题与图片回退', () => {
     expect(referenceSource).not.toContain('@media (prefers-color-scheme: dark)')
   })
 
-  it('falls back from generated thumbnails to original asset images', () => {
-    expect(pageSource).toContain('@error="fallbackImage($event, selectedAssetImage(scene, asset))"')
+  it('provides original asset images as fallbacks for prompt references', () => {
     expect(pageSource).toContain('fallbackUrl: selectedAssetImage(scene, asset)')
   })
 })

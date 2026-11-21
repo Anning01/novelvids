@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import ShortDramaStoryboardPage from './ShortDramaStoryboardPage.vue'
 import AppButton from '@/components/AppButton.vue'
 import SceneAssetVariantPicker from '@/components/SceneAssetVariantPicker.vue'
+import ImageLightbox from '@/components/ImageLightbox.vue'
 import ScenePromptEditor from '@/components/ScenePromptEditor.vue'
 import { api } from '@/api'
 import { AssetTypeEnum } from '@/types'
@@ -136,6 +137,7 @@ async function mountPage() {
       components: { AppButton },
       stubs: {
         Teleport: true,
+        ImageLightbox: true,
         AudioReferencePicker: AudioReferencePickerStub,
         ShortDramaWorkspaceShell: { template: '<div><slot name="header-end" /><slot /></div>' },
       },
@@ -277,23 +279,36 @@ describe('分镜角色音色选择', () => {
     wrapper.unmount()
   })
 
-  it('links each character portrait to its own replacement control and keeps voice and menu actions per form', async () => {
-    vi.mocked(api.workbenchBootstrap).mockResolvedValue(bootstrap([null, variant.id]) as never)
+  it('opens the shot gallery from pictures and the replacement picker only from names', async () => {
+    const response = bootstrap([null, variant.id])
+    const location = { ...character, id: 11, asset_type: AssetTypeEnum.SCENE, canonical_name: '办公室', main_image: '/office.jpg', main_image_thumbnail: '', angle_image_1_thumbnail: '/side-thumb.jpg', variants: [] }
+    const prop = { ...location, id: 12, asset_type: AssetTypeEnum.ITEM, canonical_name: '钥匙', main_image: '/key.jpg' }
+    response.data.assets.push(location, prop)
+    response.data.scenes[0]!.asset_ids.push(location.id, prop.id)
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(response as never)
     const wrapper = await mountPage()
     try {
       await flushPromises()
-      const cards = wrapper.findAll('.selected-assets.is-person-assets article')
-      expect(cards).toHaveLength(2)
-      const ids = new Set<string>()
-      for (const card of cards) {
-        const replace = card.get('.asset-name-button')
-        const portrait = card.get('label.asset-thumb')
-        expect(portrait.attributes('for')).toBe(replace.attributes('id'))
-        ids.add(replace.attributes('id')!)
-        expect(card.get('.asset-voice-button').attributes('aria-label')).toContain(replace.text())
-        expect(card.get('.scene-asset-actions__trigger').attributes('aria-label')).toContain(replace.text())
+      const cards = wrapper.findAll('.selected-assets article')
+      expect(cards).toHaveLength(4)
+      expect(cards[2]!.get('.asset-thumb img').attributes('src')).toBe(location.main_image)
+      expect(cards[1]!.get('.asset-thumb').attributes('disabled')).toBeDefined()
+      for (const i of [0, 2, 3]) {
+        const card = cards[i]!
+        const name = card.get('.asset-name-button')
+        expect(card.find('.asset-voice-button').exists()).toBe(i === 0)
+        expect(card.get('.scene-asset-actions__trigger').attributes('aria-label')).toContain(name.text())
+        await card.get('button.asset-thumb').trigger('click')
+        const viewer = wrapper.findAllComponents(ImageLightbox).find(item => item.props('open'))!
+        expect(viewer.props('src')).toBe([character.main_image, '', location.main_image, prop.main_image][i])
+        expect(viewer.props('images')?.map(image => image.src)).toEqual([character.main_image, location.main_image, prop.main_image])
+        expect(name.attributes('aria-expanded')).toBe('false')
+        viewer.vm.$emit('close')
+        await name.trigger('click')
+        expect(name.attributes('aria-expanded')).toBe('true')
+        expect(wrapper.findAllComponents(ImageLightbox).some(item => item.props('open'))).toBe(false)
+        await name.trigger('click')
       }
-      expect(ids.size).toBe(2)
     } finally { wrapper.unmount() }
   })
 
@@ -306,6 +321,9 @@ describe('分镜角色音色选择', () => {
     expect(thumbnail.attributes('src')).toBe('/media/assets/derivatives/chief-thumbnail.webp')
     expect(thumbnail.attributes('loading')).toBe('lazy')
     expect(thumbnail.attributes('decoding')).toBe('async')
+    await thumbnail.trigger('error')
+    expect(thumbnail.attributes('src')).toBe(character.main_image)
+    wrapper.unmount()
   })
 
   it('点击当前衍生形态的音色后打开项目音频库，并立即保存到该形态', async () => {

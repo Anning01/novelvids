@@ -88,7 +88,8 @@ watch(() => [props.open, props.src] as const, async ([open]) => {
   if (!slides.value.some(item => item.src === props.src) && props.src) {
     slides.value = [{ src: props.src, alt: props.alt, format: props.format }, ...slides.value]
   }
-  index.value = Math.max(0, slides.value.findIndex(item => item.src === props.src))
+  const matchingSlide = slides.value.findIndex(item => item.src === props.src && item.alt === props.alt)
+  index.value = matchingSlide >= 0 ? matchingSlide : Math.max(0, slides.value.findIndex(item => item.src === props.src))
   zoom.value = 1
   await nextTick()
   if (!props.open || !dialog.value) return
