@@ -128,7 +128,9 @@ def test_failed_split_stops_before_processing_more_scenes(monkeypatch, tmp_path,
     assert run.call_count == 1
 
 
-def test_single_pass_encodes_exact_adjacent_frame_ranges_and_retains_audio(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_single_pass_encodes_exact_adjacent_frame_ranges_and_retains_audio(tmp_path, monkeypatch, stream):
     import json
     import cv2
     import numpy as np
@@ -145,7 +147,14 @@ def test_single_pass_encodes_exact_adjacent_frame_ranges_and_retains_audio(tmp_p
     cuts = [(FrameTimecode(i*fps, fps), FrameTimecode((i+1)*fps, fps)) for i in range(len(colors))]
     monkeypatch.setattr(detector, 'detect', lambda _: cuts)
     dest = tmp_path / 'shots'
-    paths = detector.split_timeline(source, dest)
+    if stream:
+        paths = []
+        async for clip, interval, count in detector.ready_clips(source, dest):
+            assert count == len(colors)
+            paths.append(clip)
+            assert interval["end_seconds"] > interval["start_seconds"]
+    else:
+        paths = detector.split_timeline(source, dest)
     boundaries = json.loads((dest/'boundaries.json').read_text())
     for i, path in enumerate(paths):
         assert boundaries[path.name] == {'start_seconds':i, 'end_seconds':i+1}

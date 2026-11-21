@@ -139,3 +139,51 @@ def test_same_asset_alias_with_different_case_is_still_unambiguous():
     ref = {'asset_type': 'object', 'asset_name': 'KEY CARD', 'asset_id': 'local-1'}
     shot, = bind_shot_references([{'asset_refs': [ref]}], {'objects': [asset]})
     assert [r['asset_id'] for r in shot['asset_refs']] == ['prop1']
+
+
+@pytest.mark.asyncio
+async def test_closed_clip_is_analyzed_before_the_next_clip_is_published(tmp_path):
+    from services.remake.single_wave import analyze_ready_shots
+    first = asyncio.Event()
+    previous = []
+
+    async def ready():
+        yield tmp_path/'a.mp4', 4, {'start_seconds':0,'end_seconds':4}, 2
+        await asyncio.wait_for(first.wait(), 1)
+        yield tmp_path/'b.mp4', 4, {'start_seconds':4,'end_seconds':8}, 2
+
+    async def request(**kwargs):
+        previous.append(kwargs['previous_path'])
+        first.set()
+        return {}
+
+    result = await analyze_ready_shots(ready(), SimpleNamespace(analyze_one=request), 'default', {}, None, [])
+    assert [r['file'] for r in result] == ['a.mp4','b.mp4']
+    assert previous == [None, tmp_path/'a.mp4']
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_checks_closed_clip_bytes_before_any_model_call(tmp_path):
+    from services.remake.pipeline import RemakePipelineError
+    from services.remake.single_wave import stream_source_analysis
+    path = tmp_path/'scene-001.mp4'
+    interval = {'start_seconds': 0, 'end_seconds': 4}
+
+    class Detector:
+        async def ready_clips(self, _, directory):
+            yield path, interval, 1
+
+    saved = {}
+    async def checkpoint(key, snapshot):
+        return saved.setdefault(key, await snapshot())
+    model = AsyncMock(return_value={})
+    args = (Detector(), path, tmp_path, SimpleNamespace(analyze_one=model), 'default', [], saved, checkpoint, None, {})
+    path.write_bytes(b'original')
+    await stream_source_analysis(*args, cache=True)
+    assert model.await_count == 1 and (tmp_path/'manifest.json').exists()
+    del saved['remake:timeline']  # Prior attempt ended after the input receipt, before final manifest.
+    model.reset_mock()
+    path.write_bytes(b'modified')
+    with pytest.raises(RemakePipelineError, match='不能复用'):
+        await stream_source_analysis(*args, cache=False)
+    model.assert_not_awaited()

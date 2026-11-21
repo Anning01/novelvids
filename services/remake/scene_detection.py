@@ -10,6 +10,8 @@ import json
 import shlex
 import subprocess
 
+import asyncio
+
 import cv2
 from scenedetect import ContentDetector, SceneManager
 from scenedetect.backends.opencv import VideoCaptureAdapter
@@ -63,15 +65,9 @@ class SceneDetector:
             end != next_start for (_, end), (next_start, _) in zip(scenes, scenes[1:])
         ):
             return self._encode_ranges(video_path, output_dir, scenes)
-        cuts = ",".join(f"{start.get_seconds():.9f}" for start, _ in scenes[1:])
         with TemporaryDirectory(dir=output_dir) as temp:
             pattern = Path(temp) / "scene-%03d.mp4"
-            command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-threads", "1", "-i", str(video_path),
-                       "-t", str(scenes[-1][1].get_seconds()), *shlex.split(DEFAULT_FFMPEG_ARGS), "-sn",
-                       "-threads", "1", "-filter_threads", "1", "-force_key_frames", cuts,
-                       "-f", "segment", "-segment_times", cuts, "-segment_time_delta",
-                       str(0.5 / scenes[0][0].get_framerate()), "-segment_start_number", "1",
-                       "-reset_timestamps", "1", str(pattern)]
+            command = self._segment_command(video_path, scenes, pattern)
             try:
                 result = subprocess.run(command, capture_output=True)
             except OSError as error:
@@ -82,6 +78,61 @@ class SceneDetector:
             paths = [path.replace(output_dir / path.name) for path in paths]
         self._write_boundaries(output_dir, paths, scenes)
         return paths
+
+    @staticmethod
+    def _segment_command(video_path, scenes, pattern, *listing):
+        cuts = ",".join(f"{start.get_seconds():.9f}" for start, _ in scenes[1:])
+        return ["ffmpeg", "-v", "error", "-nostdin", "-y", "-threads", "1", "-i", str(video_path),
+                       "-t", str(scenes[-1][1].get_seconds()), *shlex.split(DEFAULT_FFMPEG_ARGS), "-sn",
+                       "-threads", "1", "-filter_threads", "1", "-force_key_frames", cuts,
+                       "-f", "segment", "-segment_times", cuts, "-segment_time_delta",
+                       str(0.5 / scenes[0][0].get_framerate()), "-segment_start_number", "1",
+                       "-reset_timestamps", "1", *listing, str(pattern)]
+
+    async def ready_clips(self, video_path, output_dir):
+        """Publish only closed, nonempty segments while ffmpeg continues encoding later shots."""
+        from services.remake.media_capacity import finish_thread
+        scenes = await finish_thread(self.detect, video_path)
+        if not scenes:
+            raise RemakeSceneDetectionError(localized_message('来源视频没有可分析的镜头'))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        total = len(scenes)
+        bounds = [{"start_seconds": a.get_seconds(), "end_seconds": b.get_seconds()} for a, b in scenes]
+        contiguous = scenes[0][0].get_seconds() == 0 and all(
+            end == start for (_, end), (start, _) in zip(scenes, scenes[1:]))
+        if total > 1 and contiguous:
+            paths = []
+            with TemporaryDirectory(dir=output_dir) as temp:
+                pattern = Path(temp) / "scene-%03d.mp4"
+                command = self._segment_command(video_path, scenes, pattern, "-segment_list", "pipe:1",
+                                                "-segment_list_type", "flat")
+                try:
+                    process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE,
+                                                                   stderr=asyncio.subprocess.DEVNULL)
+                except OSError as error:
+                    raise RemakeSceneDetectionError(localized_message('视频镜头切分失败')) from error
+                try:
+                    async for line in process.stdout:
+                        index = len(paths)
+                        name = f"scene-{index+1:03d}.mp4"
+                        src = Path(temp) / name
+                        if index >= total or Path(line.decode().strip()).name != name or not src.is_file() or not src.stat().st_size:
+                            raise RemakeSceneDetectionError(localized_message('视频镜头切分结果不完整'))
+                        paths.append(src.replace(output_dir / name))
+                        yield paths[-1], bounds[index], total
+                    code = await process.wait()
+                finally:
+                    if process.returncode is None:
+                        process.kill()
+                        await process.communicate()
+            if code == 0 and len(paths) == total:
+                self._write_boundaries(output_dir, paths, scenes)
+                return
+            if paths:
+                raise RemakeSceneDetectionError(localized_message('视频镜头切分结果不完整'))
+        paths = await finish_thread(self._encode_ranges, video_path, output_dir, scenes)
+        for path, bound in zip(paths, bounds, strict=True):
+            yield path, bound, total
 
     def _encode_ranges(self, video_path, output_dir, scenes):
         paths = []

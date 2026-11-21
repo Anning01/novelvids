@@ -33,7 +33,7 @@ async def completed_outputs(params, *, keys_only=False):
     results = {}
     async for task in task_history(params):
         fields = ('key',) if keys_only else ('key', 'result')
-        rows = await AgentOperation.filter(Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
+        rows = await AgentOperation.filter(Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
                                            task=task, state='completed').values(*fields)
         for row in rows:
             results.setdefault(row['key'], row.get('result'))
@@ -161,10 +161,14 @@ def clip_evidence(directory, paths, durations):
     boundaries = json.loads(boundaries_file.read_text()) if boundaries_file.is_file() else {}
     evidence = {}
     for path, duration in zip(paths, durations, strict=True):
-        with path.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        evidence[path.name] = {"sha256": digest, "duration": duration, "interval": boundaries.get(path.name)}
+        evidence[path.name] = shot_evidence(path, duration, boundaries.get(path.name))
     return evidence
+
+
+def shot_evidence(path, duration, interval):
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return {"sha256": digest, "duration": duration, "interval": interval}
 
 
 def scene_cache_directory(source):

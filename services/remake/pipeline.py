@@ -198,6 +198,10 @@ class RemakeDecompositionPipeline:
             evidence = await finish_thread(clip_evidence, directory, paths, lengths)
             async def snapshot_timeline():
                 return evidence
+            stored_clips = {k.removeprefix("remake:clip:"): v for k, v in saved.items() if k.startswith("remake:clip:")}
+            if any(name not in evidence or {**evidence[name], "total": len(paths)} != value
+                   for name, value in stored_clips.items()):
+                raise RemakePipelineError(localized_message('切片内容或边界已变化，不能复用旧分镜'))
             if await checkpoint("remake:timeline", snapshot_timeline) != evidence:
                 raise RemakePipelineError(localized_message('切片内容或边界已变化，不能复用旧分镜'))
             return evidence
@@ -207,6 +211,11 @@ class RemakeDecompositionPipeline:
 
         async def split_and_analyze():
             from services.remake.single_wave import analyze_source_shots
+            if not cached and remote is None and hasattr(self.scene_detector, "ready_clips"):
+                from services.remake.single_wave import stream_source_analysis
+                return await stream_source_analysis(
+                    self.scene_detector, model_source_path, directory, gateway, strategy, initial_catalog,
+                    saved, checkpoint, report_scene_progress, phase_times, cache=scene_cache is not None)
             paths, lengths = await timed("media_ms", split)
             evidence = await timeline(paths, lengths)
             results = await timed("shot_analysis_ms", lambda: analyze_source_shots(
