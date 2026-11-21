@@ -278,3 +278,67 @@ async def test_retry_uses_saved_assets_and_scene_files_without_detecting_again(t
     assert gateway.one_calls == [] and pipeline.scene_detector.calls == []
     assert gateway.many_calls[0][1]['completed_results'] == {2:remake_shot(2)}
     assert result.metadata['asset_call_count'] == 0 and result.metadata['prompt_call_count'] == 1
+
+
+@pytest.mark.asyncio
+async def test_continuous_pipeline_overlaps_media_and_model_and_routes_previous_shot_evidence(tmp_path, monkeypatch):
+    import asyncio
+    import json
+    from services.remake.gateway import RemakeVideoAnalysisGateway
+    from test.test_services.test_remake_persistence import _source
+    from models.asset import Asset
+
+    source = await _source()
+    hero = await Asset.create(novel_id=source.novel_id, asset_type=1, canonical_name='将军', aliases=['统领'],
+                              description='人工描述', base_traits='用户设定')
+    entered, extracted = threading.Event(), threading.Event()
+    class Detector:
+        def split_timeline(self, path, out):
+            entered.set()
+            assert extracted.wait(timeout=5)
+            out.mkdir(parents=True)
+            for i in range(1, 4):
+                (out / f'{i}.mp4').write_bytes(bytes([i]))
+            (out / 'boundaries.json').write_text(json.dumps({f'{i}.mp4':{'start_seconds':(i-1)*4.2,
+                'end_seconds':i*4.2} for i in range(1,4)}))
+            return sorted(out.glob('*.mp4'))
+
+    calls = []
+    class Gateway(RemakeVideoAnalysisGateway):
+        async def analyze_one(self, **kw):
+            calls.append(kw)
+            if kw['schema_name'] == 'global_key_assets':
+                assert await asyncio.to_thread(entered.wait, 5)
+                extracted.set()
+                assert kw['context']['project_assets'][0]['project_asset_id'] == hero.id
+                return {'characters':[{'name':'统领','label':'人物','description':'外貌','visual_fields':design_fields()}],
+                        'scenes':[], 'objects':[]}
+            i = kw['index']
+            assert kw['context']['assets'][0]['name'] == '将军'
+            assert kw['context']['source_interval']['start_seconds'] == (i-1)*4.2
+            if i > 1:
+                assert kw['context']['previous_shot']['dialogue'] == [f'0s-1s: 将军（平静）：第{i-1}句']
+            else:
+                assert 'previous_shot' not in kw['context']
+            return {**remake_shot(i), 'dialogue':[f'0s-1s: 将军（平静）：第{i}句']}
+    config = SimpleNamespace(id=9, model='test', concurrency=3)
+    gateway = Gateway(config, client=object())
+    video = tmp_path / 'sample.mp4'
+    video.write_bytes(b'video')
+    monkeypatch.setattr('services.remake.pipeline.media_session', lambda: __import__('contextlib').nullcontext(None))
+    result = await RemakeDecompositionPipeline(scene_detector=Detector(), gateway_factory=lambda _:gateway,
+        prepare_video=lambda path, *a, **kw:path).run(source=source, source_path=video, work_dir=tmp_path/'work', model_config=config)
+    assert [s['sequence'] for s in result.prompt_document['prompts']] == [1,2,3]
+    assert result.assets['characters'][0]['project_asset_id'] == hero.id
+    assert len(calls) == 4
+    await hero.refresh_from_db()
+    assert hero.base_traits == '用户设定'
+
+
+@pytest.mark.parametrize("entries", [{"file":"a"}, [None], [{"file":"bad.mp4","size":1,"duration":0}], [{"file":"../outside","size":1,"duration":1}]])
+def test_damaged_or_invalid_clip_manifest_is_not_used(tmp_path, entries):
+    import json
+    from services.remake.checkpoints import read_scene_manifest
+    (tmp_path/'bad.mp4').write_bytes(b'x')
+    (tmp_path/'manifest.json').write_text(json.dumps(entries))
+    assert read_scene_manifest(tmp_path) is None

@@ -493,3 +493,50 @@ async def test_partial_retry_skips_saved_and_uncertain_without_renumbering(tmp_p
         prompt='', schema_name='shots', response_schema={}, completed_results={1:{}}, held_shots=frozenset({2}))
     assert [item['shot_index'] for item in results] == [1, 3]
     assert analyze.await_count == 1 and analyze.await_args.kwargs['index'] == 3
+
+
+@pytest.mark.asyncio
+async def test_continuous_shots_use_last_confirmed_result_including_after_resume(tmp_path):
+    gateway = RemakeVideoAnalysisGateway(_config(concurrency=4), client=_Client([]))
+    seen = {}
+    async def analyze_one(**kw):
+        i = kw['index']
+        seen[i] = kw['context']
+        return {'actions': [f'action {i}'], 'dialogue': [f'line {i}']}
+    gateway.analyze_one = analyze_one
+    paths = [tmp_path / f'{n}.mp4' for n in range(4)]
+    results = await gateway.analyze_many(paths, prompt='', schema_name='shots', response_schema={},
+        continuity_language='zh', completed_results={1: {'actions': ['拿起杯子'], 'dialogue': ['我走了。']}},
+        context_builder=lambda i: {'duration_seconds': 4, 'assets': []})
+    assert list(seen) == [2, 3, 4] and len(results) == 4
+    assert seen[2]['previous_shot']['actions'] == ['拿起杯子']
+    assert seen[3]['previous_shot']['dialogue'] == ['line 2']
+    assert 'previous_shot' not in seen[4]['previous_shot']
+
+
+@pytest.mark.asyncio
+async def test_continuity_rules_are_instructions_but_prior_shot_and_asset_names_remain_facts(tmp_path):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_execution import current_execution
+    from schemas.agent_workflow import RemakeAssets
+    from schemas.remake import RemakeContinuityVerdict
+    from prompts.remake import continuity_audit_instruction
+    gateway = RemakeVideoAnalysisGateway(_config(),client=_Client([]))
+    path = tmp_path/'clip.mp4'
+    path.write_bytes(b'video')
+    execution = SimpleNamespace(params={'remake_context_version':2}, language='en',
+        generate=AsyncMock(return_value=RemakeAssets(characters=[],scenes=[],objects=[])))
+    token = current_execution.set(execution)
+    try:
+        await gateway.analyze_one(index=1,path=path,prompt='',schema_name='global_key_assets',
+            response_schema={},context={'project_assets':[{'name':'UntrustedName'}]})
+        call = execution.generate.await_args
+        assert 'canonical name' in call.kwargs['additional_instructions']
+        assert 'UntrustedName' not in call.kwargs['additional_instructions']
+        assert call.args[1]['assets']['project_assets'][0]['name'] == 'UntrustedName'
+        execution.generate.return_value = RemakeContinuityVerdict(consistent=True,reason='Intentional replay in this clip.')
+        response = await gateway.analyze_one(index=4,path=path,prompt=continuity_audit_instruction('en'),
+            schema_name='shot_continuity_check',response_schema={},context={'segment':4})
+        assert response['consistent'] and execution.generate.await_args.args[0] == 'structured'
+    finally:
+        current_execution.reset(token)

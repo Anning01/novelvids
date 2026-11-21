@@ -126,3 +126,46 @@ def test_failed_split_stops_before_processing_more_scenes(monkeypatch, tmp_path,
     with pytest.raises(RemakeSceneDetectionError, match="视频镜头切分失败"):
         detector.split(Path("source.mp4"), tmp_path)
     assert run.call_count == 1
+
+
+def test_single_pass_encodes_exact_adjacent_frame_ranges_and_retains_audio(tmp_path, monkeypatch):
+    import json
+    import cv2
+    import numpy as np
+    import subprocess
+    from scenedetect import FrameTimecode
+    fps = 12
+    colors = [(240, 20, 20), (20, 240, 20), (20, 20, 240), (240, 20, 20)]
+    source = tmp_path / 'video.mp4'
+    frames = b''.join(bytes(color) * (96 * 64 * fps) for color in colors)
+    subprocess.run(['ffmpeg','-nostdin','-loglevel','error','-f','rawvideo','-pixel_format','rgb24',
+                    '-video_size','96x64','-framerate',str(fps),'-i','pipe:0','-f','lavfi','-i','sine=frequency=440',
+                    '-shortest','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac',str(source)],input=frames,check=True)
+    detector = SceneDetector()
+    cuts = [(FrameTimecode(i*fps, fps), FrameTimecode((i+1)*fps, fps)) for i in range(len(colors))]
+    monkeypatch.setattr(detector, 'detect', lambda _: cuts)
+    dest = tmp_path / 'shots'
+    paths = detector.split_timeline(source, dest)
+    boundaries = json.loads((dest/'boundaries.json').read_text())
+    for i, path in enumerate(paths):
+        assert boundaries[path.name] == {'start_seconds':i, 'end_seconds':i+1}
+        decoded = cv2.VideoCapture(str(path))
+        try:
+            for _ in range(fps):
+                ok, frame = decoded.read()
+                assert ok and np.allclose(frame[10, 10, ::-1], colors[i], atol=8)
+            assert not decoded.read()[0]
+        finally:
+            decoded.release()
+        audio = subprocess.check_output(['ffprobe','-v','error','-select_streams','a:0','-show_entries','stream=codec_type',
+                                         '-of','csv=p=0',str(path)],text=True)
+        assert audio.strip() == 'audio'
+
+
+def test_uncut_take_still_gets_contiguous_bounded_segments(tmp_path):
+    import subprocess
+    video = tmp_path/'single-take.mp4'
+    subprocess.run(['ffmpeg','-nostdin','-loglevel','error','-f','lavfi','-i','color=blue:size=96x64:rate=12',
+                    '-t','34','-c:v','libx264',str(video)],check=True)
+    cuts = SceneDetector().detect(video)
+    assert [(start.get_frames(),end.get_frames()) for start,end in cuts] == [(0,180),(180,360),(360,408)]

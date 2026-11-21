@@ -1,4 +1,12 @@
 {
+  "remake_continuity": {
+    "待衔接校对": "Awaiting continuity check",
+    "识别资产与切分镜头": "Identifying assets and splitting shots",
+    "等待模型名额": "Waiting for model capacity",
+    "已确认": "Confirmed",
+    "镜头明细": "Shot details",
+    "排队 {p0} · 处理中 {p1} · 已完成 {p2} · 异常 {p3}": "Queued {p0} · Processing {p1} · Completed {p2} · Issues {p3}"
+  },
   "team_administration": {
     "调整团队额度": "Adjust team credit",
     "团队额度已调整": "Team credit updated",

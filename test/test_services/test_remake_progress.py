@@ -220,3 +220,55 @@ async def test_explicit_retry_releases_all_unfinished_clips_and_preserves_comple
     assert snapshot['retryable_clips'] == 3
     await AgentOperation.create(task=task,key='model:remake:RemakeShot:4',state='completed')
     assert await partial_retry(task,4) == ([],2)
+
+
+@pytest.mark.asyncio
+async def test_continuity_retry_does_not_resubmit_unknown_paid_result():
+    from exceptions.remake import RemakeError
+    from models.agent_operation import AgentOperation
+    from services.remake.checkpoints import reconcile_retry
+    novel = await Novel.create(name='回执确认', workflow_kind='remake')
+    source = await create_source(novel, 1, status=4, stage='needs_review', progress=55)
+    task = await source.analysis_task
+    task.request_params = {'remake_context_version': 1, 'novel_id': novel.id, 'remake_source_id': source.id}
+    await task.save()
+    await AgentOperation.create(task=task, state='uncertain', external=True, key='model:remake:RemakeShot:1')
+    with pytest.raises(RemakeError) as error:
+        await reconcile_retry(task)
+    assert error.value.error_code == 'REMAKE_AWAITING_RECEIPT'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_message,allowed", [
+    ("System protection triggered by request burst. Please slow down traffic growth and increase requests gradually before retrying.", True),
+    ("Connection dropped while reading response", False),
+])
+async def test_retry_reconciles_terminal_provider_limit_but_not_ambiguous_network_loss(provider_message, allowed):
+    from uuid import uuid4, uuid5
+    from models.agent_operation import AgentOperation
+    from models.creation_agent import AgentConversation, AgentMessage
+    from exceptions.remake import RemakeError
+    from services.remake.checkpoints import reconcile_retry
+    novel = await Novel.create(name='上游回执', workflow_kind='remake')
+    source = await create_source(novel, 1, status=4, stage='needs_review', progress=58)
+    task = await source.analysis_task
+    task.request_params = {'remake_context_version': 1, 'novel_id': novel.id}
+    task.error_message = f'第 4 个视频片段分析失败：{provider_message}'
+    await task.save()
+    key = 'model:remake:RemakeShot:4'
+    child = await AiTask.create(id=uuid5(task.id,key), task_type=8, status=4)
+    await AgentMessage.create(task=child, conversation=await AgentConversation.create(novel=novel), role='assistant',
+        request_id=uuid4(),request_hash='',usage={'calls':[{'status':'failed','usage_reported':False,'usage':{'output_tokens':0}}]})
+    await AgentOperation.create(task=child, key='model-response:1:0',state='completed',result={
+        'messages':[{'parts':[{'part_kind':'text','content':'{"description":"真实片段","actions":['}]}]})
+    receipt = await AgentOperation.create(task=task, key=key, state='uncertain',external=True)
+    if allowed:
+        await reconcile_retry(task)
+        await receipt.refresh_from_db()
+        assert receipt.state == 'failed' and receipt.result['reason'] == 'rate_limited_stream_ended'
+        assert receipt.result['partial']['description'] == '真实片段'
+    else:
+        with pytest.raises(RemakeError):
+            await reconcile_retry(task)
+        await receipt.refresh_from_db()
+        assert receipt.state == 'uncertain'

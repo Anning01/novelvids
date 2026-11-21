@@ -181,3 +181,27 @@ it('offers retry for untouched clips while submitted clips await results', async
   expect(wrapper.findAll('button').some(button => button.text().includes('重试未完成片段（79）'))).toBe(true)
   wrapper.unmount()
 })
+
+it('shows simultaneous stages and real shot states without marking a pending shot confirmed', async () => {
+  vi.mocked(api.streamRemakeProjectProgress).mockImplementation(async (_id, _update, signal) => {
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  const snap = progressSnapshot()
+  const first = snap.sources[0]!
+  first.task = {...first.task!, stage:'assets_and_scenes'}
+  snap.sources.push({...first, source_id:10, episode_number:2, task:{...first.task, id:'second', stage:'generating_storyboards',
+    completed_clips:1,total_clips:4,shot_states:{1:'completed',2:'boundary_pending',3:'waiting_capacity'}}})
+  snap.source_summary = {total:2,queued:0,processing:2,completed:0,failed:0}
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snap})
+  const wrapper = mount(RemakeProgressPage)
+  await flushPromises()
+  expect(wrapper.findAll('.pipeline-list .is-active')).toHaveLength(3)
+  expect(wrapper.get('.episode-counts').text()).toContain('处理中 2')
+  const details = wrapper.get('details')
+  expect(details.attributes('open')).toBeUndefined()
+  expect(details.findAll('li')).toHaveLength(0)
+  ;(details.element as HTMLDetailsElement).open = true
+  await details.trigger('toggle')
+  expect(details.findAll('li').map(item => item.text())).toEqual(['镜头 1 · 已确认','镜头 2 · 待衔接校对','镜头 3 · 等待模型名额','镜头 4 · 待处理'])
+  wrapper.unmount()
+})

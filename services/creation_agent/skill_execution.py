@@ -174,6 +174,7 @@ class SkillExecution:
         additional_instructions: str = "",
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
         activity_label: str | None = None,
+        receipt_segment: str | None = None,
     ):
         from services.creation_agent.handler import configured_model
         from schemas.agent_workflow import RemakeShot
@@ -194,7 +195,7 @@ class SkillExecution:
         from utils.enums import TaskStatusEnum
 
         segment = str(facts.get("segment", "")) if isinstance(facts, dict) else ""
-        key = f"model:{skill}:{output_type.__name__}:{segment}"
+        key = f"model:{skill}:{output_type.__name__}:{receipt_segment or segment}"
         if self.params.get('media_preparation_key'):
             key += ':' + self.params['media_preparation_key']
         from models.agent_operation import AgentOperation
@@ -265,7 +266,8 @@ class SkillExecution:
                     model_config.id,
                     team_id=self.params.get("team_id"),
                 )
-                if not (available.supports_tool_calls or skill == 'remake' and available.supports_json_output):
+                from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
+                if not (available.supports_tool_calls or (skill == 'remake' or output_type in (RemakeContinuityVerdict, RemakeSpeechEvidence)) and available.supports_json_output):
                     raise ValueError(localized_message("视频理解模型需要支持工具调用"))
 
         from services.creation_agent.event_log import agent_event_log

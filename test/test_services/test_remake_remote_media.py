@@ -32,7 +32,7 @@ def test_worker_reuses_media_algorithms_and_cleans_only_its_job(monkeypatch, tmp
     sibling = tmp_path / "jobs" / uuid4().hex
     sibling.mkdir(parents=True)
     work = tmp_path / "jobs" / job_id.hex
-    assert execute(MediaWorkerRequest(action="create", job_id=job_id), tmp_path) == {"ok": True}
+    assert execute(MediaWorkerRequest(action="create", job_id=job_id), tmp_path) == {"ok": True, "features": ["source_timeline_v1"]}
     (work / "source.mov").write_bytes(b"original video")
     preparation = []
 
@@ -197,3 +197,17 @@ def test_configured_host_selects_remote_worker_for_any_login_method(monkeypatch,
         assert worker.connection.memory_mb == settings.REMAKE_MEDIA_MEMORY_MB
     else:
         assert isinstance(worker, nullcontext)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('supported,expected', [(True,'split_timeline'),(False,'split')])
+async def test_timeline_remote_falls_back_to_the_legacy_worker(supported, expected, tmp_path):
+    worker = RemoteMediaSession(MediaWorkerConnection(host='worker.example'))
+    worker.timeline_available = supported
+    worker._command = AsyncMock(return_value=b'{"scenes":[{"filename":"scene-001.mp4","duration_seconds":4.0}]}')
+    async def transfer(*args, **kwargs):
+        (tmp_path/'scene-001.mp4').write_bytes(b'clip')
+    worker._run = transfer
+    paths, durations = await worker.split(tmp_path, timeline=True)
+    worker._command.assert_awaited_once_with(expected)
+    assert paths == [tmp_path/'scene-001.mp4'] and durations == [4.0]

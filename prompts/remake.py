@@ -182,3 +182,66 @@ def render_remake_prompt(kind: str, language: str) -> str:
 
 def render_remake_catalog(assets: list[dict], language: str) -> str:
     return task_facts({"assets": assets})
+
+
+def shot_continuity(previous, index, language):
+    """Only carry the immediately preceding confirmed shot, never the prompt history."""
+    context = {'sequence': index}
+    for field in ('actions', 'dialogue', 'narration'):
+        context[field] = [line[-500:] for line in (previous.get(field) or [])[-2:] if isinstance(line, str)]
+    for field in ('visual_prose', 'spatial_relationships'):
+        value = previous.get(field)
+        if isinstance(value, str):
+            context[field] = value[-600:]
+    context['asset_refs'] = [{k: ref.get(k) for k in ('asset_id', 'asset_name', 'asset_type')}
+                             for ref in previous.get('asset_refs', []) if isinstance(ref, dict)]
+    return {'previous_shot': context, 'continuity_rule': continuity_instruction(language)}
+
+
+def continuity_instruction(language):
+    return ('上一镜是已确认的历史。只写本段视频里实际发生的动作和听到的对白，承接上一镜结束时的人物、道具状态。'
+            '不要把上一镜的动作或末句再演一遍；以本段画面和原声为准。对白跨切口时，只记本段实际听到的部分；字幕若继续停留，不等于台词又说了一遍。原片确实重放或再次说出时保留。'
+            if language == 'zh' else
+            'The preceding shot is confirmed history. Describe only what is seen and heard in this clip. Carry forward the ending state. '
+            'Do not replay the preceding action or line unless the current source actually repeats it. For speech across a cut, include only the words audible in this clip. A lingering subtitle is not a second utterance. Preserve actual replays and spoken repetitions.')
+
+
+def identity_instruction(language):
+    return ('这是同项目已登记的资产。只有身份明确、且在本集出现时才沿用标准名。不要复制未出镜资产；'
+            '同名但不同身份或无法确定的主体用能区分的名称。明确的换装或形态可写为“主体名#形态名”，优先沿用已登记形态。' if language == 'zh' else
+            'These assets belong to this project. Use the canonical name only when the identity is clear and present in this episode. '
+            'Omit absent assets. Use distinct names for different or uncertain identities. For an explicit outfit or form, use canonical name#form name, reusing known forms.')
+
+
+def project_asset_context(catalog, language):
+    return {'project_assets': catalog, 'identity_rule': identity_instruction(language)}
+
+
+
+def continuity_audit_facts(index, previous, draft, context, language):
+    return {
+        "segment": index,
+        "preceding": shot_continuity(previous, index - 1, language)["previous_shot"],
+        "candidate": {key: draft.get(key) for key in ("description", "actions", "spatial_relationships",
+                                                       "visual_prose", "dialogue", "narration", "asset_refs")},
+        "source_interval": context.get("source_interval"),
+    }
+
+
+def continuity_audit_instruction(language):
+    if language == "zh":
+        return ("仅校对当前候选与真实上一镜的衔接。以附带的本镜原片和原声为准。核对已完成动作、人物/道具状态、"
+                "对白与旁白是否被错误重演或漏掉；保留原片刻意回放及跨切口的真实语音。只返回是否可以原样保留及简短依据。")
+    return ("Review only continuity against the confirmed predecessor and this clip's actual footage and sound. "
+            "Check for replayed or missing actions, states, speech and narration. Preserve real replays and speech across cuts. "
+            "Return whether the draft can be kept unchanged, with a short reason.")
+
+
+def speech_boundary_instruction(language):
+    if language == "zh":
+        return ("只核听这一段原声。相邻两份分镜都写出了同一句话。只返回这句话在当前片段实际听见的字词，"
+                "保留说出口的顺序，不补全上下句，不照抄延续显示的字幕。原声明确没有这句时返回空串；"
+                "听不清、音轨不可用或无法判断时标记不确定。不要改写画面或续写剧情。")
+    return ("Listen only to this clip's audio. Two neighboring drafts contain the same line. Return only the words "
+            "of that line actually heard here, in order. Do not complete words from lingering subtitles or context. "
+            "Use an empty string if the line is clearly absent. Mark uncertain if inaudible or indeterminate.")

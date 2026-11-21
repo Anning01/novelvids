@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from config import settings
+
 from utils.messages import localized_message
 
 from services.language import configured_language
@@ -226,6 +228,12 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
+                            "remake_context_version": 2,
+                            "source_checksum": source.checksum,
+                            "remake_block_size": settings.REMAKE_SHOT_BLOCK_SIZE,
+                            "remake_episode_count": len(prepared),
+                            **({"catalog_seed_task_id": str(created[0][1].id),
+                                "catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
@@ -432,7 +440,8 @@ class RemakeProjectService:
             from services.creation_agent.skill_execution import current_execution
             parent = current_execution.get()
             origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
-            from services.remake.checkpoints import partial_retry, resume_position
+            from services.remake.checkpoints import partial_retry, reconcile_retry, resume_position
+            await reconcile_retry(previous)
             stage, progress, _, total = await resume_position(previous, source)
             held, retryable = await partial_retry(previous, total)
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
@@ -443,7 +452,7 @@ class RemakeProjectService:
                 stage=stage,
                 progress=progress,
                 request_params={
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

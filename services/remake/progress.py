@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from tortoise.expressions import Q
+from models.agent_operation import AgentOperation
 from services.remake.customer_errors import failure_message
 from models.novel import Novel
 from models.remake_source import RemakeSource
@@ -35,6 +38,16 @@ class RemakeProgressService:
         progress_values: list[int] = []
         versions = [novel.updated_at]
 
+        receipts = defaultdict(list)
+        inspect_ids = [s.analysis_task_id for s in sources if s.analysis_task and
+                       s.analysis_task.status != TaskStatusEnum.completed and
+                       (s.analysis_task.progress >= 42 or s.analysis_task.request_params.get('retry_of_task_id'))]
+        if inspect_ids:
+            for task_id, key, state in await AgentOperation.filter(
+                Q(key__startswith="model:remake:") | Q(key__startswith="capacity:remake:"), task_id__in=inspect_ids
+            ).values_list("task_id", "key", "state"):
+                receipts[task_id].append((key, state))
+
         for source in sources:
             task = source.analysis_task
             status = task.status if task else None
@@ -42,9 +55,13 @@ class RemakeProgressService:
                 status = TaskStatusEnum.completed.value
             progress = max(0, min(100, int(task.progress or 0))) if task else 0
             completed_clips, total_clips = 0, None
+            shot_states = {}
+            if task and status == TaskStatusEnum.completed:
+                total_clips = ((task.response_data or {}).get('pipeline') or {}).get('shot_count')
+                completed_clips = total_clips or 0
             if task and status != TaskStatusEnum.completed and (progress >= 42 or task.request_params.get('retry_of_task_id')):
-                from services.remake.checkpoints import resume_position
-                _, saved_progress, completed_clips, total_clips = await resume_position(task, source)
+                from services.remake.checkpoints import shot_progress
+                _, saved_progress, completed_clips, total_clips, shot_states = await shot_progress(task, source, receipts[task.id])
                 progress = max(progress, saved_progress)
             if status in self._QUEUED:
                 summary["queued"] += 1
@@ -61,6 +78,8 @@ class RemakeProgressService:
             versions.append(source.updated_at)
             if task is not None:
                 versions.append(task.updated_at)
+            awaiting = bool(task and task.request_params.get('remake_context_version') and
+                            (task.stage == 'needs_review' or 'uncertain' in shot_states.values()))
             retryable = 0
             if task and status == TaskStatusEnum.failed:
                 from services.remake.checkpoints import partial_retry
@@ -81,9 +100,10 @@ class RemakeProgressService:
                             "stage": task.stage or "queued",
                             "progress": progress,
                             "completed_clips": completed_clips,
+                            "shot_states": shot_states,
                             "total_clips": total_clips,
                             "error_message": await failure_message(task),
-                            "awaiting_platform_result": False,
+                            "awaiting_platform_result": awaiting,
                             "retryable_clips": retryable,
                             "updated_at": task.updated_at.isoformat(),
                         }

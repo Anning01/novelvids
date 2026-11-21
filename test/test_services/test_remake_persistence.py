@@ -266,3 +266,61 @@ async def test_persistence_rolls_back_all_assets_and_scenes_when_reference_write
     assert chapter.status == TaskStatusEnum.pending.value
     assert chapter.workflow_status == WorkflowStatus.draft.value
     assert source.media_status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_three_episode_binding_uses_scoped_aliases_and_preserves_user_fields():
+    import asyncio
+    from types import SimpleNamespace
+    first = await _source()
+    novel = await first.novel
+    sources = [first]
+    for i in (2, 3):
+        chapter = await Chapter.create(novel=novel, number=i, name=str(i), content='')
+        sources.append(SimpleNamespace(novel_id=novel.id, chapter_id=chapter.id, episode_number=i, id=first.id + i))
+    hero = await Asset.create(novel=novel, asset_type=1, canonical_name='林澈', aliases=['将军'],
+                              description='人工设定', base_traits='人工提示', main_image='/hero.png', metadata={'voice':'原音'})
+    other = await Novel.create(name='其他项目')
+    await Asset.create(novel=other, asset_type=1, canonical_name='将军', aliases=['林澈'])
+    service = RemakeResultPersistence()
+    catalog = await service.project_catalog(first)
+    bound = [await service.bind_assets(first, _assets(), catalog)]
+    seeded = await service.project_catalog(first)
+    bound.extend(await asyncio.gather(*(service.bind_assets(s, _assets(), seeded) for s in reversed(sources[1:]))))
+    assert [b['characters'][0]['project_asset_id'] for b in bound] == [hero.id] * 3
+    assert all(b['characters'][0]['name'] == '林澈' for b in bound)
+    assert len({b['objects'][0]['project_asset_id'] for b in bound}) == 1
+    await hero.refresh_from_db()
+    assert (hero.source_chapters, hero.description, hero.base_traits, hero.main_image, hero.metadata['voice']) == (
+        [1,2,3], '人工设定', '人工提示', '/hero.png', '原音')
+    assert len(catalog) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrently_introduced_same_name_with_different_evidence_keeps_two_identities():
+    from types import SimpleNamespace
+    source = await _source()
+    service = RemakeResultPersistence()
+    first = await service.bind_assets(source, _assets('青年男子'), [])
+    chapter = await Chapter.create(novel_id=source.novel_id, number=2, name='第二集', content='')
+    second = await service.bind_assets(SimpleNamespace(novel_id=source.novel_id, chapter_id=chapter.id, id=99, episode_number=2),
+                                       _assets('白发老妇'), [])
+    assert first['characters'][0]['project_asset_id'] != second['characters'][0]['project_asset_id']
+    assert (await Asset.get(id=second['characters'][0]['project_asset_id'])).canonical_name == '将军 · EP2'
+
+
+@pytest.mark.asyncio
+async def test_named_outfits_reuse_subject_and_persist_the_confirmed_variant_on_the_shot():
+    from models.asset_variant import AssetVariant
+    source = await _source()
+    svc = RemakeResultPersistence()
+    candidates = _assets()
+    candidates['characters'][0]['name'] = '将军（礼服形态）'
+    bound = await svc.bind_assets(source, candidates, [])
+    actor = bound['characters'][0]
+    assert actor['name'] == '将军#礼服形态'
+    variant = await AssetVariant.get(id=actor['project_variant_id'])
+    assert variant.asset_id == actor['project_asset_id'] and variant.chapter_numbers == [1]
+    await svc.persist(source=source, assets=bound, prompt_document={'prompts':[_prompt(1)]},pipeline_metadata={})
+    scene = await Scene.get(chapter_id=source.chapter_id)
+    assert scene.metadata['asset_variant_ids'][str(variant.asset_id)] == [variant.id]

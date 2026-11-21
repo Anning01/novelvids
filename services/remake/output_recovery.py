@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from pydantic_core import from_json
 
 from models.creation_agent import AgentMessage
+from models.agent_operation import AgentOperation
 from schemas.agent_workflow import RemakeShot
 
 
@@ -13,7 +14,11 @@ async def recover_shot_output(task_id, index):
     message = await AgentMessage.get_or_none(task_id=child_id, role="assistant")
     if message is None:
         return None
-    texts = [part["content"] for entry in message.native_messages or []
+    # An interrupted stream can have a durable response even when the conversation history
+    # still ends at the request. Use its latest answer, never a superseded repair candidate.
+    receipt = await AgentOperation.filter(task_id=child_id, key__startswith="model-response:", state="completed").order_by("-id").first()
+    history = receipt.result.get("messages", []) if receipt else (message.native_messages or [])
+    texts = [part["content"] for entry in history
              for part in entry.get("parts", []) if part.get("part_kind") == "text"]
     if not texts:
         return None
