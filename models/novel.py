@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     from models.asset import Asset
 
 
+CLIP_AUTHOR = "片段创作"
+
+
 class Novel(AbstractBaseModel):
     """小说/剧本表"""
 

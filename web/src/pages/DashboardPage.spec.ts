@@ -474,3 +474,23 @@ it('filters series and home creations before pagination, retaining the source wh
   expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('全部')
   wrapper.unmount()
 })
+
+it('gives clips a media preview, media filters and their own summary while keeping controls above statistics', async () => {
+  const clip = { ...project(2, '风中的树', 'ready'), author: '片段创作', clip: { kind: 'image' as const, resolution: '2K', preview: '/media/tree.png' } }
+  vi.mocked(api.projectOverview).mockResolvedValue(response([project(1, '故事'), clip]))
+  const wrapper = render()
+  await flushPromises()
+  const controls = wrapper.get('.projects-library__toolbar')
+  expect(controls.element.compareDocumentPosition(wrapper.get('.projects-summary').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await controls.get('[aria-label="作品来源"]').findAll('button')[2]!.trigger('click')
+  const card = wrapper.get('.project-overview-card')
+  expect(card.get('img').attributes('src')).toContain('tree.png')
+  expect(card.text()).toContain('2K')
+  for (const label of ['章节数', '资产数', '成片时长']) expect(card.text()).not.toContain(label)
+  expect(wrapper.find('.projects-summary__item.is-chapters').exists()).toBe(false)
+  await controls.get('select[aria-label="创作类型"]').setValue('video')
+  expect(wrapper.text()).toContain('没有找到匹配的项目')
+  await controls.get('select[aria-label="创作类型"]').setValue('image')
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(1)
+  wrapper.unmount()
+})

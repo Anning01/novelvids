@@ -25,7 +25,15 @@ class ProjectProduction(BaseModelWithTime):
     state: Literal["not_started", "in_progress", "ready"] = "not_started"
 
 
+class ClipOverview(BaseModel):
+    kind: Literal["image", "gif", "video"] | None = None
+    resolution: str | None = None
+    thumbnail: str | None = None
+    preview: str | None = None
+
+
 class ProjectOverviewItem(NovelBriefOut):
+    clip: ClipOverview | None = None
     tags: list[str] = Field(default_factory=list)
     project_type: str | None = None
     production: ProjectProduction

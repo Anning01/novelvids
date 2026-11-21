@@ -76,7 +76,10 @@ export interface ProjectProduction {
   latest_activity_at: string
   state: 'not_started' | 'in_progress' | 'ready'
 }
-export interface ProjectOverviewItem extends Novel { production: ProjectProduction }
+export interface ProjectOverviewItem extends Novel {
+  production: ProjectProduction
+  clip?: { kind?: 'image' | 'gif' | 'video' | null; resolution?: string | null; preview?: string | null; thumbnail?: string | null } | null
+}
 export interface ProjectOverviewSummary {
   finished_seconds?: number
   unknown_finished_duration_count?: number

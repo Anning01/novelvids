@@ -208,3 +208,29 @@ async def test_failed_overview_can_be_retried(monkeypatch):
     with pytest.raises(RuntimeError, match='read failed'):
         await project_overview(7)
     assert await project_overview(7) == expected
+
+@pytest.mark.asyncio
+async def test_clip_overview_uses_current_output_for_preview_and_readiness():
+    image = await Novel.create(name="Loop", author="片段创作", project_setting='{"task_type":"image","output_format":"gif","resolution":"1K"}')
+    video = await Novel.create(name="Movie", author="片段创作", project_setting='{"task_type":"video"}')
+    await Asset.create(novel=image, asset_type=2, canonical_name="成图", main_image="/media/loop.gif")
+    await Asset.create(novel=video, asset_type=2, canonical_name="输入图", main_image="/media/input.png")
+    shot = await Scene.create(chapter=await chapter_for(video), sequence=1)
+    items = {i.id: i for i in (await project_overview()).items}
+    assert items[image.id].clip.kind == "gif" and items[image.id].clip.resolution == "1K"
+    assert items[image.id].clip.preview == "/media/loop.gif" and items[image.id].production.state == "ready"
+    assert items[video.id].clip.preview is None and items[video.id].production.state != "ready"
+    output = await video_for(shot)
+    await Video.filter(id=output.id).update(metadata={"poster_url": "/media/poster.webp"})
+    item = next(i for i in (await project_overview()).items if i.id == video.id)
+    assert item.clip.kind == "video" and item.clip.preview == "/media/poster.webp"
+    assert item.production.state == "ready" and item.production.completed_episode_count == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_clip_without_settings_still_lists_without_exposing_private_settings():
+    project = await Novel.create(name="Legacy clip", author="片段创作", project_setting="unstructured legacy settings")
+    await chapter_for(project)
+    item = (await project_overview()).items[0]
+    assert item.clip.kind is None and item.clip.preview is None
+    assert "project_setting" not in item.model_dump()

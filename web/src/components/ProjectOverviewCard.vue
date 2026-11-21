@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Image, Sparkles, Trash2 } from 'lucide-vue-next'
+import { mediaUrl } from '@/api'
+import { fallbackImage } from '@/shared/mediaFallback'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import ProjectCover from '@/components/ProjectCover.vue'
@@ -19,6 +21,8 @@ const deleteButton = ref<HTMLButtonElement | null>(null)
 const runtime = computed(() => projectRuntime(props.project.production.finished_seconds ?? 0, props.project.production.unknown_finished_duration_count ?? 0))
 const settings = computed(() => readShortDramaSettings(props.project))
 const source = computed(() => projectSource(props.project))
+const clipPreview = computed(() => props.project.clip?.thumbnail || props.project.clip?.preview || props.project.cover_thumbnail || props.project.cover)
+const clipFormat = computed(() => props.project.clip?.kind && ({ gif: tr('GIF 动图'), image: tr('图片'), video: tr('视频') })[props.project.clip.kind])
 const metadata = computed(() => [source.value === 'series' ? projectKindLabel(props.project) : null, settings.value.aspectRatio, settings.value.resolution?.toUpperCase()].filter(Boolean).join(' · '))
 const stateLabel = computed(() => ({ not_started: tr('未开始'), in_progress: tr('制作中'), ready: tr('已有作品') }[props.project.production.state]))
 const tags = computed(() => props.project.tags?.filter(Boolean) ?? [])
@@ -66,13 +70,31 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </script>
 
 <template>
-  <article class="project-overview-card" :class="{ 'is-deleting': deleting }" :aria-labelledby="`project-title-${project.id}`">
+  <article class="project-overview-card" :class="{ 'is-deleting': deleting, 'is-clip': source === 'clip' }" :aria-labelledby="`project-title-${project.id}`">
     <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="exportOnly ? undefined : tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
-      <div class="project-overview-card__identity">
+      <template v-if="source === 'clip'">
+        <div class="clip-preview">
+          <Sparkles :size="30" aria-hidden="true" />
+          <img v-if="clipPreview" :key="clipPreview" :src="mediaUrl(clipPreview)" alt="" loading="lazy" decoding="async"
+            @error="fallbackImage($event, mediaUrl(project.clip?.preview || project.cover))" />
+          <span class="project-overview-card__source is-clip"><Sparkles :size="13" aria-hidden="true" />{{ projectSourceLabel(source) }}</span>
+        </div>
+        <div class="clip-caption">
+          <p class="clip-specs">
+            <strong v-if="clipFormat">{{ clipFormat }}</strong>
+            <span>{{ [settings.aspectRatio, project.clip?.resolution || settings.resolution?.toUpperCase()].filter(Boolean).join(' · ') }}</span>
+          </p>
+          <h2 :id="`project-title-${project.id}`" :title="project.name">{{ project.name }}</h2>
+          <div :id="`project-progress-${project.id}`" class="clip-activity"><span>{{ project.production.state === 'ready' ? tr('已有结果') : stateLabel }}</span>
+            <time :datetime="project.production.latest_activity_at" :title="tr('最近更新')">{{ projectDate(project.production.latest_activity_at) }}</time>
+          </div>
+        </div>
+      </template>
+      <div v-else class="project-overview-card__identity">
         <ProjectCover :max-width="108" class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
         <div class="project-overview-card__copy">
           <span class="project-overview-card__source" :class="`is-${source}`">
-            <component :is="source === 'clip' ? Sparkles : Clapperboard" :size="13" aria-hidden="true" />{{ projectSourceLabel(source) }}
+            <Clapperboard :size="13" aria-hidden="true" />{{ projectSourceLabel(source) }}
           </span>
           <h2 :id="`project-title-${project.id}`" :title="project.name">{{ project.name }}</h2>
           <p v-if="metadata" class="project-overview-card__metadata" :title="metadata">{{ metadata }}</p>
@@ -97,20 +119,17 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
         </div>
       </div>
 
-      <div v-else :id="`project-progress-${project.id}`" class="project-overview-card__progress project-overview-card__progress-detail">
-        <span>{{ tr('最近更新') }}</span>
-        <time :datetime="project.production.latest_activity_at">{{ projectDate(project.production.latest_activity_at) }}</time>
-      </div>
-
       <dl :id="`project-stats-${project.id}`" class="project-overview-card__stats">
-        <div><dt><BookOpen :size="13" aria-hidden="true" />{{ tr('章节数') }}</dt><dd>{{ projectNumber(project.production.chapter_count) }}</dd></div>
-        <div :title="tr('当前绑定的图片、声音和视频，项目内按文件去重；已移除的素材不计入。')"><dt><Image :size="13" aria-hidden="true" />{{ tr('资产数') }}</dt><dd>{{ projectNumber(project.production.asset_count) }}</dd></div>
-        <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_finished_duration_count ?? 0 }) : tr('每集按最新成功合成版本的实际时长统计。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
+        <template v-if="source === 'series'">
+          <div><dt><BookOpen :size="13" aria-hidden="true" />{{ tr('章节数') }}</dt><dd>{{ projectNumber(project.production.chapter_count) }}</dd></div>
+          <div :title="tr('当前绑定的图片、声音和视频，项目内按文件去重；已移除的素材不计入。')"><dt><Image :size="13" aria-hidden="true" />{{ tr('资产数') }}</dt><dd>{{ projectNumber(project.production.asset_count) }}</dd></div>
+          <div :title="runtime.incomplete ? tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: project.production.unknown_finished_duration_count ?? 0 }) : tr('每集按最新成功合成版本的实际时长统计。')"><dt><Clock3 :size="13" aria-hidden="true" />{{ tr('成片时长') }}</dt><dd :class="{ 'is-pending': runtime.incomplete && !runtime.unit }">{{ runtime.value }}<small v-if="runtime.unit">{{ runtime.unit }}</small></dd></div>
+        </template>
         <div v-if="costState" class="project-overview-card__cost" :title="[costHint, tr('按成本页面的已入账费用汇总，包含历史生成及画质增强；未入账用量不计入。')].filter(Boolean).join(' ')" :aria-busy="costState === 'loading'"><dt><Coins :size="13" aria-hidden="true" />{{ tr('已花费') }}</dt><dd :class="{ 'is-pending': costState !== 'ready' }">{{ costState === 'ready' ? money(cost ?? 0) : costState === 'loading' ? tr('正在读取…') : costState === 'pending' ? tr('待结算') : tr('读取失败') }}</dd></div>
       </dl>
     </component>
 
-    <footer v-if="!exportOnly && project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }} · {{ project.production.completed_episode_count }} {{ tr('集') }}</RouterLink></footer>
+    <footer v-if="!exportOnly && project.production.completed_episode_count" class="project-finished-link"><RouterLink :to="`/finished-library/${project.id}`">{{ tr('查看作品') }}<template v-if="source === 'series'"> · {{ project.production.completed_episode_count }} {{ tr('集') }}</template></RouterLink></footer>
     <div v-if="editable && exportOnly" class="project-overview-card__export">
       <span v-if="exporting" role="status">{{ tr('正在导出') }}</span>
       <AppButton variant="secondary" size="sm" @click="exportAction"><Download v-if="!exporting" :size="14" aria-hidden="true" />{{ exporting ? tr('取消导出') : tr('导出作品') }}</AppButton>
@@ -129,6 +148,19 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 </template>
 
 <style scoped>
+.is-clip.project-overview-card { align-self: start; overflow: visible; }
+.is-clip .project-overview-card__link { padding: 0; }
+.clip-preview { position: relative; display: grid; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; place-items: center; border-radius: 17px 17px 0 0; color: var(--creation-success); background: color-mix(in srgb,var(--creation-success) 10%,var(--app-surface-muted)); }
+.clip-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.clip-preview .project-overview-card__source { position: absolute; left: 12px; bottom: 10px; color: var(--creation-success); background: var(--app-surface); }
+.clip-caption { padding: 15px 16px 12px; }
+.clip-specs,.clip-activity { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--app-text-secondary); font-size: 12px; }
+.clip-specs strong { color: var(--creation-success); }
+.clip-activity { justify-content: space-between; }
+.project-overview-card.is-clip h2 { min-height: 0; margin: 6px 0 12px; }
+.is-clip .project-overview-card__stats { margin: 0 16px; padding: 0; border: 0; }
+.is-clip .project-overview-card__cost { margin: 0; padding: 10px 0 14px; }
+.is-clip .project-overview-card__actions > .app-button { background: var(--app-surface); }
 .project-finished-link{padding:10px 20px 15px;font-size:12px;color:var(--app-accent)}
 .project-overview-card__export { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:0 20px 15px; color:var(--app-text-secondary); font-size:12px; }
 .project-overview-card { display:flex;flex-direction:column;position: relative; min-width: 0; border: 1px solid var(--app-border); border-radius: 18px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 3px 14px rgb(35 39 55 / 3%); transition: border-color 160ms ease, box-shadow 160ms ease; }

@@ -11,7 +11,7 @@ from auth.deps import AuthContext, ensure_novel_access, ensure_project_creation_
 from controllers.config import ai_model_config_controller
 from controllers.creation_agent import creation_agent_controller
 from controllers.novel import novel_controller
-from models.novel import Novel
+from models.novel import CLIP_AUTHOR, Novel
 from models.chapter import Chapter
 from models.scene import Scene
 from models.asset import Asset
@@ -27,7 +27,6 @@ from services.image_generation.capabilities import validate_selection as image_s
 from services.video.capabilities import validate_selection as video_selection
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
-CLIP_AUTHOR = '片段创作'
 
 
 def _settings(project: Novel):
