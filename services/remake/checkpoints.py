@@ -23,7 +23,7 @@ async def task_history(params):
         old = task.request_params or {}
         if any(old.get(k) != params.get(k) for k in
                ('remake_source_id', 'chapter_id', 'novel_id', 'team_id', 'user_id', 'prompt_language', 'model_config_id',
-                'remake_context_version', 'remake_identity_evidence', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
+                'remake_context_version', 'remake_identity_evidence', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
             break
         yield task
         previous_id = old.get('retry_of_task_id')
@@ -36,7 +36,10 @@ async def completed_outputs(params, *, keys_only=False):
         rows = await AgentOperation.filter(Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
                                            task=task, state='completed').values(*fields)
         for row in rows:
-            results.setdefault(row['key'], row.get('result'))
+            key = row["key"]
+            results.setdefault(key, row.get("result"))
+            if key in {"model:remake:RemakeShortStoryboard:1-readmit", "model:remake:RemakeAssets:1-readmit"}:
+                results.setdefault(key.removesuffix("-readmit"), row.get("result"))
     return results
 
 
@@ -46,7 +49,7 @@ async def _rate_limited_outcome(task, receipt, child):
     if not child or child.status != TaskStatusEnum.failed:
         return None
     segment = receipt.key.rsplit(":", 1)[-1]
-    number = re.fullmatch(r"(?:draft-)?(\d+)(?:-(?:dialogue|narration)-[0-9a-f]+)?", segment)
+    number = re.fullmatch(r"(?:draft-)?(\d+)(?:-readmit|-(?:dialogue|narration)-[0-9a-f]+)?", segment)
     if not number:
         return None
     segment = number[1]
@@ -91,6 +94,7 @@ async def reconcile_retry(previous):
     """Do not replay an external step with an unknown outcome in a fresh continuity attempt."""
     from uuid import uuid5
     from schemas.agent_workflow import RemakeAssets, RemakeShot
+    from schemas.remake_short import RemakeShortStoryboard
     from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
     from services.remake.output_recovery import recover_shot_output
     from exceptions.remake import RemakeError
@@ -107,11 +111,28 @@ async def reconcile_retry(previous):
                 continue
             child = await AiTask.get_or_none(id=uuid5(task.id, receipt.key))
             is_shot = receipt.key.startswith("model:remake:RemakeShot:")
-            schema = {"RemakeContinuityVerdict": RemakeContinuityVerdict, "RemakeSpeechEvidence": RemakeSpeechEvidence,
+            schema = {"RemakeShortStoryboard": RemakeShortStoryboard, "RemakeContinuityVerdict": RemakeContinuityVerdict, "RemakeSpeechEvidence": RemakeSpeechEvidence,
                       "RemakeShot": RemakeShot, "RemakeAssets": RemakeAssets}[receipt.key.split(":")[2]]
             result = None
             if child and child.status == TaskStatusEnum.completed and child.response_data:
                 result = schema.model_validate(child.response_data)
+            elif schema is RemakeShortStoryboard:
+                from services.remake.output_recovery import latest_response_text, recover_short_rows
+                manifest = await AgentOperation.get_or_none(task=task, key="remake:short-input", state="completed")
+                if manifest:
+                    intervals = manifest.result["intervals"]
+                    text = await latest_response_text(task.id, receipt.key)
+                    for i, value in recover_short_rows(text, intervals).items():
+                        key = f"model:remake:RemakeShot:{i}"
+                        local, _ = await AgentOperation.get_or_create(task=task, key=key,
+                            defaults={"state": "completed", "result": value})
+                        if not local.external and local.state != "completed":
+                            await AgentOperation.filter(id=local.id, external=False).exclude(state="completed").update(state="completed", result=value)
+                        if local.state == "completed" or not local.external:
+                            done[key] = None
+                    if intervals and all(f"model:remake:RemakeShot:{span['sequence']}" in done for span in intervals):
+                        # No further model request is needed. Keep the original external outcome intact.
+                        continue
             elif is_shot:
                 result = await recover_shot_output(task.id, receipt.key.rsplit(":", 1)[1])
             if result is None and (outcome := await _rate_limited_outcome(task, receipt, child)):
@@ -184,6 +205,8 @@ async def shot_progress(task, source, current_rows=None):
     keys = {key for key, state in current_rows if state == "completed"}
     if task.request_params.get("retry_of_task_id"):
         keys.update(await completed_outputs(task.request_params, keys_only=True))
+    if 'model:remake:RemakeAssets:1-readmit' in keys:
+        keys.add('model:remake:RemakeAssets:1')
     prefix = 'model:remake:RemakeShot:'
     indices = {int(key[len(prefix):]) for key in keys if key.startswith(prefix) and key[len(prefix):].isdigit()}
     manifest = read_scene_manifest(scene_cache_directory(source))
@@ -204,6 +227,12 @@ async def shot_progress(task, source, current_rows=None):
             index = key.rsplit(":", 1)[1].removeprefix("draft-")
             if index.isdigit() and states.get(int(index)) in (None, "running", "pending"):
                 states[int(index)] = "waiting_capacity"
+    if total and task.request_params.get("remake_short_storyboard"):
+        batch_states = dict(current_rows)
+        state = batch_states.get("model:remake:RemakeShortStoryboard:1-readmit") or batch_states.get("model:remake:RemakeShortStoryboard:1")
+        if state in {"running", "failed", "uncertain"}:
+            for index in range(1, total + 1):
+                states.setdefault(index, state)
     for index in indices:
         states[index] = 'completed'
     states = {i: state for i, state in states.items() if i > 0 and (not total or i <= total)}

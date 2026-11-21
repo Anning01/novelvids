@@ -103,7 +103,12 @@ class RemakeDecompositionPipeline:
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
         saved = await completed_outputs({**execution.params, 'retry_of_task_id': execution.params.get('task_id') or execution.params.get('retry_of_task_id'), 'model_config_id':model_config.id}) if execution else {}
         raw_assets = saved.get('model:remake:RemakeAssets:1')
-        if cached is None or raw_assets is None:
+        short_storyboard = bool(execution and execution.params.get("remake_short_storyboard"))
+        needs_short_video = short_storyboard and "model:remake:RemakeShortStoryboard:1" not in saved and (
+            cached is None or any(f"model:remake:RemakeShot:{i}" not in saved for i in range(1, len(cached[0]) + 1))
+        )
+        model_source_path = source_path
+        if cached is None or raw_assets is None or needs_short_video:
             async with media_capacity():
                 if remote:
                     model_source_path = await remote.prepare(source_path, work_dir / "model-input", max_bytes=MAX_MODEL_VIDEO_BYTES)
@@ -148,11 +153,18 @@ class RemakeDecompositionPipeline:
                 identity_catalog = initial_catalog if single_wave else await checkpoint("remake:catalog", lambda: remake_result_persistence.project_catalog(source))
                 context = {"context": project_asset_context(identity_catalog, language)}
             if raw is None:
-                raw = await gateway.analyze_one(
-                    index=1, path=model_source_path,
-                    prompt="" if execution else render_remake_prompt("assets", language),
-                    schema_name="global_key_assets", response_schema=ASSET_SCHEMA,
-                    include_segment_metadata=False, **context)
+                async def request_assets(segment):
+                    return await gateway.analyze_one(
+                        index=1, path=model_source_path,
+                        prompt="" if execution else render_remake_prompt("assets", task_language.get() or "zh"),
+                        schema_name="global_key_assets", response_schema=ASSET_SCHEMA,
+                        include_segment_metadata=False, **context,
+                        **({"readmission_segment": segment} if segment else {}))
+                if short_storyboard:
+                    from services.remake.short_admission import run_admitted
+                    raw = await run_admitted(request_assets, model_config, execution.params, "RemakeAssets")
+                else:
+                    raw = await request_assets(None)
             if not execution:
                 raw = render_remake_assets(raw, snapshot, language, aspect_ratio)
             normalized = normalize_global_assets(raw, language, separate_conflicts=bool(
@@ -211,6 +223,13 @@ class RemakeDecompositionPipeline:
 
         async def split_and_analyze():
             from services.remake.single_wave import analyze_source_shots
+            if short_storyboard:
+                from services.remake.single_wave import analyze_short_storyboard
+                paths, lengths = await timed("media_ms", split)
+                evidence = await timeline(paths, lengths)
+                results = await timed("shot_analysis_ms", lambda: analyze_short_storyboard(
+                    model_source_path, paths, evidence, gateway, strategy, saved, checkpoint, report_scene_progress, initial_catalog, execution.params))
+                return paths, lengths, results
             if not cached and remote is None and hasattr(self.scene_detector, "ready_clips"):
                 from services.remake.single_wave import stream_source_analysis
                 return await stream_source_analysis(
@@ -321,7 +340,7 @@ class RemakeDecompositionPipeline:
             phase_times["shot_batch_ms"] = round((time.monotonic() - shots_started) * 1000)
             metadata["phase_times"] = phase_times
             metadata["speech_boundary_reviews"] = speech_reviews
-            metadata["prompt_call_count"] = sum(t["schema_name"] == "professional_video_prompt_material" for t in analysis_requests)
+            metadata["prompt_call_count"] = sum(t["schema_name"] in {"professional_video_prompt_material", "short_video_storyboard"} for t in analysis_requests)
             metadata["boundary_checks"] = sum(t["schema_name"] == "shot_continuity_check" for t in analysis_requests)
             metadata["draft_call_count"] = sum(t.get("draft") is True for t in analysis_requests)
         return RemakePipelineResult(

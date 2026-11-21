@@ -276,3 +276,15 @@ def parallel_identity_instruction(language):
             "or sibling:<sibling name>. Keep it through outfit changes. "
             "For places use address:<exact address>; for objects use serial:<visible unique serial>. "
             "Omit the field if evidence is missing. Generic roles, appearance, color or product style do not identify a subject.")
+
+
+def short_storyboard_instruction(language):
+    if language == 'zh':
+        return ('同一条原片只附一次。按给定的半开时间区间和镜号逐一写齐，上一段只用来衔接，保留原片真实的重复。'
+                '每段各写一份可直接使用的简明提示词。每个描述字段用一句话写清可见事实，台词照录；动作、运镜和切换按段内时间描述。'
+                '相同摄影风格写入 looks 一次，各镜按从 1 开始的序号引用，不同场景可用不同 look。'
+                '只输出协议字段，不复述整版提示词，不展开额外的内部镜头表。')
+    return ('The attached video is the entire source. Cover every supplied numbered half-open interval exactly once. '
+            'Use adjacent footage for continuity, preserving genuine repeats. Write concise, usable material for '
+            'each shot. Use a short sentence per descriptive field, transcribe actual speech, and place actions, camera moves and cuts in shot-local time. Put shared '
+            'photographic settings once in looks, referenced by a 1-based index. Return only the contract fields.')

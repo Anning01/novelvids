@@ -23,6 +23,7 @@ from schemas.remake import RemakeProjectCreate
 from services.balance import ensure_solvent
 from services.project_config import validate_project_config
 from services.remake.episodes import validate_episode_batch
+from config import settings
 from services.remake.deadline import batch_deadline
 from services.remake.uploads import RemakeUploadService, remake_upload_service
 from services.remake.history_snapshot import (
@@ -233,6 +234,7 @@ class RemakeProjectService:
                             **workflow,
                             "remake_context_version": 5,
                             "remake_identity_evidence": True,
+                            "remake_short_storyboard": 0 < media.duration_seconds <= settings.REMAKE_SHORT_STORYBOARD_SECONDS,
                             "remake_deadline_at": deadline_at,
                             "source_checksum": source.checksum,
                             **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
@@ -462,7 +464,7 @@ class RemakeProjectService:
                 progress=progress,
                 request_params={
                     **({"remake_deadline_at": batch_deadline([])} if previous_params.get("remake_context_version") == 5 else {}),
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_identity_evidence", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_identity_evidence", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

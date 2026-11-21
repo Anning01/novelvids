@@ -102,7 +102,7 @@ Watch the tutorial to learn how to use NovelVids. For finished creations, see th
 | A revision in mind | Ask the assistant to change selected objects, inspect diffs and recorded changes, and undo supported edits |
 | Generated footage | Track tasks and versions, connect shots, assemble episodes and optionally enhance resolution |
 
-You can also use **Remake studio** to analyze reference videos you are authorized to use and turn their shots into an editable project. Asset recognition overlaps shot detection. Each shot uses its own footage and adjacent source footage in one independent analysis. Episodes share the selected model’s capacity. Results are ordered locally and matched to known assets. New batches have a five-minute budget from the first upload. An expired run keeps returned shots and reports incomplete work.
+You can also use **Remake studio** to analyze reference videos you are authorized to use and turn their shots into an editable project. Asset recognition overlaps shot detection. Short sources (up to 30 seconds by default, controlled by `REMAKE_SHORT_STORYBOARD_SECONDS`) submit the full film and its measured intervals in one storyboard request with shared photographic settings. For longer sources each shot uses its own footage and adjacent source footage in an independent request. Episodes share the selected model’s capacity. Results are ordered locally and matched to known assets. New batches have a five-minute budget from the first upload. An expired run keeps returned shots and reports incomplete work.
 
 ### Why a workspace?
 

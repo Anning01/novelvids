@@ -133,7 +133,7 @@ def snapshot_skills() -> dict:
 
 
 def instructions(snapshot: SkillSnapshot, language: str, skill: str, *, output_kind: str | None = None) -> str:
-    remake_shots = skill == 'remake' and output_kind == 'professional_video_prompt_material'
+    remake_shots = skill == 'remake' and output_kind in {'professional_video_prompt_material', 'short_video_storyboard'}
     remake_assets = skill == 'remake' and not remake_shots
     contract = ""
     if skill == "assets" or remake_assets:

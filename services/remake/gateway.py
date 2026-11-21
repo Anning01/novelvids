@@ -205,6 +205,7 @@ class RemakeVideoAnalysisGateway:
         include_segment_metadata: bool = True,
         draft: bool = False,
         previous_path: Path | None = None,
+        readmission_segment: str | None = None,
     ) -> dict[str, Any]:
         from contextlib import nullcontext
         from services.creation_agent.skill_execution import current_execution
@@ -232,13 +233,14 @@ class RemakeVideoAnalysisGateway:
             try:
                 return await self._request_one(index=index, path=path, prompt=prompt, schema_name=schema_name,
                     response_schema=response_schema, context=context, include_segment_metadata=include_segment_metadata, draft=draft,
-                    **({"previous_path": previous_path} if previous_path is not None else {}))
+                    **({"previous_path": previous_path} if previous_path is not None else {}),
+                    **({"readmission_segment": readmission_segment} if readmission_segment else {}))
             except RemakeVideoAnalysisError as exc:
                 if window and provider_pressure(exc):
                     await window.slow_down(15)
                 raise
 
-    async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft, previous_path=None):
+    async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft, previous_path=None, readmission_segment=None):
         started_at = self.clock()
         if self.first_request_started_at is None:
             self.first_request_started_at = started_at
@@ -252,7 +254,8 @@ class RemakeVideoAnalysisGateway:
             from schemas.agent_workflow import RemakeAssets, RemakeShot
             from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
             audit = schema_name in {'shot_continuity_check', 'shot_speech_evidence'}
-            schema = {"shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
+            from schemas.remake_short import RemakeShortStoryboard
+            schema = {"short_video_storyboard": RemakeShortStoryboard, "shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
             async def source_media(media_path):
                 if getattr(self.config, "api_protocol", None) == "novelvids":
@@ -265,7 +268,7 @@ class RemakeVideoAnalysisGateway:
             media = await asyncio.gather(*(source_media(p) for p in (previous_path, path) if p is not None))
             from services.model_concurrency import capacity_observer
             from models.agent_operation import AgentOperation
-            receipt_segment = f"draft-{index}" if draft else index
+            receipt_segment = readmission_segment or (f"draft-{index}" if draft else index)
             async def capacity_state(state):
                 await AgentOperation.update_or_create(task_id=execution.params["task_id"],
                     key=f"capacity:remake:{receipt_segment}", defaults={"state": state})
@@ -291,7 +294,30 @@ class RemakeVideoAnalysisGateway:
             if context_version == 5 and schema is RemakeShot:
                 from prompts.remake import independent_shot_instruction
                 extra = independent_shot_instruction(execution.language)
+            async def validate_batch(output):
+                output.materialize(context["intervals"])
+
+            if schema is RemakeShortStoryboard:
+                from prompts.remake import short_storyboard_instruction
+                extra = short_storyboard_instruction(execution.language)
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
+            async def recover():
+                if schema is not RemakeShot:
+                    return None
+                from services.remake.output_recovery import recover_shot_output
+                recovered = await recover_shot_output(execution.params["task_id"], receipt_segment)
+                if recovered is None:
+                    return None
+                if context_version:
+                    try:
+                        await validate_shot(recovered)
+                    except ValueError:
+                        return None
+                data = recovered.model_dump(mode="json")
+                await AgentOperation.filter(task_id=execution.params["task_id"],
+                    key=f"model:remake:RemakeShot:{receipt_segment}").update(state="completed", result=data)
+                return {**data, "shot_index": index, "file": path.name} if include_segment_metadata else data
+
             try:
                 result = await execution.generate(
                     'structured' if audit else 'remake',
@@ -300,25 +326,17 @@ class RemakeVideoAnalysisGateway:
                     model_config=self.config,
                     media=media,
                     **({"additional_instructions": extra} if extra else {}),
-                    **({"receipt_segment": f"draft-{index}"} if draft else {}),
+                    **({"receipt_segment": str(receipt_segment)} if draft or readmission_segment else {}),
                     **({"output_validator": validate_shot} if schema is RemakeShot and context_version else {}),
+                    **({"output_validator": validate_batch} if schema is RemakeShortStoryboard else {}),
                 )
+            except asyncio.CancelledError:
+                await recover()
+                raise
             except Exception as error:
-                from services.remake.output_recovery import recover_shot_output
-                if schema is RemakeShot:
-                    recovered = await recover_shot_output(execution.params["task_id"], receipt_segment)
-                    if recovered is not None and context_version:
-                        try:
-                            await validate_shot(recovered)
-                        except ValueError:
-                            recovered = None
-                    if recovered is not None:
-                        data = recovered.model_dump(mode="json")
-                        await AgentOperation.filter(task_id=execution.params["task_id"],
-                            key=f"model:remake:RemakeShot:{receipt_segment}").update(state="completed", result=data)
-                        if include_segment_metadata:
-                            data.update(shot_index=index, file=path.name)
-                        return data
+                recovered = await recover()
+                if recovered is not None:
+                    return recovered
                 self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='failed', draft=draft)
                 _log_provider_failure(error, model=str(self.config.model), schema_name=schema_name, attempt=1)
                 message, error_code = _provider_failure(error, index=index)
@@ -329,7 +347,11 @@ class RemakeVideoAnalysisGateway:
                     segment = context["segment"] if audit else receipt_segment
                     key = f"model:{domain}:{schema.__name__}:{segment}"
                     await AgentOperation.filter(task_id=execution.params["task_id"], key=key,
-                        external=True, state="uncertain").update(result={"provider_capacity_denial": True})
+                        external=True, state__in=["uncertain", "failed"]).update(result={
+                            "provider_capacity_denial": True,
+                            "http_status": getattr(error, "status_code", None),
+                            "duration_ms": self.timings[-1]["duration_ms"],
+                        })
                 raise RemakeVideoAnalysisError(message, error_code=error_code, usage=dict(self.usage)) from None
             finally:
                 capacity_observer.reset(observer)

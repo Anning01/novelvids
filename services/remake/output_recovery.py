@@ -1,4 +1,5 @@
 """Recover complete creative fields when only trailing reference metadata was cut off."""
+import json
 from uuid import UUID, uuid5
 
 from pydantic import ValidationError
@@ -10,7 +11,12 @@ from schemas.agent_workflow import RemakeShot
 
 
 async def recover_shot_output(task_id, index):
-    child_id = uuid5(UUID(str(task_id)), f"model:remake:RemakeShot:{index}")
+    text = await latest_response_text(task_id, f"model:remake:RemakeShot:{index}")
+    return recover_shot_text(text) if text else None
+
+
+async def latest_response_text(task_id, key):
+    child_id = uuid5(UUID(str(task_id)), key)
     message = await AgentMessage.get_or_none(task_id=child_id, role="assistant")
     if message is None:
         return None
@@ -22,8 +28,58 @@ async def recover_shot_output(task_id, index):
              for part in entry.get("parts", []) if part.get("part_kind") == "text"]
     if not texts:
         return None
+    return texts[-1]
+
+
+def _complete_body_before_segments(text):
+    # Decode whole top-level values. A partial parser can otherwise promote a cut-off
+    # string or nested object to an apparently valid creative field.
+    decoder = json.JSONDecoder()
+    text = text.strip()
+    if not text.startswith("{"):
+        return None
+    pos = 1
+    body = {}
+    while pos < len(text):
+        pos += len(text[pos:]) - len(text[pos:].lstrip())
+        key, pos = decoder.raw_decode(text, pos)
+        if not isinstance(key, str) or key in body:
+            return None
+        pos += len(text[pos:]) - len(text[pos:].lstrip())
+        if text[pos:pos+1] != ":":
+            return None
+        pos += 1
+        pos += len(text[pos:]) - len(text[pos:].lstrip())
+        if key == "segments" and text[pos:pos+1] == "[":
+            try:
+                decoder.raw_decode(text, pos)
+            except json.JSONDecodeError:
+                # Reject malformed JSON in the middle, rather than treating it as an interrupted stream.
+                from_json(text, allow_partial=True)
+                if {"dialogue", "narration"}.issubset(body):
+                    return RemakeShot.model_validate(body)
+            return None
+        body[key], pos = decoder.raw_decode(text, pos)
+        pos += len(text[pos:]) - len(text[pos:].lstrip())
+        if text[pos:pos+1] != ",":
+            return None
+        pos += 1
+    return None
+
+
+def recover_shot_text(text):
     try:
-        data = from_json(texts[-1], allow_partial=True)
+        return RemakeShot.model_validate_json(text)
+    except ValidationError:
+        pass
+    try:
+        recovered = _complete_body_before_segments(text)
+        if recovered is not None:
+            return recovered
+    except (ValueError, ValidationError):
+        pass
+    try:
+        data = from_json(text, allow_partial=True)
         if not isinstance(data, dict):
             return None
         if not set(RemakeShot.model_fields).difference({"confidence"}).issubset(data):
@@ -37,3 +93,56 @@ async def recover_shot_output(task_id, index):
         return RemakeShot.model_validate(data)
     except (ValueError, ValidationError):
         return None
+
+
+def recover_short_rows(text, intervals):
+    """Keep only fully delimited shot objects already delivered by the provider."""
+    from schemas.remake_short import RemakeShortStoryboard
+    if not text:
+        return {}
+    spans = {span["sequence"]: span for span in intervals}
+    decoder = json.JSONDecoder()
+    text = text.strip()
+    if not text.startswith("{"):
+        return {}
+    pos = 1
+    result = {}
+    try:
+        # looks precedes shots in the wire schema. Never guess missing shared styles.
+        looks = None
+        while pos < len(text):
+            pos += len(text[pos:]) - len(text[pos:].lstrip())
+            key, pos = decoder.raw_decode(text, pos)
+            tail = text[pos:].lstrip()
+            if not tail.startswith(":"):
+                return {}
+            pos = len(text) - len(tail[1:].lstrip())
+            if key == "shots" and looks is not None and text[pos:pos+1] == "[":
+                pos += 1
+                while pos < len(text):
+                    pos += len(text[pos:]) - len(text[pos:].lstrip())
+                    if text[pos:pos+1] == "]":
+                        break
+                    row, pos = decoder.raw_decode(text, pos)
+                    one = RemakeShortStoryboard.model_validate({"looks": looks, "shots": [row]})
+                    index = one.shots[0].sequence
+                    if index not in spans or index in result:
+                        return {}
+                    result.update(one.materialize([spans[index]]))
+                    tail = text[pos:].lstrip()
+                    if not tail.startswith(","):
+                        break
+                    pos = len(text) - len(tail) + 1
+                return result
+            if key != "looks" or looks is not None:
+                return {}
+            looks, pos = decoder.raw_decode(text, pos)
+            tail = text[pos:].lstrip()
+            if not tail.startswith(","):
+                return {}
+            pos = len(text) - len(tail) + 1
+    except json.JSONDecodeError:
+        return result
+    except (ValueError, TypeError):
+        return {}
+    return result

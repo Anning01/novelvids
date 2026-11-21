@@ -122,3 +122,66 @@ def bind_shot_references(shots, assets):
                 missing.append(ref)
         bound.append({**shot, 'asset_refs': resolved, **({'unresolved_asset_refs': missing} if missing else {})})
     return bound
+
+
+async def analyze_short_storyboard(source_path, paths, evidence, gateway, strategy, saved, checkpoint, report, catalog, params):
+    """Read the short film once, then commit each validated shot under its normal receipt key."""
+    from schemas.remake_short import RemakeShortStoryboard
+    results = {}
+    intervals = []
+    for i, path in enumerate(paths, 1):
+        stored = saved.get(f'model:remake:RemakeShot:{i}')
+        if stored is not None:
+            results[i] = stored
+        else:
+            intervals.append({"sequence": i, **evidence[path.name]["interval"]})
+    await report(len(results), len(paths))
+    async def save(i, material):
+        async def value():
+            return material
+        results[i] = await checkpoint(f"model:remake:RemakeShot:{i}", value)
+
+    if intervals:
+        # The original batch receipt survives a crash between individual local commits.
+        stored_batch = saved.get("model:remake:RemakeShortStoryboard:1")
+        if stored_batch is not None:
+            batch = RemakeShortStoryboard.model_validate({key: stored_batch[key] for key in ("looks", "shots")})
+            indices = {shot.sequence for shot in batch.shots}
+            source_intervals = [{"sequence": i, **evidence[p.name]["interval"]} for i,p in enumerate(paths,1)
+                                if i in indices]
+            material = batch.materialize(source_intervals)
+        else:
+            from services.remake.short_admission import run_admitted
+            async def input_manifest():
+                return {"intervals": intervals}
+            if await checkpoint("remake:short-input", input_manifest) != {"intervals": intervals}:
+                raise ValueError("Requested shot intervals changed")
+            async def request(segment):
+                return await gateway.analyze_one(index=1, path=source_path, prompt="", schema_name="short_video_storyboard",
+                    response_schema=RemakeShortStoryboard.model_json_schema(), include_segment_metadata=False,
+                    context={"assets": catalog, "intervals": intervals, "storyboard_strategy": strategy},
+                    **({"readmission_segment": segment} if segment else {}))
+            try:
+                raw = await run_admitted(request, gateway.config, params, "RemakeShortStoryboard")
+            except (Exception, asyncio.CancelledError) as exc:
+                from services.remake.output_recovery import latest_response_text, recover_short_rows
+                material = {}
+                for segment in ("1-readmit", "1"):
+                    text = await latest_response_text(params["task_id"], f"model:remake:RemakeShortStoryboard:{segment}")
+                    if text:
+                        material = recover_short_rows(text, intervals)
+                        break
+                for i, item in material.items():
+                    await save(i, item)
+                if isinstance(exc, asyncio.CancelledError) or len(material) != len(intervals):
+                    raise
+            else:
+                material = RemakeShortStoryboard.model_validate(raw).materialize(intervals)
+        if not {span["sequence"] for span in intervals}.issubset(material):
+            raise ValueError("Saved storyboard does not cover every unfinished source interval")
+        for span in intervals:
+            i = span["sequence"]
+            if i not in results:
+                await save(i, material[i])
+        await report(len(results), len(paths))
+    return [{**results[i], "shot_index": i, "file": path.name} for i,path in enumerate(paths,1)]
