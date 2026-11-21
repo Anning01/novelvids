@@ -46,6 +46,7 @@ function render() {
 
 beforeEach(() => {
   document.body.innerHTML = ''
+  sessionStorage.clear()
   setActivePinia(createPinia())
   useAuthStore().enabled = false
   setLocale('zh')
@@ -444,5 +445,32 @@ it('keeps diagnostic export in the collapsed support disclosure even if project 
   await support.get('button').trigger('click')
   await flushPromises()
   expect(exportDiagnostics).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
+it('filters series and home creations before pagination, retaining the source when the user returns', async () => {
+  const clips = Array.from({ length: 13 }, (_, i) => ({ ...project(i + 2, '单次作品 ' + i), author: '片段创作' }))
+  const series = project(1, '一集的短剧')
+  series.production.chapter_count = 1
+  vi.mocked(api.projectOverview).mockResolvedValue(response([series, ...clips]))
+  let wrapper = render()
+  await flushPromises()
+  const choose = (label: string) => wrapper.get('[aria-label="作品来源"]').findAll('button').find(button => button.text() === label)!.trigger('click')
+  await choose('剧集项目')
+  expect(wrapper.findAll('.project-overview-card h2').map(card => card.text())).toEqual(['一集的短剧'])
+  expect(wrapper.get('.project-overview-card__source').text()).toBe('剧集项目')
+  await choose('首页单次创作')
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(12)
+  expect(wrapper.get('.project-overview-card__source').text()).toBe('首页单次创作')
+  expect(wrapper.get('.project-overview-card').text()).not.toContain('已完成 0 集')
+  await wrapper.get('input[type="search"]').setValue('不存在')
+  expect(wrapper.text()).toContain('没有找到匹配的项目')
+  wrapper.unmount()
+  wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('首页单次创作')
+  await wrapper.get('input[type="search"]').setValue('一集的短剧')
+  await wrapper.get('.projects-page__empty button').trigger('click')
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('全部')
   wrapper.unmount()
 })

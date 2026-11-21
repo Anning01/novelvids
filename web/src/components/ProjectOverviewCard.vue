@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Image, Trash2 } from 'lucide-vue-next'
+import { BookOpen, Clapperboard, Clock3, Coins, Download, Ellipsis, Image, Sparkles, Trash2 } from 'lucide-vue-next'
 import { tr } from '@/i18n'
 import AppButton from '@/components/AppButton.vue'
 import ProjectCover from '@/components/ProjectCover.vue'
 import { money } from '@/features/billing/recordDisplay'
-import { projectDate, projectKindLabel, projectNumber, projectRuntime } from '@/shared/projectOverview'
-import { projectEntryRoute, readShortDramaSettings } from '@/shared/shortDramaProject'
+import { projectDate, projectKindLabel, projectNumber, projectRuntime, projectSourceLabel } from '@/shared/projectOverview'
+import { projectEntryRoute, projectSource, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { ProjectOverviewItem } from '@/types'
 
 const props = defineProps<{ project: ProjectOverviewItem; editable: boolean; exportOnly?: boolean; deleting?: boolean; exporting?: boolean; cost?: number; costState?: 'loading' | 'ready' | 'error' | 'pending'; costHint?: string }>()
@@ -18,7 +18,8 @@ const exportButton = ref<HTMLButtonElement | null>(null)
 const deleteButton = ref<HTMLButtonElement | null>(null)
 const runtime = computed(() => projectRuntime(props.project.production.finished_seconds ?? 0, props.project.production.unknown_finished_duration_count ?? 0))
 const settings = computed(() => readShortDramaSettings(props.project))
-const metadata = computed(() => [projectKindLabel(props.project), settings.value.aspectRatio, settings.value.resolution?.toUpperCase()].filter(Boolean).join(' · '))
+const source = computed(() => projectSource(props.project))
+const metadata = computed(() => [source.value === 'series' ? projectKindLabel(props.project) : null, settings.value.aspectRatio, settings.value.resolution?.toUpperCase()].filter(Boolean).join(' · '))
 const stateLabel = computed(() => ({ not_started: tr('未开始'), in_progress: tr('制作中'), ready: tr('已有作品') }[props.project.production.state]))
 const tags = computed(() => props.project.tags?.filter(Boolean) ?? [])
 
@@ -68,19 +69,21 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
   <article class="project-overview-card" :class="{ 'is-deleting': deleting }" :aria-labelledby="`project-title-${project.id}`">
     <component :is="exportOnly ? 'div' : 'RouterLink'" :to="exportOnly ? undefined : projectEntryRoute(project)" class="project-overview-card__link" :aria-label="exportOnly ? undefined : tr('打开项目：{p0}', { p0: project.name })" :aria-describedby="`project-progress-${project.id} project-stats-${project.id}`">
       <div class="project-overview-card__identity">
-        <ProjectCover class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
+        <ProjectCover :max-width="108" class="project-overview-card__cover" :source="project.cover_thumbnail || project.cover" :original="project.cover" :aspect-ratio="settings.aspectRatio" :title="project.name" :seed="project.id ?? project.name" :alt="project.name" />
         <div class="project-overview-card__copy">
-          <span class="project-overview-card__status" :class="`is-${project.production.state}`">{{ stateLabel }}</span>
+          <span class="project-overview-card__source" :class="`is-${source}`">
+            <component :is="source === 'clip' ? Sparkles : Clapperboard" :size="13" aria-hidden="true" />{{ projectSourceLabel(source) }}
+          </span>
           <h2 :id="`project-title-${project.id}`" :title="project.name">{{ project.name }}</h2>
-          <p class="project-overview-card__metadata" :title="metadata">{{ metadata }}</p>
+          <p v-if="metadata" class="project-overview-card__metadata" :title="metadata">{{ metadata }}</p>
           <div class="project-overview-card__tags" :title="tags.join(' · ')">
+            <span class="project-overview-card__status" :class="`is-${project.production.state}`">{{ stateLabel }}</span>
             <span v-for="tag in tags.slice(0, 3)" :key="tag" :title="tag">{{ tag }}</span>
-            <span v-if="!tags.length" class="project-overview-card__no-tags">{{ tr('未分类') }}</span>
           </div>
         </div>
       </div>
 
-      <div :id="`project-progress-${project.id}`" class="project-overview-card__progress" :title="tr('每集合成成功后计为完成，同一集的多个合成版本只统计一次。')">
+      <div v-if="source === 'series'" :id="`project-progress-${project.id}`" class="project-overview-card__progress" :title="tr('每集合成成功后计为完成，同一集的多个合成版本只统计一次。')">
         <div class="project-overview-card__progress-heading">
           <span><Clapperboard :size="14" aria-hidden="true" />{{ tr('视频制作') }}</span>
           <strong>{{ tr('已完成 {p0} 集', { p0: projectNumber(project.production.completed_episode_count) }) }}</strong>
@@ -92,6 +95,11 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
           <span v-else>{{ tr('尚未开始视频制作') }}</span>
           <time :datetime="project.production.latest_activity_at" :title="tr('最近更新：{p0}', { p0: project.production.latest_activity_at })">{{ projectDate(project.production.latest_activity_at) }}</time>
         </div>
+      </div>
+
+      <div v-else :id="`project-progress-${project.id}`" class="project-overview-card__progress project-overview-card__progress-detail">
+        <span>{{ tr('最近更新') }}</span>
+        <time :datetime="project.production.latest_activity_at">{{ projectDate(project.production.latest_activity_at) }}</time>
       </div>
 
       <dl :id="`project-stats-${project.id}`" class="project-overview-card__stats">
@@ -127,16 +135,20 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', outside))
 .project-overview-card:hover, .project-overview-card:focus-within { border-color: var(--app-border-strong); box-shadow: 0 8px 24px rgb(35 39 55 / 7%); }
 .project-overview-card__link { display: flex; flex:1; min-width: 0; flex-direction: column; padding: 20px; border-radius: inherit; color: inherit; }
 .project-overview-card__link:focus-visible { outline: 3px solid var(--app-accent); outline-offset: 3px; }
-.project-overview-card__identity { display: grid; min-height: 126px; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 16px; }
+.project-overview-card__identity { display: grid; min-height: 126px; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 12px; }
 .project-overview-card__copy { min-width: 0; }
-.project-overview-card__status { display: inline-flex; max-width: calc(100% - 23px); min-height: 23px; align-items: center; padding: 2px 7px; border-radius: 6px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; font-weight: 600; line-height: 1.35; }
+.project-overview-card__source { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 5px; font-size: 12px; font-weight: 650; line-height: 1.4; }
+.project-overview-card__source svg { flex: none; }
+.project-overview-card__source.is-series { color: var(--app-accent); background: var(--app-accent-soft); }
+.project-overview-card__source.is-clip { color: var(--creation-success); background: color-mix(in srgb, var(--creation-success) 12%, var(--app-surface)); }
+.project-overview-card__status { display: inline-flex; max-width: 100%; min-height: 23px; white-space: nowrap; align-items: center; padding: 2px 7px; border-radius: 6px; color: var(--app-text-secondary); background: var(--app-surface-muted); font-size: 12px; font-weight: 600; line-height: 1.35; }
 .project-overview-card__status.is-in_progress { color: var(--app-accent); background: var(--app-accent-soft); }
 .project-overview-card__status.is-ready { color: var(--creation-success); background: color-mix(in srgb, var(--creation-success) 10%, var(--app-surface)); }
 .project-overview-card h2 { display: -webkit-box; min-height: 44px; overflow: hidden; margin: 9px 0 5px; font-size: 16px; font-weight: 650; line-height: 22px; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .project-overview-card__metadata { overflow: hidden; margin: 0; color: var(--app-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .project-overview-card__tags { display: flex; min-height: 22px; align-items: center; gap: 5px; margin-top: 9px; overflow: hidden; }
-.project-overview-card__tags > span { overflow: hidden; max-width: 8em; padding: 2px 6px; border-radius: 5px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.project-overview-card__tags > .project-overview-card__no-tags { color: var(--app-text-secondary); background: var(--app-surface-muted); }
+.project-overview-card__tags > span:not(.project-overview-card__status) { overflow: hidden; max-width: 8em; padding: 2px 6px; border-radius: 5px; color: var(--app-accent); background: var(--app-accent-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.project-overview-card__tags > .project-overview-card__status { flex: none; }
 .project-overview-card__progress { margin-top: 19px; }
 .project-overview-card__progress-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
 .project-overview-card__progress-heading > span { display: inline-flex; align-items: center; gap: 6px; color: var(--app-text-secondary); }

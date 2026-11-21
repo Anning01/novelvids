@@ -4162,6 +4162,9 @@
     "也可以将文件拖拽到这里": "You can also drag files here"
   },
   "project_overview": {
+    "剧集项目": "Series project",
+    "首页单次创作": "Home quick creation",
+    "作品来源": "Creation source",
     "AI 创作": "AI creation",
     "手动创作": "Manual creation",
     "小说 / 剧本": "Novel / script",

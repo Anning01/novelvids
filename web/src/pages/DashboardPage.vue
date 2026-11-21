@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Upload, X } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Clapperboard, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Sparkles, Upload, X } from 'lucide-vue-next'
 import { exportProject, importProject } from '@/features/project-transfer/transfer'
 import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { tr } from '@/i18n'
@@ -12,7 +12,8 @@ import { useAuthStore } from '@/features/auth/authStore'
 import { money } from '@/features/billing/recordDisplay'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import { projectKind, projectNumber, projectRuntime } from '@/shared/projectOverview'
+import { projectSource } from '@/shared/shortDramaProject'
+import { projectKind, projectNumber, projectRuntime, projectSourceLabel } from '@/shared/projectOverview'
 import type { ProjectOverview, ProjectOverviewItem } from '@/types'
 
 const auth = useAuthStore()
@@ -24,6 +25,11 @@ const pendingCosts = ref(new Set<number>())
 const costState = ref<'loading' | 'ready' | 'error'>('loading')
 const costError = ref('')
 const search = ref('')
+type SourceFilter = 'all' | ReturnType<typeof projectSource>
+const sourceStorageKey = 'projects-source-filter'
+const savedSource = sessionStorage.getItem(sourceStorageKey)
+const sourceFilter = ref<SourceFilter>(savedSource === 'series' || savedSource === 'clip' ? savedSource : 'all')
+const sourceOptions = ['all', 'series', 'clip'] as const
 const typeFilter = ref('all')
 const stateFilter = ref('all')
 const sort = ref('updated')
@@ -36,7 +42,8 @@ const filtered = computed(() => {
   const keyword = search.value.trim().toLocaleLowerCase()
   return (overview.value?.items ?? []).filter(project => (
     (!keyword || project.name.toLocaleLowerCase().includes(keyword))
-    && (typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
+    && (sourceFilter.value === 'all' || projectSource(project) === sourceFilter.value)
+    && (sourceFilter.value === 'clip' || typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
     && (stateFilter.value === 'all' || project.production.state === stateFilter.value)
   )).sort((left, right) => {
     if (sort.value === 'name') return left.name.localeCompare(right.name)
@@ -46,7 +53,7 @@ const filtered = computed(() => {
   })
 })
 const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
-const hasFilters = computed(() => Boolean(search.value.trim()) || typeFilter.value !== 'all' || stateFilter.value !== 'all')
+const hasFilters = computed(() => Boolean(search.value.trim()) || sourceFilter.value !== 'all' || typeFilter.value !== 'all' || stateFilter.value !== 'all')
 const runtime = computed(() => projectRuntime(overview.value?.summary.finished_seconds ?? 0, overview.value?.summary.unknown_finished_duration_count ?? 0))
 const costHint = computed(() => auth.role === 'creator' ? tr('仅本人已入账费用') : tr('当前项目已入账费用'))
 // Sum the same visible projects as the cards, including historical calls and versions.
@@ -59,7 +66,7 @@ const stats = computed(() => [
   ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? pendingCosts.value.size ? tr('待结算') : money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
 ])
 const typeOptions = computed(() => [
-  { value: 'all', label: tr('全部类型') }, { value: 'clip', label: tr('独立片段') }, { value: 'agent', label: tr('AI 创作') },
+  { value: 'all', label: tr('全部类型') }, { value: 'agent', label: tr('AI 创作') },
   { value: 'manual', label: tr('手动创作') }, { value: 'remake', label: tr('视频重制') },
   { value: 'script', label: tr('小说 / 剧本') },
 ])
@@ -116,6 +123,7 @@ async function loadCosts(revision: number) {
 }
 
 function resetFilters() {
+  sourceFilter.value = 'all'
   search.value = ''
   typeFilter.value = 'all'
   stateFilter.value = 'all'
@@ -200,7 +208,8 @@ async function remove(project: ProjectOverviewItem) {
   }
 }
 
-watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
+watch(sourceFilter, value => { sessionStorage.setItem(sourceStorageKey, value) })
+watch([search, sourceFilter, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
 watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { cancelTransfers(); overview.value = null; void load() })
 const exporting = ref(false)
@@ -248,13 +257,21 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 
       <section class="projects-library" :aria-label="tr('项目列表')">
         <div class="projects-library__toolbar">
-          <div class="projects-library__heading"><h2>{{ tr('全部项目') }}</h2><span role="status" aria-live="polite">{{ tr('共 {p0} 个项目', { p0: projectNumber(filtered.length) }) }}</span></div>
+          <div class="projects-library__heading"><h2>{{ tr('项目列表') }}</h2><span role="status" aria-live="polite">{{ tr('共 {p0} 个项目', { p0: projectNumber(filtered.length) }) }}</span></div>
           <div class="projects-library__filters">
             <label class="projects-search"><Search :size="17" aria-hidden="true" /><span class="projects-sr-only">{{ tr('搜索项目名称') }}</span><input v-model="search" type="search" :placeholder="tr('搜索项目名称')"><button v-if="search" type="button" :aria-label="tr('清空搜索')" @click="search = ''"><X :size="14" aria-hidden="true" /></button></label>
-            <AppSelect v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
+            <AppSelect v-if="sourceFilter !== 'clip'" v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
             <AppSelect v-model="sort" :options="sortOptions" :ariaLabel="tr('项目排序')" />
             <AppSelect v-model="stateFilter" :options="stateOptions" :ariaLabel="tr('创作状态')" />
           </div>
+        </div>
+
+        <div class="project-sources" role="group" :aria-label="tr('作品来源')">
+          <button v-for="source in sourceOptions" :key="source" type="button" :aria-pressed="sourceFilter === source" @click="sourceFilter = source">
+            <Clapperboard v-if="source === 'series'" :size="15" aria-hidden="true" />
+            <Sparkles v-if="source === 'clip'" :size="15" aria-hidden="true" />
+            {{ source === 'all' ? tr('全部') : projectSourceLabel(source) }}
+          </button>
         </div>
 
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
@@ -322,6 +339,11 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-search button:focus-visible { outline: 2px solid var(--app-accent); }
 .projects-library__filters :deep(.app-select) { min-width: 0; flex: 0 0 124px; }
 .projects-library__filters :deep(.app-select__trigger) { height: 40px; }
+.project-sources { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; gap: 2px; padding: 3px; margin-bottom: 16px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface-muted); }
+.project-sources button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 4px 10px; border: 0; border-radius: 7px; font: inherit; font-size: 13px; color: var(--app-text-secondary); background: transparent; cursor: pointer; }
+.project-sources button:hover { color: var(--app-text); background: var(--app-surface-hover); }
+.project-sources button[aria-pressed="true"] { color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong); font-weight: 650; }
+.project-sources button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 1px; }
 .projects-library__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .projects-page__empty, .projects-page__error { display: grid; min-height: 285px; place-items: center; align-content: center; gap: 12px; text-align: center; }
 .projects-page__empty-icon { display: grid; width: 64px; height: 64px; margin-bottom: 4px; place-items: center; border-radius: 18px; color: var(--app-text-secondary); background: var(--app-surface-muted); }
