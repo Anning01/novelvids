@@ -200,10 +200,10 @@ def shot_continuity(previous, index, language):
 
 def continuity_instruction(language):
     return ('上一镜是已确认的历史。只写本段视频里实际发生的动作和听到的对白，承接上一镜结束时的人物、道具状态。'
-            '不要把上一镜的动作或末句再演一遍；以本段画面和原声为准。对白跨切口时，只记本段实际听到的部分；字幕若继续停留，不等于台词又说了一遍。原片确实重放或再次说出时保留。'
+            '上一镜的开场布局不能代替结束状态。物体移出特写画框不等于已放下；本镜开场已经握住的物体，不要再写一次拿起或递出。以本段画面和原声为准。对白跨切口时，只记本段实际听到的部分；字幕若继续停留，不等于台词又说了一遍。原片确实重放或再次说出时保留。'
             if language == 'zh' else
             'The preceding shot is confirmed history. Describe only what is seen and heard in this clip. Carry forward the ending state. '
-            'Do not replay the preceding action or line unless the current source actually repeats it. For speech across a cut, include only the words audible in this clip. A lingering subtitle is not a second utterance. Preserve actual replays and spoken repetitions.')
+            'The prior opening layout is not its ending state. Leaving a close-up does not establish that an object was put down. If it is already held at the new opening, do not invent a second pickup or handoff. For speech across a cut, include only the words audible in this clip. A lingering subtitle is not a second utterance. Preserve actual replays and spoken repetitions.')
 
 
 def identity_instruction(language):

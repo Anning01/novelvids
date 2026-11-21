@@ -1,4 +1,7 @@
 {
+  "切片内容或边界已变化，不能复用旧分镜": "The source clips or their boundaries have changed. The saved shots cannot be reused.",
+  "来源视频已变化，请重新创建拆解任务": "The source video has changed. Start a new analysis task.",
+  "上次请求的结果尚未确认，请稍后核对": "The previous request has no confirmed outcome yet. Check its receipt again later.",
   "该用户是团队所有人，请先解散团队，或确认解散团队并删除用户": "This user owns a team. Dissolve it first, or confirm archiving the team together with account deletion.",
   "调整后余额超出上限": "The resulting balance exceeds the supported limit",
   "团队已归档": "Team archived",
