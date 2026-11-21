@@ -24,9 +24,22 @@ class TeamBalanceOut(BaseModel):
         return _serialize_decimal(value)
 
 
+class BalanceSnapshotOut(TeamBalanceOut):
+    last_transaction_id: int
+
+
+class BalanceDeductIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    team_id: int = Field(gt=0)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+    note: str = Field(min_length=1, max_length=255)
+    last_transaction_id: int = Field(ge=0)
+
+
 class BalanceTopUpIn(BaseModel):
+    last_transaction_id: int | None = Field(None, ge=0)
     team_id: int = Field(..., gt=0, description="目标团队")
-    amount: Decimal = Field(..., gt=0, description="充值金额（元）")
+    amount: Decimal = Field(..., gt=0, max_digits=18, decimal_places=6, description="充值金额（元）")
     note: str = Field("", max_length=255, description="备注")
 
 
@@ -173,7 +186,7 @@ class TeamOut(BaseModel):
     name: str
     balance: Decimal = Decimal("0")
     model_config_source: str = "official"
-    status: int = 1
+    status: int = Field(1, description="0 停用，1 正常，2 已归档")
     member_limit: Optional[int] = Field(None, description="成员人数上限；null 不限")
     owner_user_id: Optional[int] = Field(None, description="团队所有人 User.id")
     owner_username: str = Field("", description="团队所有人用户名")

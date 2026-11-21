@@ -12,10 +12,12 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException
 from tortoise.expressions import F
+from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
 from auth.models import BalanceTransaction, Team, TeamMember
 from config import settings
+from services.team_lifecycle import require_unarchived
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,48 @@ async def get_balance(team_id: int) -> Decimal:
     return team.balance
 
 
+async def _latest_transaction_id(team_id: int) -> int:
+    row = await BalanceTransaction.filter(team_id=team_id).order_by("-id").first().values("id")
+    return row["id"] if row else 0
+
+
+async def snapshot(team_id: int) -> dict:
+    # Read the amount and ledger revision in the same statement, without blocking writers.
+    rows = await Team.filter(id=team_id).annotate(revision=Max("balance_transactions__id")).group_by(
+        "id", "balance"
+    ).values("balance", "revision")
+    if not rows:
+        raise HTTPException(404, localized_message("团队不存在"))
+    return {"team_id": team_id, "balance": rows[0]["balance"], "last_transaction_id": rows[0]["revision"] or 0}
+
+
+async def _adjust_ledger(team_id: int, delta: Decimal, kind: str, operator_user_id: int | None,
+                         note: str, revision: int | None, *, settlement: bool = False) -> dict:
+    async with in_transaction():
+        team = await Team.filter(id=team_id).select_for_update().first()
+        if team is None:
+            raise HTTPException(404, localized_message("团队不存在"))
+        if not settlement:
+            require_unarchived(team)
+        if revision is not None and revision != await _latest_transaction_id(team_id):
+            raise HTTPException(409, localized_message("余额已变动，请核对最新余额后重试"))
+        if delta < 0 and -delta > team.balance:
+            raise HTTPException(400, localized_message("扣减金额不能超过团队余额"))
+        if team.balance + delta > Decimal("999999999999.999999"):
+            raise HTTPException(422, localized_message("调整后余额超出上限"))
+        team.balance = _money(team.balance + delta)
+        await team.save(update_fields=["balance", "updated_at"])
+        entry = await BalanceTransaction.create(team=team, change_amount=delta, balance_after=team.balance,
+            type=kind, operator_user_id=operator_user_id, note=note)
+        return {"team_id": team.id, "balance": team.balance, "last_transaction_id": entry.id}
+
+
+async def deduct(team_id: int, amount: Decimal, last_transaction_id: int, operator_user_id: int, note: str) -> dict:
+    if amount <= 0 or not note.strip():
+        raise HTTPException(422, localized_message("请输入正数金额和扣减原因"))
+    return await _adjust_ledger(team_id, -amount, "adjust", operator_user_id, note.strip(), last_transaction_id)
+
+
 async def ensure_solvent(
     team_id: int | None, user_id: int | None = None
 ) -> None:
@@ -48,6 +92,7 @@ async def ensure_solvent(
     team = await Team.get_or_none(id=team_id)
     if team is None:
         raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
+    require_unarchived(team)
     if team.balance <= 0:
         raise HTTPException(
             status_code=402, detail=localized_message('团队余额不足，请联系团队管理员充值')
@@ -92,26 +137,16 @@ async def top_up(
     amount: Decimal,
     operator_user_id: int | None = None,
     note: str = "",
+    *, settlement: bool = False, last_transaction_id: int | None = None,
 ) -> Decimal:
     """超管充值；事务内加锁更新余额并落流水。"""
     amount_dec = _money(amount)
     if amount_dec <= 0:
         raise HTTPException(status_code=400, detail=localized_message('充值金额必须为正数'))
-    async with in_transaction():
-        team = await Team.filter(id=team_id).select_for_update().first()
-        if team is None:
-            raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
-        team.balance = _money(team.balance + amount_dec)
-        await team.save(update_fields=["balance", "updated_at"])
-        await BalanceTransaction.create(
-            team=team,
-            change_amount=amount_dec,
-            balance_after=team.balance,
-            type="topup",
-            operator_user_id=operator_user_id,
-            note=note or "余额充值",
-        )
-    return team.balance
+    posted = await _adjust_ledger(team_id, amount_dec, "topup", operator_user_id, note or "余额充值",
+                                  last_transaction_id, settlement=settlement)
+    return posted["balance"]
+
 
 
 async def consume(

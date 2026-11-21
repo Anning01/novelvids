@@ -17,6 +17,7 @@ from tortoise.transactions import atomic
 
 from auth.security import hash_password
 from auth.models import Team, TeamInvite, TeamMember, User
+from services.team_lifecycle import require_unarchived
 from services.team_provisioning import create_owned_team
 
 INVITE_TTL_HOURS = 24
@@ -26,12 +27,14 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+@atomic()
 async def create_invite(
     team_id: int, role: str, created_by: int | None = None
 ) -> TeamInvite:
-    team = await Team.get_or_none(id=team_id)
+    team = await Team.filter(id=team_id).select_for_update().first()
     if team is None:
         raise HTTPException(status_code=404, detail=localized_message('团队不存在'))
+    require_unarchived(team)
     if role not in ("admin", "creator", "viewer"):
         raise HTTPException(status_code=422, detail=localized_message('角色必须是 admin/creator/viewer'))
     token = secrets.token_urlsafe(24)
@@ -60,8 +63,10 @@ async def get_invite_info(token: str) -> dict:
 async def join_team_via_invite(user: User, token: str) -> dict:
     """老用户经邀请链接加入团队。"""
     invite = await _valid_invite(token)
-    await Team.filter(id=invite.team_id).select_for_update().get()
-    await _enforce_member_limit(invite.team)
+    team = await Team.filter(id=invite.team_id).select_for_update().get()
+    if team.status != 1:
+        raise HTTPException(403, localized_message("团队已停用"))
+    await _enforce_member_limit(team)
     if await TeamMember.filter(team=invite.team, user=user).exists():
         raise HTTPException(status_code=400, detail=localized_message('你已是该团队成员'))
     membership = await TeamMember.create(team=invite.team, user=user, role=invite.role)
@@ -80,11 +85,13 @@ async def register_via_invite(
 ) -> tuple[User, dict]:
     """新用户经邀请链接注册并自动加入团队。"""
     invite = await _valid_invite(token)
-    await Team.filter(id=invite.team_id).select_for_update().get()
+    team = await Team.filter(id=invite.team_id).select_for_update().get()
+    if team.status != 1:
+        raise HTTPException(403, localized_message("团队已停用"))
     username = username.strip()
     if await User.filter(username=username).exists():
         raise HTTPException(status_code=400, detail=localized_message('用户名已被使用'))
-    await _enforce_member_limit(invite.team)
+    await _enforce_member_limit(team)
     user = await User.create(
         username=username,
         nickname=nickname or username,

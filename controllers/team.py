@@ -12,11 +12,12 @@ from typing import Any
 from fastapi import HTTPException
 from tortoise.expressions import Q
 from tortoise.timezone import now as tz_now
-from tortoise.transactions import in_transaction
+from tortoise.transactions import atomic, in_transaction
 
 from auth.models import RechargeOrder, Team, TeamMember, User
 from config import settings
 from services import balance, invites
+from services.team_lifecycle import archive_team, require_unarchived
 from services.team_provisioning import create_owned_team
 from services.wechat_pay import WeChatPayError, wechat_pay_service
 from utils.enums import TeamRoleEnum
@@ -83,7 +84,7 @@ class TeamController:
     # ---- 余额 ----
 
     async def balance(self, team_id: int) -> dict:
-        return {"team_id": team_id, "balance": await balance.get_balance(team_id)}
+        return await balance.snapshot(team_id)
 
     async def top_up(
         self,
@@ -91,9 +92,16 @@ class TeamController:
         amount: Decimal,
         operator_user_id: int | None,
         note: str,
+        last_transaction_id: int | None = None,
     ) -> dict:
-        result = await balance.top_up(team_id, amount, operator_user_id, note)
+        result = await balance.top_up(team_id, amount, operator_user_id, note, last_transaction_id=last_transaction_id)
         return {"team_id": team_id, "balance": result}
+
+    async def deduct(self, team_id: int, amount: Decimal, last_transaction_id: int, operator_id: int, note: str):
+        return await balance.deduct(team_id, amount, last_transaction_id, operator_id, note)
+
+    async def archive(self, team_id: int) -> None:
+        await archive_team(team_id)
 
     async def transactions(self, team_id: int, page: int, page_size: int) -> dict:
         return await balance.list_transactions(team_id, page, page_size)
@@ -108,6 +116,7 @@ class TeamController:
         note: str = "",
     ) -> RechargeOrder:
         team = await self._ensure_team(team_id)
+        require_unarchived(team)
         if amount <= 0:
             raise HTTPException(400, localized_message("充值金额必须大于零"))
 
@@ -342,6 +351,7 @@ class TeamController:
                 amount=locked.amount,
                 operator_user_id=locked.user_id,
                 note=f"微信支付充值 (单号: {locked.out_trade_no})",
+                settlement=True,
             )
             return True
 
@@ -580,6 +590,7 @@ class TeamController:
             raise HTTPException(status_code=422, detail=localized_message('人员上限必须为正整数'))
         return await create_owned_team(owner_user_id, name, member_limit)
 
+    @atomic()
     async def update_team(
         self,
         team_id: int,
@@ -587,7 +598,10 @@ class TeamController:
         status: int | None,
         member_limit: int | None = None,
     ) -> dict:
-        team = await self._ensure_team(team_id)
+        team = await Team.filter(id=team_id).select_for_update().first()
+        if team is None:
+            raise HTTPException(404, localized_message("团队不存在"))
+        require_unarchived(team)
         update_fields = ["updated_at"]
         if name is not None:
             name = name.strip()

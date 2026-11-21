@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '@/features/auth/authStore'
+import { appConfirmState, resolveAppConfirm } from '@/shared/confirmDialog'
 import UsersPage from './UsersPage.vue'
 import { api } from '@/api'
 
@@ -71,7 +72,6 @@ describe('UsersPage 用户管理', () => {
     } as never)
     vi.spyOn(api, 'updateUser').mockResolvedValue({ data: {} } as never)
     vi.spyOn(api, 'deleteUser').mockResolvedValue({ data: null } as never)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     const wrapper = mountPage()
     await flushPromises()
@@ -86,6 +86,8 @@ describe('UsersPage 用户管理', () => {
 
     const deleteButton = wrapper.findAll('button').find(button => button.text() === '删除')
     await deleteButton!.trigger('click')
+    expect(appConfirmState.open).toBe(true)
+    resolveAppConfirm(true)
     await flushPromises()
     expect(api.deleteUser).toHaveBeenCalledWith(2)
   })
@@ -97,4 +99,26 @@ describe('UsersPage 用户管理', () => {
     expect(wrapper.text()).not.toContain('创建用户')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
   })
+})
+
+it('requires explicit confirmation of named teams before deleting their owner', async () => {
+  vi.spyOn(api, 'userStats').mockResolvedValue({data: {user_count: 1, team_count: 1}} as never)
+  vi.spyOn(api, 'users').mockResolvedValue({data: {items: [{
+    id: 7, username: 'owner', nickname: '团队所有人', status: 1, team_count: 1,
+    owned_teams: [{id: 8, name: '保留作品', balance: '25.5'}],
+  }], pagination: {total: 1}}} as never)
+  const remove = vi.spyOn(api, 'deleteUser').mockResolvedValue({data: null} as never)
+  const wrapper = mountPage()
+  await flushPromises()
+  const button = wrapper.findAll('button').find(item => item.text() === '删除')!
+  await button.trigger('click')
+  expect(appConfirmState.details).toContain('「保留作品」 · 余额 ¥25.5')
+  resolveAppConfirm(false)
+  await flushPromises()
+  expect(remove).not.toHaveBeenCalled()
+  await button.trigger('click')
+  resolveAppConfirm(true)
+  await flushPromises()
+  expect(remove).toHaveBeenCalledWith(7, [8])
+  wrapper.unmount()
 })

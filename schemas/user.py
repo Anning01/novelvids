@@ -34,6 +34,12 @@ class UserPatchIn(BaseModel):
     status: Literal[0, 1] = Field(..., description="登录状态：0 禁用 / 1 正常")
 
 
+class OwnedTeamOut(BaseModel):
+    id: int
+    name: str
+    balance: str
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +51,7 @@ class UserOut(BaseModel):
     created_at: datetime | str | None = ""
     total_cost: Decimal | float | str | None = 0.0
     team_count: int = 0
+    owned_teams: list[OwnedTeamOut] = Field(default_factory=list)
 
     @field_serializer("created_at", when_used="json")
     def _ser_created_at(self, value):

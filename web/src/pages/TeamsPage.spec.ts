@@ -130,16 +130,33 @@ describe('TeamsPage', () => {
     vi.spyOn(api, 'teamTopUp').mockResolvedValue({
       data: { team_id: 1, balance: 50 },
     } as never)
-    vi.spyOn(window, 'prompt').mockReturnValue('50')
+    vi.spyOn(api, 'teamBalance').mockResolvedValue({data: {team_id: 1, balance: '0', last_transaction_id: 0}} as never)
 
     const wrapper = mountPage()
     await flushPromises()
     const buttons = wrapper.findAll('button')
-    const topUpButton = buttons.find(button => button.text() === '充值')
+    const topUpButton = buttons.find(button => button.text() === '调整额度')
     expect(topUpButton).toBeTruthy()
     await topUpButton!.trigger('click')
     await flushPromises()
 
-    expect(api.teamTopUp).toHaveBeenCalledWith({ team_id: 1, amount: 50, note: '管理端充值' })
+    await wrapper.get('.quota-field input[inputmode="decimal"]').setValue('50')
+    await wrapper.get('.quota-field input[maxlength]').setValue('手工补额')
+    await wrapper.get('.quota-dialog form').trigger('submit')
+    await flushPromises()
+    expect(api.teamTopUp).toHaveBeenCalledWith({ team_id: 1, amount: '50', note: '手工补额', last_transaction_id: 0 })
   })
+})
+
+it('displays archived teams and keeps their administrative mutation controls out of the row', async () => {
+  vi.spyOn(api, 'teams').mockResolvedValue({data: {items: [
+    {id: 4, name: '旧团队', balance: 15, status: 2, owner_user_id: null, member_count: 0},
+  ],pagination: {total: 1}}} as never)
+  const wrapper = mountPage()
+  await flushPromises()
+  const row = wrapper.get('tbody tr')
+  expect(row.text()).toContain('已归档')
+  expect(row.text()).toContain('15.00')
+  expect(row.find('button').exists()).toBe(false)
+  wrapper.unmount()
 })

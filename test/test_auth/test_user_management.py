@@ -241,3 +241,83 @@ async def test_create_team_rejects_missing_owner(client, user_world):
         headers=_auth(user_world["token"]),
     )
     assert response.json()["code"] == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_owner_requires_exact_team_confirmation_and_preserves_history(client, user_world):
+    from auth.models import BalanceTransaction, PlatformApiKey, RechargeOrder, TeamInvite, UserSession
+    from models.novel import Novel
+    from services import balance, invites
+
+    owner, team = user_world["alice"], user_world["team"]
+    headers = _auth(user_world["token"])
+    await _login(client, owner.username)
+    await balance.top_up(team.id, Decimal("21"))
+    project = await Novel.create(name="Archived work", team_id=team.id, created_by=owner.id)
+    await RechargeOrder.create(out_trade_no="archive-history", team=team, user_id=owner.id, amount=10, status="paid")
+    await invites.create_invite(team.id, "viewer", owner.id)
+    key = await PlatformApiKey.create(user_id=user_world["bob"].id, team_id=team.id, name="测试密钥",
+                                      token_hash="archive-test-only", preview="test")
+    listed = (await client.get("/api/users", headers=headers)).json()["data"]["items"]
+    summary = next(u for u in listed if u["id"] == owner.id)["owned_teams"]
+    assert [t["id"] for t in summary] == [team.id] and Decimal(summary[0]["balance"]) == 21
+    url = f"/api/users/{owner.id}"
+    stale = await client.delete(url, params={"archive_team_id": team.id + 100}, headers=headers)
+    assert stale.json()["code"] == 409 and await User.filter(id=owner.id).exists()
+    assert (await Team.get(id=team.id)).owner_user_id == owner.id
+    assert (await client.delete(url, params={"archive_team_id": team.id}, headers=headers)).json()["code"] == 0
+    archived = await Team.get(id=team.id)
+    assert (archived.status, archived.owner_user_id, archived.balance) == (2, None, Decimal("21"))
+    assert not await User.filter(id=owner.id).exists() and not await UserSession.filter(user_id=owner.id).exists()
+    assert await User.filter(id=user_world["bob"].id).exists()
+    assert not await TeamMember.filter(team=team).exists() and not await TeamInvite.filter(team=team).exists()
+    assert (await PlatformApiKey.get(id=key.id)).revoked_at is not None
+    assert await Novel.filter(id=project.id, team_id=team.id).exists()
+    assert await RechargeOrder.filter(team=team, status="paid").exists()
+    assert await BalanceTransaction.filter(team=team, type="topup").count() == 1
+
+
+@pytest.mark.asyncio
+async def test_team_archive_is_super_only_idempotent_and_terminal(client, user_world):
+    team = user_world["team"]
+    url = f"/api/team/teams/{team.id}"
+    owner_headers = _auth((await _login(client, user_world["alice"].username))["data"]["token"])
+    headers = _auth(user_world["token"])
+    assert (await client.delete(url, headers=owner_headers)).json()["code"] == 403
+    for _ in range(2):
+        assert (await client.delete(url, headers=headers)).json()["code"] == 0
+    assert (await client.patch(url, headers=headers, json={"status": 1})).json()["code"] == 409
+    assert (await client.post("/api/team/balance/topup", headers=headers, json={"team_id": team.id, "amount": 2})).json()["code"] == 409
+    assert (await client.get("/api/team/balance", headers=owner_headers)).json()["code"] == 403
+    assert await User.filter(id=user_world["alice"].id).exists()
+
+
+@pytest.mark.asyncio
+async def test_failed_user_removal_rolls_back_archive(client, user_world, monkeypatch):
+    from controllers.user import user_controller
+    team, user = user_world["team"], user_world["alice"]
+
+    async def fail_delete(self):
+        raise RuntimeError("rollback check")
+
+    monkeypatch.setattr(User, "delete", fail_delete)
+    with pytest.raises(RuntimeError):
+        await user_controller.remove_user(user.id, user_world["boss"].id, [team.id])
+    assert (await Team.get(id=team.id)).owner_user_id == user.id
+    assert await TeamMember.filter(team_id=team.id).count() == 2
+
+
+@pytest.mark.asyncio
+async def test_pre_archive_order_can_settle_once_after_user_deletion(client, user_world):
+    from auth.models import BalanceTransaction, RechargeOrder
+    from controllers.team import team_controller
+    from controllers.user import user_controller
+
+    owner, team = user_world["alice"], user_world["team"]
+    order = await RechargeOrder.create(out_trade_no="pending-before-archive", team=team, user_id=owner.id, amount=12)
+    await user_controller.remove_user(owner.id, user_world["boss"].id, [team.id])
+    assert await team_controller._finish_recharge(order, "confirmed-before-archive")
+    assert not await team_controller._finish_recharge(order, "confirmed-before-archive")
+    archived = await Team.get(id=team.id)
+    assert archived.status == 2 and archived.balance == Decimal("12")
+    assert await BalanceTransaction.filter(team=team, type="topup").count() == 1

@@ -81,6 +81,7 @@ async def patch_user(
 async def delete_user(
     user_id: int,
     ctx: AuthContext = _SUPER,
+    archive_team_id: list[int] | None = Query(None, description="经管理员明确确认一起归档的团队 ID"),
 ):
-    await user_controller.remove_user(user_id, _operator_id(ctx))
+    await user_controller.remove_user(user_id, _operator_id(ctx), archive_team_id)
     return ResponseSchema(data=None, message="用户已删除")

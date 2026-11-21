@@ -1,4 +1,11 @@
 {
+  "该用户是团队所有人，请先解散团队，或确认解散团队并删除用户": "This user owns a team. Dissolve it first, or confirm archiving the team together with account deletion.",
+  "调整后余额超出上限": "The resulting balance exceeds the supported limit",
+  "团队已归档": "Team archived",
+  "扣减金额不能超过团队余额": "The deduction exceeds the team balance",
+  "余额已变动，请核对最新余额后重试": "The balance changed. Review the updated amount before submitting again.",
+  "请输入正数金额和扣减原因": "Enter a positive amount and a reason for the deduction",
+  "用户拥有的团队已变更，请刷新后重新确认": "Team ownership changed. Refresh and confirm again.",
   "视频任务已提交，完成处理后即可删除": "This video job has been submitted. You can delete it when processing finishes.",
   "本集有已提交的生成任务，请等待处理完成后再永久删除": "This episode has submitted generation jobs. Wait until they finish before permanently deleting it.",
   "音色设计": "Voice design",

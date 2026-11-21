@@ -15,6 +15,8 @@ from auth.api import password_provider
 from config import settings
 from controllers.team import team_controller
 from schemas.team import (
+    BalanceDeductIn,
+    BalanceSnapshotOut,
     BalanceTopUpIn,
     BalanceTransactionOut,
     InviteOut,
@@ -62,7 +64,7 @@ def _operator_id(ctx: AuthContext) -> int | None:
 @router.get(
     "/balance",
     summary="查询团队余额",
-    response_model=ResponseSchema[TeamBalanceOut],
+    response_model=ResponseSchema[BalanceSnapshotOut],
 )
 async def get_team_balance(
     ctx: AuthContext = _ADMIN,
@@ -88,8 +90,16 @@ async def top_up_team_balance(
             payload.amount,
             operator_user_id=_operator_id(ctx),
             note=payload.note,
+            last_transaction_id=payload.last_transaction_id,
         )
     )
+
+
+@router.post("/balance/deduct", summary="管理员扣减团队额度", response_model=ResponseSchema[BalanceSnapshotOut])
+async def deduct_balance(payload: BalanceDeductIn, ctx: AuthContext = _SUPER):
+    return ResponseSchema(data=await team_controller.deduct(
+        payload.team_id, payload.amount, payload.last_transaction_id, ctx.user.id, payload.note,
+    ))
 
 
 @router.post(
@@ -481,3 +491,9 @@ async def patch_team(
             team_id, payload.name, payload.status, payload.member_limit
         )
     )
+
+
+@router.delete("/teams/{team_id}", summary="解散并归档团队（仅超级管理员）", response_model=ResponseSchema[None])
+async def archive_team(team_id: int, _: AuthContext = _SUPER):
+    await team_controller.archive(team_id)
+    return ResponseSchema(data=None)

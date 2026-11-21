@@ -291,3 +291,33 @@ async def test_team_key_usage_does_not_deduct_team_balance(client):
     # 成员累计消耗照记（历史消耗金额两种来源都累计）
     membership = await MemberRow.get(team_id=team.id, user_id=member_user.id)
     assert membership.total_cost == Decimal("20.000000")
+
+
+@pytest.mark.asyncio
+async def test_admin_deduction_is_audited_once_and_refuses_overdraft(client):
+    import asyncio
+
+    team = await Team.create(name="额度调整")
+    boss = await _create_user("quota_boss", super_admin=True)
+    headers = _auth(await _login(client, boss.username))
+    await balance.top_up(team.id, Decimal("25.5"))
+    async def snapshot():
+        return (await client.get("/api/team/balance", params={"team_id":team.id}, headers=headers)).json()["data"]
+    state = await snapshot()
+    payload = {"team_id":team.id, "amount":"5.123456", "last_transaction_id":state["last_transaction_id"], "note":"额度纠正"}
+    url = "/api/team/balance/deduct"
+    a, b = await asyncio.gather(*(client.post(url, headers=headers, json=payload) for _ in range(2)))
+    assert sorted([a.json()["code"], b.json()["code"]]) == [0,409]
+    result = await snapshot()
+    assert Decimal(result["balance"]) == Decimal("20.376544")
+    entry = await BalanceTransaction.get(team=team,type="adjust")
+    assert (entry.change_amount,entry.note,entry.operator_user_id) == (Decimal("-5.123456"),"额度纠正",boss.id)
+    for fields, code in [({"amount":"100"},400),({"amount":"0"},422),({"amount":"-1"},422),({"note":"   "},422),({"amount":"0.0000001"},422)]:
+        res = await client.post(url, headers=headers, json={**payload,"last_transaction_id":result["last_transaction_id"],**fields})
+        assert res.json()["code"] == code
+    assert await snapshot() == result
+    assert await BalanceTransaction.filter(team=team).count() == 2
+    admin = await _create_user("quota_admin")
+    await TeamMember.create(team=team,user=admin,role="admin")
+    denied = await client.post(url, headers=_auth(await _login(client,admin.username)), json=payload)
+    assert denied.json()["code"] == 403

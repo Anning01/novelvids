@@ -455,6 +455,7 @@ export interface UserItem {
   created_at?: string
   total_cost?: number | string
   team_count?: number
+  owned_teams?: { id: number; name: string; balance: string }[]
 }
 
 export interface VisualStyleItem { key: string; label: string }
