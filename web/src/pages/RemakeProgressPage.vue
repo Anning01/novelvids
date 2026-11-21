@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AlertTriangle,
@@ -9,10 +9,12 @@ import {
   Check,
   Circle,
   Film,
+  List,
   LoaderCircle,
   RefreshCw,
   RotateCcw,
   Sparkles,
+  X,
 } from 'lucide-vue-next'
 import AppButton from '@/components/AppButton.vue'
 import { api } from '@/api'
@@ -26,12 +28,19 @@ const loading = ref(true)
 const connectionState = ref<'connecting' | 'live' | 'reconnecting' | 'closed'>('connecting')
 const errorMessage = ref('')
 const retryingSourceIds = ref<Set<number>>(new Set())
-const expandedEpisodes = ref(new Set<number>())
-function toggleDetails(id: number, event: Event) {
-  const details = event.currentTarget as HTMLDetailsElement
-  if (details.open) expandedEpisodes.value.add(id)
-  else expandedEpisodes.value.delete(id)
+const detailsDialog = ref<HTMLDialogElement | null>(null)
+const detailsSourceId = ref<number | null>(null)
+const detailsSource = computed(() => snapshot.value?.sources.find(s => s.source_id === detailsSourceId.value))
+
+async function openDetails(source: RemakeProgressSource) {
+  detailsSourceId.value = source.source_id
+  await nextTick()
+  if (detailsSource.value?.task?.total_clips) detailsDialog.value?.showModal()
 }
+
+watch(() => detailsSource.value?.task?.total_clips, total => {
+  if (!total && detailsDialog.value?.open) detailsDialog.value.close()
+})
 let pageAlive = true
 let streamGeneration = 0
 let streamController: AbortController | null = null
@@ -257,7 +266,11 @@ onBeforeUnmount(() => {
               <div class="episode-copy">
                 <strong>{{ tr('第') }} {{ source.episode_number }} {{ tr('集') }}</strong>
                 <p>{{ source.original_filename }}</p>
-                <small v-if="source.task?.total_clips">{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:source.task.completed_clips || 0,p1:source.task.total_clips}) }}</small>
+                <div v-if="source.task?.total_clips" class="shot-summary">
+                  <small>{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:source.task.completed_clips || 0,p1:source.task.total_clips}) }}</small>
+                  <AppButton variant="ghost" size="xs" class="details-trigger" aria-haspopup="dialog"
+                    @click="openDetails(source)"><List :size="14" aria-hidden="true" />{{ tr('镜头明细') }}</AppButton>
+                </div>
                 <progress :value="source.task?.progress ?? (source.media_status === 'completed' ? 100 : 0)" max="100" :aria-label="tr('拆解进度')" />
               </div>
               <div class="episode-state">
@@ -274,10 +287,6 @@ onBeforeUnmount(() => {
               ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />{{ source.task?.retryable_clips ? tr('重试未完成片段（{p0}）', {p0:source.task.retryable_clips}) : tr('重试') }}</AppButton>
               <AppButton v-if="source.media_status === 'completed'" variant="ghost" size="sm"
                 @click="router.push({ name: 'short-drama-storyboard', params: { projectId }, query: { chapter: source.chapter_id } })">{{ tr('查看分镜') }}</AppButton>
-              <details v-if="source.task?.total_clips" class="shot-details" @toggle="toggleDetails(source.source_id, $event)">
-                <summary>{{ tr('镜头明细') }}</summary>
-                <ol v-if="expandedEpisodes.has(source.source_id)"><li v-for="i in source.task.total_clips" :key="i" :data-state="source.task.shot_states?.[i]">{{ tr('镜头 {p0}', {p0:i}) }} · {{ shotStatus(source, i) }}</li></ol>
-              </details>
               <p v-if="source.task?.error_message" class="episode-error">{{ source.task.error_message }}</p>
             </section>
           </div>
@@ -305,20 +314,51 @@ onBeforeUnmount(() => {
         <AppButton v-else type="button" variant="secondary" size="lg" @click="router.push('/projects')">{{ tr('返回项目列表') }}</AppButton>
       </footer>
     </div>
+    <dialog ref="detailsDialog" class="shot-dialog" aria-labelledby="shot-dialog-title" @close="detailsSourceId = null">
+      <template v-if="detailsSource?.task?.total_clips">
+        <header>
+          <div>
+            <h2 id="shot-dialog-title">{{ tr('第') }} {{ detailsSource.episode_number }} {{ tr('集') }} · {{ tr('镜头明细') }}</h2>
+            <p>{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:detailsSource.task.completed_clips ?? 0,p1:detailsSource.task.total_clips}) }}</p>
+          </div>
+          <AppButton variant="ghost" size="sm" icon-only autofocus :aria-label="tr('关闭')" @click="detailsDialog?.close()"><X :size="18" /></AppButton>
+        </header>
+        <ol class="shot-list" tabindex="0" :aria-label="tr('镜头明细')">
+          <li v-for="i in detailsSource.task.total_clips" :key="i"
+            :data-state="detailsSource.task.status === TaskStatusEnum.COMPLETED ? 'completed' : detailsSource.task.shot_states?.[i]">
+            <span>{{ tr('镜头 {p0}', {p0:i}) }}</span>
+            <strong>{{ shotStatus(detailsSource, i) }}</strong>
+          </li>
+        </ol>
+      </template>
+    </dialog>
   </main>
 </template>
 
 <style scoped>
 progress.progress-track,.episode-copy progress { display: block; width: 100%; accent-color: var(--app-accent); border: 0; }
 .episode-copy progress { height: 5px; margin-top: 5px; }
-.episode-counts,.shot-details { color: var(--app-text-secondary); font-size: 12px; }
-.shot-details { grid-column: 1 / -1; }
-.shot-details li { padding: 2px 5px; }
-.shot-details li[data-state="completed"] { color: var(--creation-success); }
-.shot-details li:is([data-state="failed"],[data-state="uncertain"]) { color: var(--creation-danger); }
-.shot-details summary { width: fit-content; cursor: pointer; }
-.shot-details summary:focus-visible { outline: 2px solid var(--app-accent); }
-.shot-details ol { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 6px; max-height: 210px; overflow: auto; padding: 0; list-style: none; }
+.episode-counts { color: var(--app-text-secondary); font-size: 12px; }
+.shot-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; }
+.shot-summary .details-trigger { color: var(--app-accent); }
+.shot-dialog {
+  box-sizing: border-box; width: min(560px, calc(100% - 28px)); max-height: 80vh; max-height: 80dvh;
+  margin: auto; padding: 0; border: 1px solid var(--app-border); border-radius: 16px;
+  color: var(--app-text); background: var(--app-surface); box-shadow: var(--app-shadow);
+}
+.shot-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.shot-dialog:modal, .shot-list { overscroll-behavior: contain; }
+.shot-dialog::backdrop { background: rgb(20 24 36 / 45%); overflow: hidden; overscroll-behavior: contain; }
+.shot-dialog header { display: flex; flex: none; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--app-border); }
+.shot-dialog h2 { margin: 0; font-size: 17px; }
+.shot-dialog p { margin: 4px 0 0; font-size: 12px; color: var(--app-text-secondary); }
+.shot-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%, 170px),1fr)); gap: 0 20px; overflow-y: auto; margin: 0; padding: 6px 20px 16px; list-style: none; }
+.shot-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--app-border); font-size: 13px; font-variant-numeric: tabular-nums; }
+.shot-list strong { color: var(--app-text-secondary); font-size: 12px; font-weight: 500; }
+.shot-list [data-state="completed"] strong { color: var(--creation-success); }
+.shot-list [data-state="running"] strong { color: var(--app-accent); }
+.shot-list :is([data-state="failed"],[data-state="uncertain"]) strong { color: var(--creation-danger); }
+.shot-list:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -3px; }
 
 .pipeline-list li.is-failed .stage-marker { color: var(--creation-danger); background: var(--app-surface); }
 .retry-error { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--app-border); border-radius: 8px; color: var(--creation-danger); background: var(--app-surface); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -335,7 +375,7 @@ progress.progress-track,.episode-copy progress { display: block; width: 100%; ac
 .connection-message { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 6px; margin: 0; color: var(--creation-warning); font-size: 9px; }.connection-message svg { animation: spin 1s linear infinite; }
 .progress-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(360px,.85fr); gap: 18px; }.pipeline-card, .episodes-card { padding: 22px; border: 1px solid var(--app-border); border-radius: 17px; background: var(--app-surface); box-shadow: var(--app-shadow); }.pipeline-card > header, .episodes-card > header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }.pipeline-card h2, .episodes-card h2 { margin: 3px 0 0; font-size: 15px; }.pipeline-card header > span { color: var(--app-text-secondary); font-size: 9px; }
 .pipeline-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.pipeline-list li { position: relative; display: grid; min-height: 61px; grid-template-columns: 28px minmax(0,1fr); gap: 10px; color: var(--app-text-secondary); }.pipeline-list li:not(:last-child)::after { position: absolute; top: 28px; bottom: 0; left: 13px; width: 1px; background: var(--app-border); content: ''; }.stage-marker { z-index: 1; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--app-text-secondary); background: var(--app-surface-muted); }.pipeline-list strong { display: block; padding-top: 2px; font-size: 11px; }.pipeline-list p { margin: 4px 0 0; font-size: 9px; line-height: 1.45; }.pipeline-list li.is-completed { color: var(--app-text-secondary); }.pipeline-list li.is-completed .stage-marker { color: var(--app-surface); background: var(--creation-success); }.pipeline-list li.is-completed:not(:last-child)::after { background: color-mix(in srgb, var(--creation-success) 50%, var(--app-surface)); }.pipeline-list li.is-active { color: var(--app-accent); }.pipeline-list li.is-active .stage-marker { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: 0 0 0 5px var(--app-accent-soft); }.pipeline-list li.is-active .stage-marker svg { animation: spin 1s linear infinite; }
-.episode-list { display: grid; max-height: 410px; gap: 9px; overflow: auto; }.episode-item { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface-muted); }.episode-item.is-failed { border-color: color-mix(in srgb, var(--creation-danger) 30%, var(--app-surface)); background: color-mix(in srgb, var(--creation-danger) 8%, var(--app-surface)); }.episode-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: var(--app-accent); background: var(--app-accent-soft); }.episode-copy { min-width: 0; }.episode-copy > strong { font-size: 10px; }.episode-copy > p { overflow: hidden; margin: 3px 0 7px; color: var(--app-text-secondary); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.episode-copy > div { height: 4px; overflow: hidden; border-radius: 999px; background: var(--app-fill-subtle); }.episode-copy > div span { display: block; height: 100%; border-radius: inherit; background: var(--app-accent); transition: width .4s ease; }.episode-state { display: grid; justify-items: end; gap: 3px; }.episode-state strong { color: var(--app-accent); font-size: 11px; }.episode-state span { color: var(--app-text-secondary); font-size: 8px; white-space: nowrap; }.episode-item > button { grid-column: 2 / -1; justify-self: end; }.episode-error { grid-column: 2 / -1; margin: 0; color: var(--creation-danger); font-size: 8px; line-height: 1.45; }
+.episode-list { display: grid; max-height: 410px; gap: 9px; overflow: auto; }.episode-item { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface-muted); }.episode-item.is-failed { border-color: color-mix(in srgb, var(--creation-danger) 30%, var(--app-surface)); background: color-mix(in srgb, var(--creation-danger) 8%, var(--app-surface)); }.episode-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: var(--app-accent); background: var(--app-accent-soft); }.episode-copy { min-width: 0; }.episode-copy > strong { font-size: 10px; }.episode-copy > p { overflow: hidden; margin: 3px 0 7px; color: var(--app-text-secondary); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.episode-state { display: grid; justify-items: end; gap: 3px; }.episode-state strong { color: var(--app-accent); font-size: 11px; }.episode-state span { color: var(--app-text-secondary); font-size: 8px; white-space: nowrap; }.episode-item > button { grid-column: 2 / -1; justify-self: end; }.episode-error { grid-column: 2 / -1; margin: 0; color: var(--creation-danger); font-size: 8px; line-height: 1.45; }
 .progress-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 20px; border: 1px solid var(--app-border); border-radius: 15px; background: var(--app-surface-raised); }.progress-footer p { display: grid; gap: 4px; margin: 0; }.progress-footer strong { font-size: 10px; }.progress-footer span { color: var(--app-text-secondary); font-size: 9px; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 50% { transform: scale(1.08); opacity: .72; } }
 @media (max-width: 800px) { .progress-grid { grid-template-columns: 1fr; }.progress-content { padding-top: 26px; }.progress-header { padding: 0 16px; } }
