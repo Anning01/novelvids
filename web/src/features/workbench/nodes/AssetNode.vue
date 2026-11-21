@@ -10,6 +10,7 @@ import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
 import { notice } from '@/shared/notice'
+import { imageReferenceCount } from '@/shared/assetImageDependencies'
 import { estimateAssetImageCost } from '@/shared/modelPricing'
 import AssetDefaultImage from '../components/AssetDefaultImage.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
@@ -56,7 +57,7 @@ const prompt = ref('')
 const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value, projectDefaults.value))
 const imageModels = computed(() => (props.data.imageModelOptions as ImageGenerationModel[] | undefined) || [])
 const imageModelOptions = computed(() => imageModels.value.map(model => ({ value: model.config_id, label: model.name || model.model })))
-const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) || null)
+const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) ?? imageModels.value[0] ?? null)
 const saving = ref(false)
 const changingMainImage = ref(false)
 const uploadingImage = ref(false)
@@ -88,21 +89,15 @@ watch(activeAsset, value => {
   description.value = value.description || ''
   prompt.value = value.base_traits || ''
   config.value = normalizeAssetConfig(value, projectDefaults.value)
-  if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
-    config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
-  }
 }, { immediate: true })
 watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (activeAsset.value.base_traits || '') }))
 
-watch(projectDefaults, value => {
-  config.value = normalizeAssetConfig(activeAsset.value, value)
-}, { deep: true })
-
-watch(imageModelOptions, options => {
-  if (!options.some(option => option.value === config.value.modelConfigId)) {
-    config.value.modelConfigId = options[0]?.value ?? null
+watch(() => projectDefaults.value?.aspectRatio, (aspectRatio, previous) => {
+  const oldDefaults = normalizeAssetConfig(activeAsset.value, { aspectRatio: previous })
+  if (config.value.aspectRatio === oldDefaults.aspectRatio) {
+    config.value.aspectRatio = normalizeAssetConfig(activeAsset.value, { aspectRatio }).aspectRatio
   }
-}, { immediate: true })
+})
 
 const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
@@ -263,7 +258,7 @@ const materialMentions = computed<MaterialMention[]>(() => {
 const personAsset = computed(() => assetType.value === AssetTypeEnum.PERSON)
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const generatorSupportsType = computed(() => ![AssetTypeEnum.PRODUCT, AssetTypeEnum.STYLE].includes(assetType.value))
-const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && config.value.modelConfigId !== null && !busy.value && !saving.value)
+const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && Boolean(selectedImageModel.value) && !busy.value && !saving.value)
 const assetTypeOptions = editableAssetTypeOptions
 const assetTypeValue = computed({
   get: () => imageMetadata.value.source === 'upload' && !assetTypeExplicit.value ? 'image' : String(assetType.value),
@@ -279,12 +274,20 @@ const assetTypeValue = computed({
   },
 })
 const imageParameterValue = computed<ImageGenerationParameters>({
-  get: () => ({
-    clarity: config.value.clarity,
-    aspectRatio: config.value.aspectRatio,
-    outputFormat: config.value.outputFormat,
-    generationCount: config.value.generationCount,
-  }),
+  get() {
+    const { clarity, aspectRatio, outputFormat, generationCount } = config.value
+    const caps = selectedImageModel.value?.capabilities
+    if (!caps) return { clarity, aspectRatio, outputFormat, generationCount }
+    const format = caps.output_formats.includes(outputFormat) ? outputFormat : caps.default_output_format
+    const clarities = caps.clarities_by_format?.[format] ?? caps.clarities
+    const defaultClarity = clarities.includes(caps.default_clarity) ? caps.default_clarity : clarities[0]!
+    return {
+      clarity: clarities.includes(clarity) ? clarity : defaultClarity,
+      aspectRatio: caps.aspect_ratios.includes(aspectRatio) ? aspectRatio : caps.default_aspect_ratio,
+      outputFormat: format,
+      generationCount: caps.generation_counts.includes(generationCount) ? generationCount : caps.default_generation_count,
+    }
+  },
   set: value => {
     config.value = {
       ...config.value,
@@ -300,27 +303,19 @@ const imageParameterValue = computed<ImageGenerationParameters>({
 })
 
 function normalizedDraftConfig(): AssetWorkbenchConfig {
+  const parameters = imageParameterValue.value
   return {
     ...config.value,
-    resolution: config.value.clarity,
-    size: config.value.aspectRatio,
-    format: config.value.outputFormat.toUpperCase(),
+    ...parameters,
+    generationCount: parameters.generationCount as AssetWorkbenchConfig['generationCount'],
+    modelConfigId: selectedImageModel.value?.config_id ?? null,
+    resolution: parameters.clarity,
+    size: parameters.aspectRatio,
+    format: parameters.outputFormat.toUpperCase(),
     digitalHumanAssetId: personAsset.value ? config.value.digitalHumanAssetId : '',
     digitalHumanPreviewUrl: personAsset.value ? config.value.digitalHumanPreviewUrl : '',
   }
 }
-
-watch(selectedImageModel, model => {
-  if (!model) return
-  const current = imageParameterValue.value
-  const capabilities = model.capabilities
-  imageParameterValue.value = {
-    clarity: capabilities.clarities.includes(current.clarity) ? current.clarity : capabilities.default_clarity,
-    aspectRatio: capabilities.aspect_ratios.includes(current.aspectRatio) ? current.aspectRatio : capabilities.default_aspect_ratio,
-    outputFormat: capabilities.output_formats.includes(current.outputFormat) ? current.outputFormat : capabilities.default_output_format,
-    generationCount: capabilities.generation_counts.includes(current.generationCount) ? current.generationCount : capabilities.default_generation_count,
-  }
-}, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -390,6 +385,13 @@ async function focusVariant(value: string) {
   else store.selectNode(key)
 }
 
+const generationReferenceCount = computed(() => {
+  const saved = activeAsset.value.metadata?.generation_reference_images
+  const connected = store.assetGenerationReferenceImages(asset.value.id, selectedVariantId.value)
+  const references = [...(Array.isArray(saved) ? saved.filter((url): url is string => typeof url === 'string') : []), ...connected]
+  return imageReferenceCount(asset.value, selectedVariant.value, store.assets, references)
+})
+
 registerWorkbenchPromptAction(props.id, {
   id: 'asset-image-generation',
   get label() { return tr('生成资产图片') },
@@ -397,7 +399,7 @@ registerWorkbenchPromptAction(props.id, {
   enabled: canGenerate,
   busy,
   cost: computed(() => estimateAssetImageCost(
-    selectedImageModel.value, imageParameterValue.value, materialMentions.value.filter(item => item.hasImage).length,
+    selectedImageModel.value, imageParameterValue.value, generationReferenceCount.value,
   )),
   costPricing: computed(() => selectedImageModel.value?.pricing),
   controls: [
@@ -408,7 +410,7 @@ registerWorkbenchPromptAction(props.id, {
         options: imageModelOptions.value,
         get label() { return tr('图片模型') },
       })),
-      modelValue: computed(() => config.value.modelConfigId),
+      modelValue: computed(() => selectedImageModel.value?.config_id ?? null),
       updateModelValue(value) {
         const modelConfigId = Number(value)
         if (Number.isFinite(modelConfigId)) config.value.modelConfigId = modelConfigId
@@ -454,7 +456,10 @@ registerWorkbenchNodeRun(props.id, { enabled: canGenerate, run: generate })
 
 function handlePromptFocusOut(event: FocusEvent) {
   const panel = event.currentTarget as HTMLElement | null
-  if (event.relatedTarget instanceof Node && panel?.contains(event.relatedTarget)) return
+  const next = event.relatedTarget
+  if (next instanceof Node && panel?.contains(next)) return
+  const popup = next instanceof Element ? next.closest('.image-parameters__panel') : null
+  if (popup && panel?.querySelector('[aria-controls="' + CSS.escape(popup.id) + '"]')) return
   void save()
 }
 

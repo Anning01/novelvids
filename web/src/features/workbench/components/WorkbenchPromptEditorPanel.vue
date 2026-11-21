@@ -258,8 +258,9 @@ onBeforeUnmount(() => {
           >
             <LoaderCircle v-if="actionBusy(action)" class="workbench-prompt-panel__action-spinner" :size="15" aria-hidden="true" />
             <Play v-else :size="14" aria-hidden="true" />
-            <span>{{ actionBusy(action) ? (action.busyLabel || tr('处理中')) : action.label }}</span>
-            <BillingPriceTag v-if="!actionBusy(action)" :compact="config.nodeKind === 'shot'" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
+            <span class="workbench-prompt-panel__full-run-label">{{ actionBusy(action) ? (action.busyLabel || tr('处理中')) : action.label }}</span>
+            <span class="workbench-prompt-panel__short-run-label" aria-hidden="true">{{ actionBusy(action) ? tr('处理中') : tr('生成') }}</span>
+            <BillingPriceTag v-if="!actionBusy(action)" :compact="config.nodeKind === 'shot'" :show-estimate-state="action.id === 'asset-image-generation'" :cost="actionCost(action)" :pricing="actionCostPricing(action)" />
             <i v-if="actionProgress(action) !== null" aria-hidden="true">
               <b :style="{ width: `${actionProgress(action)}%` }" />
             </i>

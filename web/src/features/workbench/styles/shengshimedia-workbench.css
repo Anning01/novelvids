@@ -997,43 +997,49 @@
     width: 100%;
   }
 }
-/* Keep asset controls readable as the anchored panel narrows, even on a wide screen. */
+/* Keep the canvas tools on a single baseline and give the remaining space to the model. */
 .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer {
   flex: none;
-  flex-flow: row wrap;
-  justify-content: flex-start;
+  flex-flow: row nowrap;
   align-items: center;
-  gap: 6px 8px;
+  justify-content: flex-start;
+  gap: 6px;
 }
-.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start {
-  display: contents;
-}
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start { display: contents; }
 .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start > .media-generation-model-selector {
-  flex: 1 1 12rem;
+  flex: 1 1 11rem;
+  min-width: 0;
   width: auto;
-  min-width: min(11rem, 100%);
-  max-width: 22rem;
+  max-width: 14rem;
 }
 .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-start > :is(.image-parameters, .digital-human-generation-control) {
-  flex: 0 0 auto;
-  width: max-content;
-  min-width: 0;
-  max-width: 100%;
+  flex: none; width: max-content; min-width: 0;
 }
 .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-actions {
-  flex: 0 1 auto;
-  width: auto;
-  max-width: 100%;
-  margin-inline-start: auto;
+  flex: none; width: auto; margin-inline-start: auto;
 }
 .workbench-prompt-panel__footer-start .digital-human-generation-control__clear { min-width: 0; }
-@container (max-width: 27rem) {
-  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__footer-actions {
-    flex: 1 0 100%;
-  }
-  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__primary-action {
-    width: 100%;
-  }
+.workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__primary-action { padding-inline: 9px; min-width: 0; }
+.workbench-prompt-panel__short-run-label { display: none; }
+
+@container (max-width: 40rem) {
+  .workbench-prompt-panel:not(.is-shot-prompt) .billing-price-tag__original,
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__count,
+  .workbench-prompt-panel:not(.is-shot-prompt) .digital-human-generation-control__trigger > :is(span, svg:last-child) { display: none; }
+  .workbench-prompt-panel:not(.is-shot-prompt) .digital-human-generation-control__trigger { width: 32px; min-width: 32px; padding: 0; justify-content: center; }
+}
+@container (max-width: 30rem) {
+  .workbench-prompt-panel:not(.is-shot-prompt) .image-parameters__trigger > :is(span, svg:last-child),
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__full-run-label { display: none; }
+  .workbench-prompt-panel:not(.is-shot-prompt) .image-parameters__trigger { width: auto; min-width: 0; padding-inline: 6px; gap: 4px; justify-content: center; }
+  .workbench-prompt-panel:not(.is-shot-prompt) .image-parameters__trigger::after { content: attr(data-ratio); white-space: nowrap; }
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__short-run-label { display: inline; }
+}
+
+@container (max-width: 23rem) {
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__primary-action > svg,
+  .workbench-prompt-panel:not(.is-shot-prompt) .billing-price-tag__badge { display: none; }
+  .workbench-prompt-panel:not(.is-shot-prompt) .workbench-prompt-panel__primary-action { gap: 4px; padding-inline: 6px; }
 }
 /* Shot editor controls share the available line and wrap in a narrow panel. */
 .workbench-prompt-panel.is-shot-prompt .workbench-prompt-panel__footer {

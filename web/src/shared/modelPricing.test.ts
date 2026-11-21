@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelPricing } from '@/types'
-import { defaultPricing, estimateImageCost, estimateVideoCost, pricingDiscount, pricingDiscountDescription, pricingTiers } from './modelPricing'
+import type { ImageGenerationModel, ModelPricing } from '@/types'
+import { defaultPricing, estimateAssetImageCost, estimateImageCost, estimateVideoCost, pricingDiscount, pricingDiscountDescription, pricingTiers } from './modelPricing'
 
 describe('modelPricing', () => {
   it('文本模型默认定价结构', () => {
@@ -53,4 +53,20 @@ it('quotes single-image pixel tiers and charges reference images per request', (
     prices: { low: 0.13, high_capped: 0.23 }, input_image: { first_free: 0, price_per_image: 0.05 } }
   expect(estimateImageCost(pricing, '2K', 1, 2, 2610000)).toBeCloseTo(0.23)
   expect(estimateImageCost(pricing, '2K', 1, 2, 2611000)).toBeCloseTo(0.33)
+})
+
+it('distinguishes a configured zero-cost asset tier from missing or incomplete pricing', () => {
+  const params = { clarity: '2K', aspectRatio: '1:1', generationCount: 1 }
+  const model: ImageGenerationModel = {
+    config_id: 1, name: '测试模型', model: 'test', model_type: 'gpt_image_2', concurrency: 1,
+    capabilities: {
+      aspect_ratios: ['1:1'], clarities: ['2K'], output_formats: ['png'], generation_counts: [1],
+      default_aspect_ratio: '1:1', default_clarity: '2K', default_output_format: 'png', default_generation_count: 1,
+    },
+    pricing: { type: 'image', currency: 'CNY', prices: { '2K': 0 } },
+  }
+  expect(estimateAssetImageCost(model, params, 0)).toBe(0)
+  expect(estimateAssetImageCost(null, params, 0)).toBeNaN()
+  expect(estimateAssetImageCost(model, { ...params, clarity: '4K' }, 0)).toBeNaN()
+  expect(estimateAssetImageCost({ ...model, pricing: {type: 'image', currency: 'CNY', billing_unit: 'pixel_tier', prices: {low: .13}} }, params, 0)).toBeNaN()
 })

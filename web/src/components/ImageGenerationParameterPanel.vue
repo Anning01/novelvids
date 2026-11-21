@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '@/i18n'
 
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { ImageGenerationCapabilities } from '@/types'
 import { claimExclusivePopover } from '@/shared/exclusivePopover'
@@ -27,6 +27,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: ImageGenerationParameters] }>()
 const root = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
+const panelId = useId()
 const open = ref(false)
 const opensUp = ref(true)
 const placement = ref({ top: 0, left: 0, width: 520 })
@@ -145,13 +146,13 @@ onUnmounted(() => {
 
 <template>
   <div ref="root" class="image-parameters" :class="{ 'is-open': open, 'is-compact': compact }">
-    <button type="button" class="image-parameters__trigger" :disabled="disabled || !capabilities" :aria-label="tr('设置图片生成参数')" aria-haspopup="dialog" :aria-expanded="open" @click="toggle">
+    <button type="button" class="image-parameters__trigger" :disabled="disabled || !capabilities" :title="summary" :data-ratio="modelValue.aspectRatio" :aria-controls="open ? panelId : undefined" :aria-label="tr('设置图片生成参数')" aria-haspopup="dialog" :aria-expanded="open" @click="toggle">
       <i class="image-parameters__trigger-ratio" :style="ratioStyle(modelValue.aspectRatio, 20, 15, 6)" data-ratio-icon aria-hidden="true" />
       <span>{{ summary }}</span>
       <ChevronDown :size="15" aria-hidden="true" />
     </button>
     <Teleport to="body">
-      <section v-if="open && capabilities" ref="panel" class="image-parameters__panel" :class="{ 'is-up': opensUp }" :style="panelStyle" role="dialog" :aria-label="tr('图片生成参数')">
+      <section v-if="open && capabilities" ref="panel" :id="panelId" @mousedown.prevent class="image-parameters__panel" :class="{ 'is-up': opensUp }" :style="panelStyle" role="dialog" :aria-label="tr('图片生成参数')">
         <fieldset>
           <legend>{{ tr('清晰度') }}</legend>
           <div class="image-parameters__segments">
