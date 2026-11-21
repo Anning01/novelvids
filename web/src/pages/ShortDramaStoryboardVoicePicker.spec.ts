@@ -277,6 +277,26 @@ describe('分镜角色音色选择', () => {
     wrapper.unmount()
   })
 
+  it('links each character portrait to its own replacement control and keeps voice and menu actions per form', async () => {
+    vi.mocked(api.workbenchBootstrap).mockResolvedValue(bootstrap([null, variant.id]) as never)
+    const wrapper = await mountPage()
+    try {
+      await flushPromises()
+      const cards = wrapper.findAll('.selected-assets.is-person-assets article')
+      expect(cards).toHaveLength(2)
+      const ids = new Set<string>()
+      for (const card of cards) {
+        const replace = card.get('.asset-name-button')
+        const portrait = card.get('label.asset-thumb')
+        expect(portrait.attributes('for')).toBe(replace.attributes('id'))
+        ids.add(replace.attributes('id')!)
+        expect(card.get('.asset-voice-button').attributes('aria-label')).toContain(replace.text())
+        expect(card.get('.scene-asset-actions__trigger').attributes('aria-label')).toContain(replace.text())
+      }
+      expect(ids.size).toBe(2)
+    } finally { wrapper.unmount() }
+  })
+
   it('分镜侧栏使用缩略图而不是直接加载资产原图', async () => {
     vi.mocked(api.workbenchBootstrap).mockResolvedValue(bootstrap(null) as never)
     const wrapper = await mountPage()

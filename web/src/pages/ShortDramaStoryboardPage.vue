@@ -2712,11 +2712,13 @@ onBeforeUnmount(() => {
                     }"
                   >
                     <article v-for="asset in selectedAssetsFor(scene, group)" :key="assetActionKey(scene, asset)" class="selected-asset-row">
-                      <span
+                      <component
+                        :is="group.type === AssetTypeEnum.PERSON ? 'label' : 'span'"
+                        :for="group.type === AssetTypeEnum.PERSON ? assetRowPickerAnchorId(scene, asset) : undefined"
                         class="asset-thumb"
                         :class="{ 'is-reference-highlighted': highlightedReferenceKey === `asset:${scene.id}:${asset.id}` }"
                         :data-reference-asset-id="asset.id"
-                      ><component :is="group.icon" :size="16" /><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" @error="fallbackImage($event, selectedAssetImage(scene, asset))" /></span>
+                      ><component :is="group.icon" :size="16" /><img v-if="selectedAssetThumbnail(scene, asset)" :src="selectedAssetThumbnail(scene, asset)" :alt="selectedAssetLabel(scene, asset)" loading="lazy" decoding="async" @error="fallbackImage($event, selectedAssetImage(scene, asset))" /></component>
                       <AppButton
                         :id="assetRowPickerAnchorId(scene, asset)"
                         variant="soft"
@@ -3027,7 +3029,6 @@ onBeforeUnmount(() => {
 .shot-assets > header button { width: 26px; min-height: 26px; padding: 0; }
 .selected-assets { display: grid; gap: 7px; }
 .selected-asset-row { display: grid; min-width: 0; grid-template-columns: 38px minmax(0,1fr) 30px; align-items: center; gap: 6px; }
-.selected-assets.is-person-assets .selected-asset-row { grid-template-columns: 38px minmax(0,1fr) 90px 30px; }
 .selected-asset-row > button { min-width: 0; justify-content: flex-start; }
 .selected-asset-row .asset-name-button { height: auto; padding: 7px 9px; color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border); }
 .selected-asset-row .asset-name-button span { overflow-wrap: anywhere; white-space: normal; line-height: 1.4; text-align: left; }
@@ -3041,6 +3042,76 @@ onBeforeUnmount(() => {
 .asset-thumb { position: relative; display: grid; width: 38px; height: 38px; flex: 0 0 38px; overflow: hidden; place-items: center; border-radius: 7px; color: #959baa; background: #e9ebf1; transition: box-shadow .18s ease, transform .18s ease; }
 .asset-thumb.is-reference-highlighted { box-shadow: 0 0 0 3px rgb(255 122 140 / 42%), 0 6px 18px rgb(120 35 52 / 18%); transform: scale(1.04); }
 .asset-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.shot-assets:has(.is-person-assets) > header { color: var(--app-text-secondary); font-size: 11px; }
+.selected-assets.is-person-assets {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 5.5rem), 1fr));
+  gap: 12px 8px;
+}
+.is-person-assets .selected-asset-row {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-rows: auto 1fr auto;
+  gap: 2px 0;
+  align-items: start;
+}
+.is-person-assets .asset-thumb {
+  grid-area: 1 / 1 / 2 / -1;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 8 / 5;
+  cursor: pointer;
+  color: var(--app-text-muted);
+  background: var(--app-surface-muted);
+}
+.is-person-assets .asset-thumb img { object-fit: contain; }
+.is-person-assets .selected-asset-row .asset-name-button,
+.is-person-assets .selected-asset-row .asset-voice-button {
+  min-height: 24px;
+  justify-content: center;
+  padding: 2px 3px;
+  background: transparent;
+  box-shadow: none;
+}
+.selected-assets.is-person-assets .selected-asset-row .asset-name-button {
+  color: var(--app-text);
+  font-size: 12px;
+  grid-area: 2 / 1 / 3 / -1;
+  margin-inline: 0 24px;
+}
+.is-person-assets .selected-asset-row .asset-name-button span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  text-align: center;
+}
+.selected-assets.is-person-assets .selected-asset-row .asset-voice-button {
+  font-size: 10px;
+  grid-area: 3 / 1 / 4 / -1;
+  gap: 3px;
+  color: var(--app-text-secondary);
+}
+.is-person-assets .asset-voice-button svg { flex: none; }
+.selected-assets.is-person-assets .selected-asset-row :is(.asset-name-button,.asset-voice-button):is(:hover:not(:disabled),.is-active) {
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
+}
+.is-person-assets .selected-asset-row:has(.asset-name-button:focus-visible) .asset-thumb {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+.is-person-assets .scene-asset-actions {
+  grid-area: 2 / 2 / 3 / 3;
+  width: 24px;
+  height: 24px;
+}
+.is-person-assets :deep(.scene-asset-actions__trigger) {
+  width: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  height: 24px;
+}
+.is-person-assets .selected-asset-row:has(.scene-asset-actions__menu) { z-index: 1; }
 .shot-assets > p { display: grid; min-height: 52px; margin: 0; place-items: center; border-radius: 9px; color: #a1a6b3; background: #f7f8fb; font-size: 9px; }
 .asset-picker { display: grid; max-height: 180px; gap: 4px; overflow-y: auto; padding: 6px; border-radius: 10px; background: #f7f8fb; }
 .asset-picker button { width: 100%; justify-content: flex-start; color: #646a79; }
