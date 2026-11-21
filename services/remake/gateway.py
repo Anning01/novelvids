@@ -163,7 +163,9 @@ class RemakeVideoAnalysisGateway:
                         response_schema=RemakeContinuityVerdict.model_json_schema(), context=facts)
                 return RemakeContinuityVerdict.model_validate({k: kept[k] for k in ("consistent", "reason")}).consistent
 
-            result = await confirmed_blocks(len(paths), block_size, capacity=self.config.concurrency,
+            execution = current_execution.get()
+            shared_window = execution and execution.params.get("remake_context_version", 0) >= 2
+            result = await confirmed_blocks(len(paths), block_size, capacity=None if shared_window else self.config.concurrency,
                 language=continuity_language, confirmed=dict(saved), drafts=dict(draft_results or {}),
                 run=generate, promote=promote, report=on_completed, audit=audit)
             return [{**value, "shot_index": i, "file": paths[i - 1].name} for i, value in enumerate(result, 1)]
@@ -197,6 +199,34 @@ class RemakeVideoAnalysisGateway:
         include_segment_metadata: bool = True,
         draft: bool = False,
     ) -> dict[str, Any]:
+        from contextlib import nullcontext
+        from services.creation_agent.skill_execution import current_execution
+        from services.remake.analysis_capacity import provider_pressure, window_for
+        execution = current_execution.get()
+        gate = nullcontext()
+        window = None
+        if execution and getattr(execution, "params", {}).get("remake_context_version", 0) >= 2:
+            from models.agent_operation import AgentOperation
+            model_key = getattr(self.config, "id", None) or self.config.model
+            window = window_for(model_key)
+            segment = f"draft-{index}" if draft else index
+
+            async def announce(state):
+                await AgentOperation.update_or_create(task_id=execution.params["task_id"],
+                    key=f"capacity:remake:{segment}", defaults={"state": state})
+
+            gate = window.admit(max(1, int(self.config.concurrency or 1)), draft=draft,
+                                notify=announce if schema_name == "professional_video_prompt_material" else None)
+        async with gate:
+            try:
+                return await self._request_one(index=index, path=path, prompt=prompt, schema_name=schema_name,
+                    response_schema=response_schema, context=context, include_segment_metadata=include_segment_metadata, draft=draft)
+            except RemakeVideoAnalysisError as exc:
+                if window and provider_pressure(exc):
+                    await window.slow_down(15)
+                raise
+
+    async def _request_one(self, *, index, path, prompt, schema_name, response_schema, context, include_segment_metadata, draft):
         started_at = self.clock()
         from prompts.remake import render_remake_request
         from utils.prompt_language import task_language
@@ -209,11 +239,12 @@ class RemakeVideoAnalysisGateway:
             audit = schema_name in {'shot_continuity_check', 'shot_speech_evidence'}
             schema = {"shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
-            video_bytes, mime = await asyncio.to_thread(self._read_video, path)
             if getattr(self.config, "api_protocol", None) == "novelvids":
-                url = await self._platform_video_url(video_bytes, mime, execution.params.get("team_id"))
+                mime = self._video_mime(path)
+                url = await self._platform_video_url(path, execution.params.get("team_id"))
                 video_content = VideoUrl(url=url, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
             else:
+                video_bytes, mime = await asyncio.to_thread(self._read_video, path)
                 video_content = BinaryContent(data=video_bytes, media_type=mime, vendor_metadata={"fps": VIDEO_INPUT_FPS})
             from services.model_concurrency import capacity_observer
             from models.agent_operation import AgentOperation
@@ -271,8 +302,8 @@ class RemakeVideoAnalysisGateway:
             self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='completed', draft=draft)
             return data
         if getattr(self.config, "api_protocol", None) == "novelvids":
-            data, mime = await asyncio.to_thread(self._read_video, path)
-            url = await self._platform_video_url(data, mime, None)
+            self._video_mime(path)
+            url = await self._platform_video_url(path, None)
             video_input = {"type": "video_url", "video_url": {"url": url, "fps": VIDEO_INPUT_FPS}}
         else:
             video_input = await asyncio.to_thread(self._build_video_input, path)
@@ -377,7 +408,7 @@ class RemakeVideoAnalysisGateway:
             status,
         )
 
-    def _read_video(self, path: Path) -> tuple[bytes, str]:
+    def _video_mime(self, path: Path) -> str:
         if not path.is_file():
             raise RemakeVideoAnalysisError(
                 localized_message('模型输入视频不存在'),
@@ -389,16 +420,18 @@ class RemakeVideoAnalysisGateway:
                 localized_message('模型输入视频超过 {p1} 字节上限', p1=f'{MAX_MODEL_VIDEO_BYTES}'),
                 error_code="REMAKE_ANALYSIS_MEDIA_TOO_LARGE",
             )
-        mime = "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
+        return "video/quicktime" if path.suffix.lower() == ".mov" else "video/mp4"
+
+    def _read_video(self, path: Path) -> tuple[bytes, str]:
+        mime = self._video_mime(path)
         return path.read_bytes(), mime
 
-    async def _platform_video_url(self, data: bytes, mime: str, team_id: int | None) -> str:
+    async def _platform_video_url(self, path: Path, team_id: int | None) -> str:
         from services.oss.studio_client import studio_client
         client = studio_client(team_id, base_url=self.config.base_url, api_key=self.config.api_key)
         if client is None:
             raise RemakeVideoAnalysisError(localized_message("本地猫影的平台密钥尚未配置"))
-        encoded = await asyncio.to_thread(base64.b64encode, data)
-        return await client.resolve(f"data:{mime};base64,{encoded.decode('ascii')}")
+        return await client.resolve(path)
 
     def _build_video_input(self, path: Path) -> dict[str, Any]:
         data, mime = self._read_video(path)

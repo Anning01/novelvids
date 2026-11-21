@@ -51,8 +51,12 @@ async def _rate_limited_outcome(task, receipt, child):
         return None
     segment = number[1]
     message = task.error_message or ""
-    denied = (f"第 {segment} 个视频片段分析失败：System protection triggered by request burst." in message
-              or re.search(rf"Video segment {segment}[^:]*: System protection triggered by request burst\.", message, re.I))
+    from services.remake.analysis_capacity import provider_pressure
+    # Require this exact segment's terminal error, not a coincidental failure elsewhere in the batch.
+    denied = provider_pressure(message) and (
+        f"第 {segment} 个视频片段分析失败：" in message
+        or re.search(rf"Video segment {segment}\b[^:]*:", message, re.I)
+    )
     if not denied:
         return None
     record = await AgentMessage.filter(task=child, role="assistant").only("usage").first()
@@ -187,11 +191,11 @@ async def shot_progress(task, source, current_rows=None):
         suffix = key.removeprefix(prefix + "draft-")
         if key.startswith(prefix + "draft-") and suffix.isdigit():
             states.setdefault(int(suffix), "boundary_pending" if state == "completed" else state)
-    if task.request_params.get("remake_context_version") and "running" in states.values():
+    if task.request_params.get("remake_context_version"):
         waiting = [key for key, state in current_rows if key.startswith("capacity:remake:") and state == "waiting_capacity"]
         for key in waiting:
             index = key.rsplit(":", 1)[1].removeprefix("draft-")
-            if index.isdigit() and states.get(int(index)) == "running":
+            if index.isdigit() and states.get(int(index)) in (None, "running", "pending"):
                 states[int(index)] = "waiting_capacity"
     for index in indices:
         states[index] = 'completed'

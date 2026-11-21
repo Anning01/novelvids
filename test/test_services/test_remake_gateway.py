@@ -457,6 +457,7 @@ async def test_studio_remake_sends_media_link_with_sampling_rate(tmp_path, monke
         await gateway.analyze_one(**args)
     finally:
         current_execution.reset(token)
+    upload.assert_awaited_once_with(video)  # The studio uploader streams from disk.
     item = execution.generate.call_args.kwargs['media'][0]
     expected = {'type':'video_url', 'video_url':{'url':url,'fps':1.0}}
     assert await UsagePreservingChatModel._map_video_url_item(None, item) == expected
@@ -540,3 +541,51 @@ async def test_continuity_rules_are_instructions_but_prior_shot_and_asset_names_
         assert response['consistent'] and execution.generate.await_args.args[0] == 'structured'
     finally:
         current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_default_new_project_runs_long_episode_in_parallel_and_checks_its_seams(tmp_path,monkeypatch):
+    from config import settings
+    from models.ai_task import AiTask
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.analysis_capacity import window_for
+    cfg = _config(id=997,concurrency=6)
+    gateway = RemakeVideoAnalysisGateway(cfg,client=_Client([]))
+    task = await AiTask.create(task_type=6,status=2)
+    execution = SimpleNamespace(params={'task_id':str(task.id),'remake_context_version':2})
+    active = peak = 0
+    observed = []
+    checked = asyncio.Event()
+    async def request(**call):
+        nonlocal active,peak
+        active += 1
+        peak = max(peak,active)
+        try:
+            i,stage = call['index'],call['schema_name']
+            if i == 35 and call['draft']:
+                await asyncio.wait_for(checked.wait(), 2)
+            await asyncio.sleep(.003)
+            observed.append((stage,i))
+            if stage == 'shot_continuity_check':
+                assert call['context']['preceding']['sequence'] == i-1
+                checked.set()
+                return {'consistent':True,'reason':'Continuous source action.'}
+            return {'actions':[str(i)]}
+        finally:
+            active -= 1
+    monkeypatch.setattr(gateway,'_request_one',request)
+    token = current_execution.set(execution)
+    try:
+        # Use the shipped default; administrators may explicitly opt out in their deployment.
+        import os
+        assert settings.REMAKE_SHOT_BLOCK_SIZE == max(0, int(os.getenv('REMAKE_SHOT_BLOCK_SIZE', '5')))
+        monkeypatch.setattr(settings, 'REMAKE_SHOT_BLOCK_SIZE', 5)
+        rows = await gateway.analyze_many([tmp_path/f'{i}.mp4' for i in range(35)],
+            continuity_language='zh',block_size=settings.REMAKE_SHOT_BLOCK_SIZE,context_builder=lambda _: {},
+            prompt='',schema_name='professional_video_prompt_material',response_schema={})
+    finally:
+        current_execution.reset(token)
+    assert [r['shot_index'] for r in rows] == list(range(1,36))
+    assert 2 < peak <= cfg.concurrency
+    assert [i for stage,i in observed if stage=='shot_continuity_check'] == [6,11,16,21,26,31]
+    assert len(observed) == 41 and window_for(997).active == 0

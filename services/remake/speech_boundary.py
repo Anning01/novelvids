@@ -1,4 +1,5 @@
 """Check transcribed dialogue at physical cuts. Never infer an omission from text similarity alone."""
+import asyncio
 import re
 import unicodedata
 from copy import deepcopy
@@ -69,19 +70,38 @@ async def review_speech(shots, paths, gateway, saved, language):
     from prompts.remake import speech_boundary_instruction
     from schemas.remake import RemakeSpeechEvidence
     corrected = deepcopy(shots)
-    decisions = []
-    for i in range(1, len(corrected)):
-        previous, current = corrected[i - 1], corrected[i]
-        for field, last, first in list(repeated_lines(previous, current)):
-            observations = []
-            for position, line in ((i-1,last),(i,first)):
+    boundaries = []
+    requests = {}
+    for i in range(1, len(shots)):
+        for field, last, first in repeated_lines(shots[i-1], shots[i]):
+            keys = []
+            for position, line in ((i-1, last), (i, first)):
                 key = f'{position+1}-{field}-' + sha256(line.encode()).hexdigest()[:16]
-                stored = saved.get(f'model:structured:RemakeSpeechEvidence:{key}')
-                if stored is None:
-                    stored = await gateway.analyze_one(index=position+1, path=paths[position], schema_name='shot_speech_evidence',
-                        prompt=speech_boundary_instruction(language), response_schema=RemakeSpeechEvidence.model_json_schema(),
-                        context={'segment':key,'shot_number':position+1,'line_to_locate':line}, include_segment_metadata=False)
-                observations.append(RemakeSpeechEvidence.model_validate(stored))
-            decision = apply_speech_evidence(previous,current,field,*observations)
-            decisions.append({'previous':i, 'current':i+1, 'field':field, 'decision':decision})
+                requests[key] = (position, line)
+                keys.append(key)
+            boundaries.append((i, field, last, first, keys))
+
+    async def observe(key):
+        position, line = requests[key]
+        stored = saved.get(f'model:structured:RemakeSpeechEvidence:{key}')
+        if stored is None:
+            stored = await gateway.analyze_one(index=position+1, path=paths[position], schema_name='shot_speech_evidence',
+                prompt=speech_boundary_instruction(language), response_schema=RemakeSpeechEvidence.model_json_schema(),
+                context={'segment':key,'shot_number':position+1,'line_to_locate':line}, include_segment_metadata=False)
+        return RemakeSpeechEvidence.model_validate(stored)
+
+    # Each observation hears one original clip. Independent checks share the same model admission window.
+    values = await asyncio.gather(*(observe(key) for key in requests), return_exceptions=True)
+    for value in values:
+        if isinstance(value, BaseException):
+            raise value
+    evidence = dict(zip(requests, values, strict=True))
+    decisions = []
+    for i, field, last, first, keys in boundaries:
+        previous, current = corrected[i-1], corrected[i]
+        if (field, last, first) in repeated_lines(previous, current):
+            decision = apply_speech_evidence(previous, current, field, *(evidence[key] for key in keys))
+        else:
+            decision = 'resolved_by_adjacent_cut'
+        decisions.append({'previous':i, 'current':i+1, 'field':field, 'decision':decision})
     return corrected, decisions

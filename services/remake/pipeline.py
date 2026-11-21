@@ -230,9 +230,7 @@ class RemakeDecompositionPipeline:
                                           **({'source_interval': ranges[scene_paths[index - 1].name]}
                                              if scene_paths[index - 1].name in ranges else {})},
             **({'continuity_language': language,
-                'block_size': execution.params.get('remake_block_size', 0) if execution and
-                    (model_config.concurrency > execution.params.get('remake_episode_count', 1)
-                     or any(k.startswith('model:remake:RemakeShot:draft-') for k in saved)) else 0,
+                'block_size': execution.params.get('remake_block_size', 0) if execution else 0,
                 'audit_results': {i: saved[f'model:structured:RemakeContinuityVerdict:{i}'] for i in range(1, len(scene_paths) + 1)
                                  if f'model:structured:RemakeContinuityVerdict:{i}' in saved},
                 'draft_results': {i: saved[f'model:remake:RemakeShot:draft-{i}'] for i in range(1, len(scene_paths) + 1)

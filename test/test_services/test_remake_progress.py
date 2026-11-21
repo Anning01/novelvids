@@ -241,6 +241,7 @@ async def test_continuity_retry_does_not_resubmit_unknown_paid_result():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_message,allowed", [
     ("System protection triggered by request burst. Please slow down traffic growth and increase requests gradually before retrying.", True),
+    ("The service is currently unable to handle additional requests due to server overload. Please retry later.", True),
     ("Connection dropped while reading response", False),
 ])
 async def test_retry_reconciles_terminal_provider_limit_but_not_ambiguous_network_loss(provider_message, allowed):

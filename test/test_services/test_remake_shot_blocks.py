@@ -72,3 +72,43 @@ async def test_accepted_boundary_keeps_original_draft_and_avoids_cascading_paid_
     values = await confirmed_blocks(12, 4, capacity=3, language='zh', confirmed={}, drafts={},
                                    run=run, promote=keep, report=None, audit=audit)
     assert len(values) == 12 and audits == [5,9] and rewrites == [1,2,3,4]
+
+
+@pytest.mark.asyncio
+async def test_first_seam_is_checked_while_a_later_block_is_still_generating():
+    reached_seam = asyncio.Event()
+    events = []
+    async def run(i, previous, draft):
+        if i == 9:
+            await asyncio.wait_for(reached_seam.wait(), 2)
+        await asyncio.sleep(0)
+        events.append(('draft' if draft else 'final', i))
+        return {'actions':[str(i)]}
+    async def audit(i, previous, candidate):
+        events.append(('audit', i))
+        if i == 4:
+            reached_seam.set()
+        return True
+    async def promote(_, data):
+        return data
+    result = await confirmed_blocks(9, 3, capacity=4, language='zh', confirmed={}, drafts={}, run=run,
+                                    promote=promote, report=None, audit=audit)
+    assert events.index(('audit',4)) < events.index(('draft',9))
+    assert [x['actions'] for x in result] == [[str(i)] for i in range(1,10)]
+
+
+@pytest.mark.asyncio
+async def test_pressure_in_one_block_preserves_later_independent_drafts():
+    from services.remake.gateway import RemakeVideoAnalysisError
+    confirmed,drafts = {},{}
+    async def run(i, previous, draft):
+        await asyncio.sleep(.001)
+        if i == 4:
+            raise RemakeVideoAnalysisError("busy",error_code="REMAKE_ANALYSIS_RATE_LIMITED")
+        return {'actions':[str(i)]}
+    async def promote(_, value):
+        return value
+    with pytest.raises(RemakeVideoAnalysisError):
+        await confirmed_blocks(9,3,capacity=2,language='en',confirmed=confirmed,drafts=drafts,
+                               run=run,promote=promote,report=None)
+    assert set(confirmed)=={1,2,3} and set(drafts)=={7,8,9}
