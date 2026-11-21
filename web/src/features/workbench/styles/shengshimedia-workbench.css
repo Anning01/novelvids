@@ -2596,7 +2596,7 @@
 .viral-workbench-canvas .workbench-edge--asset .vue-flow__edge-path,
 .viral-workbench-canvas .vue-flow__edge-asset_reference .vue-flow__edge-path {
   stroke: var(--wb-asset);
-  stroke-dasharray: 6 5;
+  stroke-dasharray: none;
 }
 .viral-workbench-canvas .workbench-edge--sequence.vue-flow__edge-path,
 .viral-workbench-canvas .workbench-edge--sequence .vue-flow__edge-path,
@@ -2640,8 +2640,22 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.viral-workbench-canvas .vue-flow__edge.is-muted-wire .vue-flow__edge-path { opacity: .28; }
-.viral-workbench-canvas .vue-flow__edge.is-related-wire .vue-flow__edge-path { opacity: 1; stroke-width: 2; }
+.viral-workbench-canvas .vue-flow__node:is(.is-wire-origin,.is-wire-neighbor):not(.selected):not(.vue-flow__node-section)::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--app-accent);
+  border-radius: 13px;
+  pointer-events: none;
+}
+.viral-workbench-canvas .vue-flow__edge-asset_reference .vue-flow__edge-path { opacity: .52; }
+.viral-workbench-canvas .vue-flow__edge.is-muted-wire .vue-flow__edge-path { opacity: .12; }
+.viral-workbench-canvas .vue-flow__edge.is-detail-wire:not(:focus):not(.selected) {
+  opacity: 0;
+  pointer-events: none;
+}
+.viral-workbench-canvas .vue-flow__edge.is-detail-wire:not(:focus):not(.selected) path { pointer-events: none; }
+.viral-workbench-canvas .vue-flow__edge.is-related-wire .vue-flow__edge-path { opacity: 1; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
 .viral-workbench-canvas .vue-flow__edge:hover .vue-flow__edge-path,
 .viral-workbench-canvas .vue-flow__edge.selected .vue-flow__edge-path,
 .viral-workbench-canvas .vue-flow__edge:focus .vue-flow__edge-path {

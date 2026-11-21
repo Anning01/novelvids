@@ -288,6 +288,36 @@ function packLane(
   return columns;
 }
 
+/** Place each source asset just upstream of its median consuming shot column. */
+function placeShotInputs(columns: WorkbenchNode[][], outgoing: Map<string, Set<string>>, incoming: Map<string, Set<string>>,
+  sizes: Record<string, NodeSize>, rowGap: number, maxHeight: number) {
+  const shotSlots = new Map<string, { column: number; row: number }>()
+  columns.forEach((column, index) => column.forEach((node, row) => {
+    if (workbenchLayoutFamily(node) === 'shot') shotSlots.set(node.key, { column: index, row })
+  }))
+  const moved = new Set<string>()
+  const inputs = new Map<number, { node: WorkbenchNode; row: number }[]>()
+  for (const column of columns) {
+    for (const node of column) {
+      if (node.kind !== 'asset' || incoming.get(node.key)?.size) continue
+      const targets = [...outgoing.get(node.key)!]
+      if (!targets.length || !targets.every(key => shotSlots.has(key))) continue
+      const slots = targets.map(key => shotSlots.get(key)!).sort((a, b) => a.column - b.column)
+      const owner = slots[Math.floor((slots.length - 1) / 2)]!.column
+      const row = median(slots.filter(slot => slot.column === owner).map(slot => slot.row))
+      const members = inputs.get(owner) ?? []
+      members.push({ node, row })
+      inputs.set(owner, members)
+      moved.add(node.key)
+    }
+  }
+  return columns.flatMap((column, index) => {
+    const ordered = (inputs.get(index) ?? []).sort((a, b) => a.row - b.row || a.node.key.localeCompare(b.node.key))
+    const rest = column.filter(node => !moved.has(node.key))
+    return [...packLane(ordered.map(item => item.node), sizes, rowGap, maxHeight), ...(rest.length ? [rest] : [])]
+  })
+}
+
 function preserveFixedPositions(
   nodes: WorkbenchNode[],
   positions: Record<string, Point>,
@@ -583,12 +613,14 @@ export function buildWorkbenchAutoLayout(
   reduceEdgeCrossings(orderedColumns, incoming, outgoing, connectionCounts);
   enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
   transposeCrossedNeighbors(orderedColumns, incoming, outgoing)
-  const columns = orderedColumns.flatMap((column) => {
+  const packedColumns = orderedColumns.flatMap((column) => {
     const family = workbenchLayoutFamily(column[0]!);
     return (family === 'shot' || family === 'result')
       ? packLane(column, sizes, rowGap, maxColumnHeight)
       : [column];
   });
+
+  const columns = placeShotInputs(packedColumns, outgoing, incoming, sizes, rowGap, maxColumnHeight)
 
   const columnWidths = columns.map(column => Math.max(...column.map(node => sizes[node.key]!.width)));
   const columnHeights = columns.map(column => (

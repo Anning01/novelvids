@@ -81,3 +81,19 @@ it('keeps linked cards one compact gutter apart while leaving room above the nex
   expect(placed.shot!.x - placed.a!.x - first.size!.width).toBe(72)
   expect(Math.abs(placed.b!.y - placed.a!.y) - first.size!.height).toBe(96)
 })
+
+it('places local references beside their shot run and shared references beside a central run', () => {
+  const shots = Array.from({ length: 9 }, (_, i) => node('shot' + (i + 1), 'shot', 900, i * 10))
+  const assets = ['early', 'shared', 'late'].map(key => node(key, 'asset', 0, 0))
+  const nodes = [...shots, ...assets]
+  const edges = [...shots.map(shot => wire('shared', shot.key)), wire('early', 'shot2'), wire('late', 'shot8')]
+  const placed = buildWorkbenchGroupedAutoLayout(nodes, edges, { maxColumnHeight: 480, rowGap: 60, columnGap: 72 })
+  for (const [asset, shot] of [['early', 'shot2'], ['shared', 'shot5'], ['late', 'shot8']] as const) {
+    expect(placed[shot]!.x - placed[asset]!.x).toBe(272)
+    expect(placed[asset]!.y).toBe(placed[shot]!.y)
+  }
+  expect(placed.early!.x).toBeLessThan(placed.shared!.x)
+  expect(placed.shared!.x).toBeLessThan(placed.late!.x)
+  const arranged = nodes.map(item => ({ ...item, position: placed[item.key]! }))
+  expect(buildWorkbenchGroupedAutoLayout(arranged, edges, { maxColumnHeight: 480, rowGap: 60, columnGap: 72 })).toEqual(placed)
+})

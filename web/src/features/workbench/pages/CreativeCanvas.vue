@@ -19,6 +19,7 @@ import CanvasToolSwitcher from '../components/CanvasToolSwitcher.vue'
 import ConnectionNodePicker from '../components/ConnectionNodePicker.vue'
 import WorkbenchRunStatus from '../components/WorkbenchRunStatus.vue'
 import WorkbenchToolbar from '../components/WorkbenchToolbar.vue'
+import { detailOnlyReferences } from '../edges/referenceOverview'
 import AssetReferenceEdge from '../edges/AssetReferenceEdge.vue'
 import OutputBindingEdge from '../edges/OutputBindingEdge.vue'
 import ShotSequenceEdge from '../edges/ShotSequenceEdge.vue'
@@ -142,7 +143,7 @@ const visibleStoreEdges = computed(() => store.edges
     && visibleNodeKeys.value.has(item.source)
     && visibleNodeKeys.value.has(item.target)))
 const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
-  id: item.key, type: item.kind, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
+  id: item.key, type: item.kind, class: neighborClass, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
   ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px`, ...(item.kind === 'section' ? { '--section-layer': item.zIndex } : {}) } } : {}),
   data: {
     ...item.data,
@@ -162,27 +163,47 @@ const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
     ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
   },
 })))
+const hoveredWireNode = ref('')
+const focusedWireNode = ref('')
+function trackWireFocus(target: EventTarget | null) {
+  if (target instanceof Element && target.matches(':focus-visible')) hoveredWireNode.value = ''
+  focusedWireNode.value = target instanceof Element ? target.closest<HTMLElement>('.vue-flow__node')?.dataset.id ?? '' : ''
+}
+const detailWires = computed(() => detailOnlyReferences(visibleStoreNodes.value, visibleStoreEdges.value))
 const highlightedWireNodes = computed(() => {
-  const keys = new Set(store.selectedNodeKeys)
-  for (const key of store.selectedNodeKeys) {
+  const inspecting = hoveredWireNode.value || focusedWireNode.value
+  const keys = new Set(inspecting && !store.selectedNodeKeys.includes(inspecting) ? [inspecting] : store.selectedNodeKeys)
+  for (const key of [...keys]) {
     const node = store.nodeByKey(key)
     if (node?.kind === 'section') for (const member of sectionMemberKeys(node)) keys.add(member)
   }
   return visibleStoreEdges.value.some(edge => keys.has(edge.source) || keys.has(edge.target)) ? keys : null
 })
-const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map((item) => {
+const wireNeighbors = computed(() => {
+  const neighbors = new Set<string>()
+  const focus = highlightedWireNodes.value
+  if (focus) for (const edge of visibleStoreEdges.value) {
+    if (focus.has(edge.source)) neighbors.add(edge.target)
+    if (focus.has(edge.target)) neighbors.add(edge.source)
+  }
+  return neighbors
+})
+function neighborClass(node: { id: string }) {
+  if (highlightedWireNodes.value?.has(node.id)) return 'is-wire-origin'
+  return wireNeighbors.value.has(node.id) ? 'is-wire-neighbor' : ''
+}
+function wireClass(edge: { id: string; source: string; target: string; selected?: boolean }) {
+  const focus = highlightedWireNodes.value
+  if (edge.selected || focus?.has(edge.source) || focus?.has(edge.target)) return 'is-related-wire'
+  if (detailWires.value.has(edge.id)) return 'is-detail-wire'
+  return focus ? 'is-muted-wire' : ''
+}
+const flowEdges = computed<Edge[]>(() => visibleStoreEdges.value.map(item => {
   const handles = canonicalEdgeHandles(item)
   return {
-    id: item.key,
-    source: item.source,
-    target: item.target,
-    type: item.type,
-    selected: store.selectedEdgeKeys.includes(item.key),
-    class: highlightedWireNodes.value
-      ? (highlightedWireNodes.value.has(item.source) || highlightedWireNodes.value.has(item.target) ? 'is-related-wire' : 'is-muted-wire')
-      : undefined,
-    sourceHandle: handles.sourceHandle,
-    targetHandle: handles.targetHandle,
+    id: item.key, source: item.source, target: item.target, type: item.type,
+    selected: store.selectedEdgeKeys.includes(item.key), class: wireClass,
+    sourceHandle: handles.sourceHandle, targetHandle: handles.targetHandle,
   }
 }))
 const panModeActive = computed(() => canvasTool.value === 'pan' || spacePanActive.value)
@@ -830,7 +851,11 @@ onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectio
     @pointerdown.capture="rememberSelectionIntent" @click.capture="applySelectionIntent">
     <div v-if="store.loading" class="workbench-state" role="status">{{ tr('正在加载工作区…') }}</div>
     <div v-else-if="loadError" class="workbench-state" role="alert">{{ loadError }} <AppButton @click="openCanvas">{{ tr('重新加载') }}</AppButton></div>
-    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space" @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
+    <VueFlow v-else :id="WORKBENCH_FLOW_ID" class="viral-workbench-canvas" :class="{ 'is-pan-mode': interactionState.panOnDrag, 'is-manual-pan-mode': canvasTool === 'pan' }" :aria-label="tr('小说视频创作画布')" :nodes="flowNodes" :edges="flowEdges" :node-types="nodeTypes" :edge-types="edgeTypes" :default-viewport="store.viewport" :min-zoom="WORKBENCH_MIN_ZOOM" :max-zoom="WORKBENCH_MAX_ZOOM" :pan-on-drag="interactionState.panOnDrag" :pan-on-scroll="true" :pan-on-scroll-mode="PanOnScrollMode.Vertical" :zoom-on-scroll="false" :zoom-on-pinch="false" :zoom-activation-key-code="zoomActivationKeyCode" :nodes-draggable="interactionState.nodesDraggable" :nodes-connectable="interactionState.nodesConnectable" :elements-selectable="interactionState.elementsSelectable" :select-nodes-on-drag="interactionState.selectNodesOnDrag" :selection-key-code="!interactionState.panOnDrag" :multi-selection-key-code="['Meta', 'Control', 'Shift']" :selection-mode="SelectionMode.Partial" :delete-key-code="null" no-wheel-class-name="nowheel" pan-activation-key-code="Space"
+      @node-mouse-enter="hoveredWireNode = $event.node.type === 'section' ? '' : $event.node.id"
+      @node-mouse-leave="hoveredWireNode = ''"
+      @focusin="trackWireFocus($event.target)" @focusout="trackWireFocus($event.relatedTarget)"
+      @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
       <Background variant="lines" color="var(--app-border-strong)" :gap="38" :line-width="1" />
       <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
       <Controls position="bottom-right" />
