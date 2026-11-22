@@ -444,3 +444,41 @@ async def test_asset_request_fails_but_completed_prompts_reach_the_workspace(tmp
     assert scene.prompt == scene.prompt_params['prompt'] and scene.duration == 4
     assert scene.metadata['pipeline']['asset_inventory'] == 'failed'
     gateway.analyze_one.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_timeline_registers_visible_props_when_global_objects_are_missing(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from unittest.mock import AsyncMock
+    from models.ai_task import AiTask
+    from models.asset import Asset
+    from models.scene import Scene
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.persistence import remake_result_persistence
+    from test.test_services.test_remake_persistence import _source
+
+    source = await _source()
+    task = await AiTask.create(task_type=6, status=2)
+    clip = tmp_path/'input.mp4'
+    clip.write_bytes(b'sample')
+    span = {'start_seconds':0, 'end_seconds':4, 'output_seconds':4}
+    shot = {**remake_shot(1,4,refs=[{'asset_type':'object','asset_id':'local-1','asset_name':'纸灯',
+               'visual_description':'米白色，六面折纸灯罩。'}]), 'shot_index':1, 'source_interval':span}
+    monkeypatch.setattr('services.remake.pipeline.media_session', lambda: nullcontext(None))
+    monkeypatch.setattr('services.remake.single_wave.stream_source_analysis',AsyncMock(return_value=([clip],[4],[shot])))
+    gateway = _Gateway()
+    gateway.analyze_one = AsyncMock(return_value={'characters':[],'scenes':[],'objects':[]})
+    token = current_execution.set(SimpleNamespace(params={'task_id':str(task.id),'remake_context_version':5,'remake_shot_limit':15,'remake_action_memory':'timeline'},
+                                  snapshot=synthetic_snapshot(), language='zh'))
+    try:
+        result = await RemakeDecompositionPipeline(gateway_factory=lambda _:gateway, prepare_video=lambda p,*a,**kw:p).run(
+            source=source,source_path=clip,work_dir=tmp_path/'work',model_config=SimpleNamespace(id=1,model='offline'))
+        await remake_result_persistence.persist(source=source,assets=result.assets,prompt_document=result.prompt_document,
+                                                pipeline_metadata=result.metadata)
+    finally:
+        current_execution.reset(token)
+    asset = await Asset.get(novel_id=source.novel_id,canonical_name='纸灯')
+    assert '六面折纸灯罩' in asset.description
+    saved = await Scene.get(chapter_id=source.chapter_id,sequence=1)
+    assert await saved.assets.all().values_list('id',flat=True) == [asset.id]
+    gateway.analyze_one.assert_awaited_once()

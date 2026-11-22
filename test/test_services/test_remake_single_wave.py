@@ -308,3 +308,21 @@ def test_repeated_prop_inventory_entries_keep_their_separate_sightings():
     prop, = normalized['objects']
     assert prop['appearances'] == spans
     assert rows[0]['appearances'] == spans[:1]
+
+
+def test_missing_visual_groups_are_rebuilt_from_shot_local_names_and_bound_per_shot():
+    from services.remake.single_wave import missing_visual_groups
+    from services.remake.prompt_render import normalize_global_assets
+
+    def shot(index, *refs):
+        return {'shot_index': index, 'asset_refs': [
+            {'asset_id': str(i), 'asset_type': kind, 'asset_name': name} for i,(kind,name) in enumerate(refs)]}
+    shots = [shot(1, ('scene','工作间'),('object','蓝杯')),
+             shot(2, ('scene','阳台'),('object','蓝杯'),('object','桌子'))]
+    assets = {'characters': [], 'scenes': [], 'objects': []}
+    extra = missing_visual_groups(shots, assets)
+    registered = normalize_global_assets(extra)
+    assert [item['name'] for item in registered['objects']] == ['蓝杯','桌子']
+    rows = bind_shot_references(shots, registered)
+    assert [[r['asset_name'] for r in row['asset_refs']] for row in rows] == [['工作间','蓝杯'],['阳台','蓝杯','桌子']]
+    assert not missing_visual_groups(shots, registered)

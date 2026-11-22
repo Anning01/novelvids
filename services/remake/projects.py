@@ -238,6 +238,7 @@ class RemakeProjectService:
                             "remake_context_version": 5,
                             "remake_shot_limit": novel.shot_duration_max,
                             "remake_action_memory": "timeline",
+                            "remake_visible_references": True,
                             "remake_identity_evidence": True,
                             "remake_cast_appearances": True,
                             "remake_asset_appearances": True,
@@ -471,7 +472,7 @@ class RemakeProjectService:
                 progress=progress,
                 request_params={
                     **({"remake_deadline_at": batch_deadline([])} if previous_params.get("remake_context_version") == 5 else {}),
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_visible_references", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

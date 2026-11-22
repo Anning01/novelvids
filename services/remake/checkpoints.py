@@ -30,7 +30,7 @@ async def task_history(params):
         old = task.request_params or {}
         if any(old.get(k) != params.get(k) for k in
                ('remake_source_id', 'chapter_id', 'novel_id', 'team_id', 'user_id', 'prompt_language', 'model_config_id',
-                'remake_context_version', 'remake_shot_limit', 'remake_action_memory', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_asset_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
+                'remake_context_version', 'remake_shot_limit', 'remake_action_memory', 'remake_visible_references', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_asset_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
             break
         yield task
         previous_id = old.get('retry_of_task_id')
@@ -40,7 +40,7 @@ async def completed_outputs(params, *, keys_only=False):
     results = {}
     async for task in task_history(params):
         fields = ('key',) if keys_only else ('key', 'result')
-        rows = await AgentOperation.filter(Q(key__startswith='remake:recovered-') | Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
+        rows = await AgentOperation.filter(Q(key__startswith='remake:recovered-') | Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:shot-bindings', 'remake:timeline']),
                                            task=task, state='completed').values(*fields)
         for row in rows:
             key = row["key"]

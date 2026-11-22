@@ -3,6 +3,9 @@ import asyncio
 import time
 from contextlib import aclosing
 from collections import defaultdict
+from hashlib import sha256
+
+from models.asset import Asset
 
 
 
@@ -106,6 +109,30 @@ async def stream_source_analysis(detector, source_path, directory, gateway, stra
     results = await analyze_ready_shots(ready(), gateway, strategy, saved, report, catalog)
     phase_times["shot_analysis_ms"] = round((time.monotonic() - first_ready) * 1000) if first_ready is not None else 0
     return paths, durations, results
+
+
+def missing_visual_groups(shots, assets):
+    """Recover empty inventory categories from subjects explicitly observed in this episode."""
+    groups = {kind: group for kind, group in (('scene', 'scenes'), ('object', 'objects')) if not assets.get(group)}
+    missing = {}
+    for shot in shots:
+        for ref in shot['asset_refs']:
+            group = groups.get(ref['asset_type'])
+            if not group:
+                continue
+            name = ref['asset_name'].strip()
+            if not name:
+                continue
+            entries = missing.setdefault(group, {})
+            description = ref.get('visual_description') or name
+            if name.casefold() not in entries:
+                limit = Asset._meta.fields_map["canonical_name"].max_length
+                canonical = name if len(name) <= limit else name[:limit-9] + "-" + sha256(name.encode()).hexdigest()[:8]
+                entries[name.casefold()] = {'name': canonical, 'description': description, 'visual_fields': {}, 'source_names': [name]}
+            asset = entries[name.casefold()]
+            if asset['description'] == name:
+                asset['description'] = description
+    return {group: list(entries.values()) for group, entries in missing.items()}
 
 
 def bind_shot_references(shots, assets):

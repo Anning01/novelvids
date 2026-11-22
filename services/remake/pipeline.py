@@ -281,6 +281,16 @@ class RemakeDecompositionPipeline:
         if continuous and not single_wave:
             evidence = await timeline(scene_paths, durations)
             ranges = {name: item["interval"] for name, item in evidence.items() if item["interval"] is not None}
+        if single_wave and execution.params.get("remake_action_memory") == "timeline":
+            from services.remake.single_wave import missing_visual_groups
+            missing = missing_visual_groups(media_results[2], assets)
+            if missing:
+                async def bind_missing():
+                    rendered = render_remake_assets(missing, snapshot, language, aspect_ratio)
+                    return await remake_result_persistence.bind_assets(source, normalize_global_assets(rendered, language),
+                        await remake_result_persistence.project_catalog(source))
+                extra = await checkpoint("remake:shot-bindings", bind_missing)
+                assets = {group: [*items, *extra[group]] for group, items in assets.items()}
         catalog = compact_catalog(assets, snapshot=snapshot, language=language)
         if not single_wave:
             await _report(progress, 55, "generating_storyboards")

@@ -6,7 +6,7 @@ import re
 from pydantic import ValidationError
 from models.asset import Asset
 from schemas.remake_asset_format import unpack_asset_rows
-from schemas.remake_timeline import RemakeShot, RemakeShortStoryboard
+from schemas.remake_visible_refs import RemakeShot, RemakeShortStoryboard
 from services.remake.asset_validation import render_remake_assets
 
 
@@ -53,8 +53,17 @@ def raw_shot(value):
     text = value if isinstance(value,str) else None
     if isinstance(value,dict) and isinstance(value.get('prompt'),str):
         text = value['prompt']
+    refs = []
+    if isinstance(value, dict) and isinstance(value.get('asset_refs'), list):
+        for ref in value['asset_refs']:
+            if not isinstance(ref, dict) or ref.get('asset_type') not in ('character', 'scene', 'object'):
+                continue
+            name = ref.get('asset_name')
+            if isinstance(name, str) and name.strip():
+                refs.append({'asset_id': str(ref.get('asset_id') or len(refs) + 1), 'asset_type': ref['asset_type'],
+                             'asset_name': name, 'visual_description': ref.get('visual_description') if isinstance(ref.get('visual_description'), str) else ''})
     return {'source_prompt_text':text or json.dumps(value,ensure_ascii=False,indent=2),
-            'asset_refs':[], 'actions':[], 'transition':''}
+            'asset_refs':refs, 'actions':[], 'transition':''}
 
 
 def delivered_shot(reply):

@@ -70,6 +70,9 @@ class RemakeShortStoryboard(LegacyBatch):
     shots: list[ShortMotionShot] = Field(min_length=1)
 
 def shot_contracts(params):
+    if params.get("remake_visible_references"):
+        from schemas.remake_visible_refs import RemakeShot as VisibleShot, RemakeShortStoryboard as VisibleBatch
+        return VisibleShot, VisibleBatch
     if params.get("remake_action_memory") == "timeline":
         from schemas.remake_timeline import RemakeShot as TimelineShot, RemakeShortStoryboard as TimelineBatch
         return TimelineShot, TimelineBatch

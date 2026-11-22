@@ -66,3 +66,22 @@ def test_plain_text_reaches_the_saved_prompt_even_without_structured_fields():
         'start_seconds':0, 'end_seconds':4.2, 'output_seconds':4}}], 'zh')
     result = prepare_remake_prompt(material, [], synthetic_snapshot(), 'zh')
     assert result['prompt'] == prompt and result['duration_seconds'] == 4
+
+
+def test_optional_reference_design_survives_structured_and_free_text_shots():
+    from schemas.remake_motion import shot_contracts
+    from services.remake.delivered_output import delivered_batch, raw_shot
+    from test.test_services.test_remake_short_storyboard import sample
+
+    old, _ = shot_contracts({'remake_action_memory':'timeline'})
+    new, _ = shot_contracts({'remake_action_memory':'timeline','remake_visible_references':True})
+    assert 'VisibleReference' not in old.model_json_schema()['$defs']
+    assert 'visual_description' in new.model_json_schema()['$defs']['VisibleReference']['properties']
+    wire = sample(1)
+    ref = {'asset_type':'scene','asset_id':'local','asset_name':'阁楼','visual_description':'木梁和斜顶。'}
+    row = wire['shots'][0]
+    row.update(actions=[{'start':0,'end':4,'text':'阳光照在木梁上。'}],
+               sound_design={'ambience':'风声'},asset_refs=[ref])
+    span = {'sequence':1,'start_seconds':0,'end_seconds':4,'output_seconds':4}
+    assert delivered_batch(wire,[span])[1]['asset_refs'] == [ref]
+    assert raw_shot({'prompt':'阳光照进阁楼。', 'asset_refs':[ref]})['asset_refs'] == [ref]
