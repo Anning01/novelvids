@@ -75,6 +75,26 @@ class RemakeAssets(BaseModel):
     objects: list[RemakeAsset] = Field(max_length=100)
 
 
+class CastAppearance(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def positive_span(self):
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("A cast appearance must have positive duration")
+        return self
+
+
+class TimedCharacter(RemakeAsset):
+    appearances: list[CastAppearance] = Field(min_length=1, description="Disjoint source-time ranges where this character appears or speaks")
+
+
+class RemakeCastAssets(RemakeAssets):
+    characters: list[TimedCharacter] = Field(max_length=100)
+
+
 class RemakeReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=100)

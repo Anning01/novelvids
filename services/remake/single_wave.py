@@ -24,13 +24,13 @@ async def analyze_ready_shots(ready, gateway, strategy, saved, report, catalog):
         nonlocal completed
         key = f'model:remake:RemakeShot:{i}'
         if key in saved:
-            return {**saved[key], 'shot_index': i, 'file': path.name}
+            return {**saved[key], 'shot_index': i, 'file': path.name, 'source_interval': facts['source_interval']}
         result = await gateway.analyze_one(index=i, path=path, prompt='', context=facts,
             schema_name='professional_video_prompt_material', response_schema=schema, previous_path=previous)
         completed += 1
         if report:
             await report(completed, total)
-        return {**result, 'shot_index': i, 'file': path.name}
+        return {**result, 'shot_index': i, 'file': path.name, 'source_interval': facts['source_interval']}
 
     previous = previous_interval = None
     try:
@@ -120,7 +120,19 @@ def bind_shot_references(shots, assets):
                 resolved.append({**ref, 'asset_id': item['id'], 'asset_name': item['name']})
             else:
                 missing.append(ref)
-        bound.append({**shot, 'asset_refs': resolved, **({'unresolved_asset_refs': missing} if missing else {})})
+        interval = shot.get('source_interval')
+        present_names = []
+        if interval:
+            for character in assets.get('characters', []):
+                if any(span['start_seconds'] < interval['end_seconds'] and interval['start_seconds'] < span['end_seconds']
+                       for span in character.get('appearances', [])):
+                    present_names.append(character['name'])
+                    if not any(ref['asset_id'] == character['id'] for ref in resolved):
+                        resolved.append({'asset_id': character['id'], 'asset_name': character['name'], 'asset_type': 'character'})
+        item = {**shot, 'asset_refs': resolved, **({'unresolved_asset_refs': missing} if missing else {})}
+        if present_names and shot.get('visible_asset_names') is not None:
+            item['visible_asset_names'] = list(dict.fromkeys([*shot['visible_asset_names'], *present_names]))
+        bound.append(item)
     return bound
 
 
@@ -184,4 +196,5 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
             if i not in results:
                 await save(i, material[i])
         await report(len(results), len(paths))
-    return [{**results[i], "shot_index": i, "file": path.name} for i,path in enumerate(paths,1)]
+    return [{**results[i], "shot_index": i, "file": path.name, "source_interval": evidence[path.name]["interval"]}
+            for i,path in enumerate(paths,1)]

@@ -187,3 +187,57 @@ async def test_stream_resume_checks_closed_clip_bytes_before_any_model_call(tmp_
     with pytest.raises(RemakePipelineError, match='不能复用'):
         await stream_source_analysis(*args, cache=False)
     model.assert_not_awaited()
+
+
+def test_cast_is_bound_by_observed_source_intervals_even_if_model_uses_generic_names():
+    def person(i, name, spans):
+        return {'id': f'character-{i}', 'name': name, 'appearances': [
+            {'start_seconds': a, 'end_seconds': b} for a, b in spans]}
+    assets = {'characters': [person(1, '被束缚男子', [(0, 1), (2, 3)]),
+                             person(2, '海滩女子', [(2, 3)])]}
+    shots = [{'description':'男子', 'source_interval':{'start_seconds':i,'end_seconds':i+1},
+              'visible_asset_names':[], 'asset_refs':[]} for i in range(3)]
+    rows = bind_shot_references(shots, assets)
+    names = [[r['asset_name'] for r in row['asset_refs']] for row in rows]
+    assert names == [['被束缚男子'], [], ['被束缚男子', '海滩女子']]
+    assert [r['visible_asset_names'] for r in rows] == names
+    shots[0]['asset_refs'] = [{'asset_type':'character','asset_name':'被束缚男子','asset_id':'local'}]
+    assert len(bind_shot_references(shots[:1],assets)[0]['asset_refs']) == 1
+
+
+def test_cast_inventory_preserves_verified_ranges_through_asset_rendering():
+    from pydantic import ValidationError
+    from schemas.agent_workflow import CastAppearance, RemakeCastAssets
+    from services.remake.asset_validation import render_remake_assets
+    from prompts.remake import cast_appearance_instruction, cast_reference_instruction
+    from test.remake_fixtures import design_fields, synthetic_snapshot
+    raw = {'characters':[{'name':'男孩','description':'男孩站在岸边','visual_fields':design_fields(),
+                          'appearances':[{'start_seconds':1,'end_seconds':2}]}], 'scenes':[], 'objects':[]}
+    output = RemakeCastAssets.model_validate(raw)
+    rendered = render_remake_assets(output.model_dump(), synthetic_snapshot(), 'zh', '9:16')
+    assert RemakeCastAssets.model_validate(rendered).characters[0].appearances == output.characters[0].appearances
+    assert all('appearances' in cast_appearance_instruction(lang) and 'asset_refs' in cast_reference_instruction(lang) for lang in ('zh','en'))
+    with pytest.raises(ValidationError):
+        CastAppearance(start_seconds=2, end_seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_new_asset_request_collects_cast_appearances_in_its_existing_model_call(tmp_path):
+    from schemas.agent_workflow import RemakeCastAssets
+    from services.remake.gateway import RemakeVideoAnalysisGateway
+    from services.creation_agent.skill_execution import current_execution
+    from test.test_services.test_remake_gateway import _config, _Client
+    from prompts.remake import cast_appearance_instruction
+    src = tmp_path/'film.mp4'
+    src.write_bytes(b'film')
+    response = RemakeCastAssets(characters=[],scenes=[],objects=[])
+    generate = AsyncMock(return_value=response)
+    gateway = RemakeVideoAnalysisGateway(_config(),client=_Client([]))
+    token = current_execution.set(SimpleNamespace(params={'remake_context_version':5,'remake_cast_appearances':True},
+                                                 language='zh',generate=generate))
+    try:
+        await gateway.analyze_one(index=1,path=src,prompt='',context={},schema_name='global_key_assets',response_schema={})
+    finally:
+        current_execution.reset(token)
+    assert generate.await_count == 1 and generate.await_args.args[2] is RemakeCastAssets
+    assert cast_appearance_instruction('zh') in generate.await_args.kwargs['additional_instructions']

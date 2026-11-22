@@ -288,3 +288,23 @@ def short_storyboard_instruction(language):
             'Use adjacent footage for continuity, preserving genuine repeats. Write concise, usable material for '
             'each shot. Use a short sentence per descriptive field, transcribe actual speech, and place actions, camera moves and cuts in shot-local time. Put shared '
             'photographic settings once in looks, referenced by a 1-based index. Return only the contract fields.')
+
+
+
+def cast_appearance_instruction(language):
+    if language == "zh":
+        return ("为每个人物、群像或动物在 appearances 中标出其实际出镜或发声的原片起止秒数。"
+                "离场后再出现要分段列出；仅被提及、相似服装或同类身份都不能算作出场。")
+    return ("For each character, group or animal, list its actual visible or speaking intervals in appearances "
+            "using seconds from the start of the source. Split separate appearances. A mention, similar clothing "
+            "or a similar role is not an appearance.")
+
+
+
+def cast_reference_instruction(language):
+    if language == "zh":
+        return ("每个分镜的 asset_refs 都要列出实际出镜或发声的角色，即使项目目录暂为空。"
+                "使用本镜内唯一的标识和可辨认的角色称呼，并在正文中沿用该称呼。仅被谈及的角色不计入。")
+    return ("In each shot's asset_refs list every character actually seen or heard, even when the project catalog "
+            "is empty. Use a shot-local ID and an identifiable character name consistently in the shot text. "
+            "Omit characters who are only mentioned.")

@@ -257,6 +257,10 @@ class RemakeVideoAnalysisGateway:
             from schemas.remake_short import RemakeShortStoryboard
             schema = {"short_video_storyboard": RemakeShortStoryboard, "shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
+            if schema is RemakeAssets and getattr(execution, "params", {}).get("remake_cast_appearances"):
+                from schemas.agent_workflow import RemakeCastAssets
+                schema = RemakeCastAssets
+
             async def source_media(media_path):
                 if getattr(self.config, "api_protocol", None) == "novelvids":
                     mime = self._video_mime(media_path)
@@ -287,10 +291,13 @@ class RemakeVideoAnalysisGateway:
             extra = prompt if audit else ""
             context_version = getattr(execution, 'params', {}).get('remake_context_version', 0)
             if context_version >= 2 and not audit:
-                extra = identity_instruction(execution.language) if schema is RemakeAssets else continuity_instruction(execution.language)
-            if context_version == 5 and schema is RemakeAssets and execution.params.get("remake_identity_evidence"):
+                extra = identity_instruction(execution.language) if issubclass(schema, RemakeAssets) else continuity_instruction(execution.language)
+            if context_version == 5 and issubclass(schema, RemakeAssets) and execution.params.get("remake_identity_evidence"):
                 from prompts.remake import parallel_identity_instruction
                 extra += "\n" + parallel_identity_instruction(execution.language)
+            if issubclass(schema, RemakeAssets) and getattr(execution, "params", {}).get("remake_cast_appearances"):
+                from prompts.remake import cast_appearance_instruction
+                extra += "\n" + cast_appearance_instruction(execution.language)
             if context_version == 5 and schema is RemakeShot:
                 from prompts.remake import independent_shot_instruction
                 extra = independent_shot_instruction(execution.language)
@@ -300,6 +307,9 @@ class RemakeVideoAnalysisGateway:
             if schema is RemakeShortStoryboard:
                 from prompts.remake import short_storyboard_instruction
                 extra = short_storyboard_instruction(execution.language)
+            if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_cast_appearances"):
+                from prompts.remake import cast_reference_instruction
+                extra += "\n" + cast_reference_instruction(execution.language)
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
             async def recover():
                 if schema is not RemakeShot:
