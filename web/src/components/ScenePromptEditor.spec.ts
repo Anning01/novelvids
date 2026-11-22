@@ -46,7 +46,7 @@ afterEach(() => {
 })
 
 describe('ScenePromptEditor', () => {
-  it('caps the embedded editor at 600px and scrolls long prompts internally', () => {
+  it('renders the prompt textbox inside the embedded editor', () => {
     const wrapper = mount(ScenePromptEditor, {
       props: { modelValue: '很长的提示词', options, embedded: true },
       global: { components: { AppButton }, stubs: { Teleport: true } },

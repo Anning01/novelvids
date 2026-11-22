@@ -836,12 +836,13 @@ onBeforeUnmount(() => {
 <style scoped>
 .scene-prompt-editor { display: grid; min-width: 0; min-height: 420px; grid-template-rows: minmax(0,1fr); overflow: hidden; border: 1px solid color-mix(in srgb,var(--app-border) 84%,transparent); border-radius: 14px; color: var(--app-text); background: var(--app-surface); box-shadow: 0 1px 2px rgb(17 24 39 / 3%),0 8px 24px rgb(17 24 39 / 2%); transition: border-color .18s ease,box-shadow .18s ease; }
 .scene-prompt-editor:focus-within { border-color: color-mix(in srgb,var(--app-accent) 46%,var(--app-border)); box-shadow: 0 0 0 3px color-mix(in srgb,var(--app-accent) 9%,transparent),0 10px 28px rgb(17 24 39 / 4%); }
-.scene-prompt-editor.is-embedded { min-height: 320px; max-height: 600px; align-self: start; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.scene-prompt-editor.is-embedded { min-height: 320px; align-self: stretch; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .scene-prompt-editor.is-embedded:focus-within { border-color: transparent; box-shadow: none; }
 .scene-prompt-editor.is-focus-mode { width: 100%; height: 100%; min-height: 0; max-height: none; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .scene-prompt-editor.is-focus-mode:focus-within { border-color: transparent; box-shadow: none; }
 .scene-prompt-editor__input { min-width: 0; min-height: 420px; overflow: auto; padding: 1px 16px 20px; outline: 0; color: var(--app-text-secondary); background: var(--app-surface); font-size: 11px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: var(--app-accent); }
-.scene-prompt-editor.is-embedded .scene-prompt-editor__input { min-height: 320px; max-height: 600px; overflow-y: auto; background: transparent; scrollbar-width: none; }
+/* Limit content-driven height, but fill any taller row established by the adjacent panels. */
+.scene-prompt-editor.is-embedded .scene-prompt-editor__input { min-height: 100%; max-height: 600px; overflow-y: auto; background: transparent; scrollbar-width: none; }
 .scene-prompt-editor.is-embedded .scene-prompt-editor__input::-webkit-scrollbar { display: none; }
 .scene-prompt-editor.is-focus-mode .scene-prompt-editor__input { height: 100%; min-height: 0; max-height: none; padding: 24px 28px 40px; background: transparent; font-size: 14px; line-height: 2; scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
 .scene-prompt-editor__input:focus { background: color-mix(in srgb,var(--app-surface) 98%,var(--app-accent)); }
