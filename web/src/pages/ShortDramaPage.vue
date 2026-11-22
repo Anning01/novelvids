@@ -10,6 +10,7 @@ import {
   Film,
   Monitor,
   PencilLine,
+  Plus,
   Sparkles,
   UploadCloud,
   X,
@@ -56,7 +57,7 @@ const storyboardStrategies = ref<StoryboardStrategy[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 const router = useRouter()
 const selectedFile = ref<File | null>(null)
-const sourceMode = ref<'file' | 'text'>('file')
+const sourceMode = ref<'file' | 'text' | 'blank'>('file')
 const storyText = ref('')
 const sourceKind = ref<'novel' | 'screenplay'>('novel')
 const storyTitle = ref('')
@@ -89,7 +90,8 @@ const storyboardStrategyOptions = computed(() => storyboardStrategies.value.map(
   value: item.key,
   get label() { return tr(item.name) },
 })))
-const recoveryLabel = computed(() => sourceKind.value === 'novel' ? tr('继续识别章节') : tr('继续进入项目'))
+const needsChapterSplit = computed(() => sourceMode.value !== 'blank' && sourceKind.value === 'novel')
+const recoveryLabel = computed(() => needsChapterSplit.value ? tr('继续识别章节') : tr('继续进入项目'))
 const formattedFileSize = computed(() => {
   if (!selectedFile.value) return ''
   const megabytes = selectedFile.value.size / 1024 / 1024
@@ -173,7 +175,7 @@ async function createProject() {
   if (creating.value) return
   if (importedProjectId.value) { await resumeImport(); return }
   createError.value = ''
-  if (sourceMode.value === 'file' ? !selectedFile.value : !storyText.value.trim()) {
+  if ((sourceMode.value === 'file' && !selectedFile.value) || (sourceMode.value === 'text' && !storyText.value.trim())) {
     notice.info(sourceMode.value === 'file' ? tr('请先上传剧本文件') : tr('请先粘贴小说或剧本正文'))
     return
   }
@@ -181,17 +183,18 @@ async function createProject() {
     notice.info(tr('请填写自定义画面风格'))
     return
   }
+  const blank = sourceMode.value === 'blank'
   const projectName = storyTitle.value.trim()
     || (sourceMode.value === 'file' ? selectedFile.value?.name.replace(/\.[^.]+$/, '') : '')
-    || tr('未命名短剧')
+    || (blank ? tr('新项目') : tr('未命名短剧'))
   creating.value = true
   try {
-    createProgress.value = sourceMode.value === 'file' ? tr('正在上传并读取书稿…') : tr('正在保存内容…')
+    createProgress.value = sourceMode.value === 'file' ? tr('正在上传并读取书稿…') : tr('正在创建项目…')
     const uploaded = sourceMode.value === 'file' ? await api.upload(selectedFile.value!) : null
-    const sourceName = uploaded?.filename || `${projectName}.txt`
+    const sourceName = blank ? undefined : uploaded?.filename || `${projectName}.txt`
     const createPayload: Parameters<typeof api.createNovel>[0] = {
       name: projectName,
-      author: 'Agent 创建',
+      author: blank ? '人工创建' : 'Agent 创建',
       content: '',
       aspect_ratio: aspectRatio.value,
       resolution: resolution.value,
@@ -200,8 +203,10 @@ async function createProject() {
       storyboard_strategy: storyboardStrategy.value,
       storyboard_setting: selectedStoryboardStrategy.value?.description ?? '',
     }
-    createPayload.source_kind = sourceKind.value
-    createPayload.description = `源剧本：${sourceName}`
+    if (!blank) {
+      createPayload.source_kind = sourceKind.value
+      createPayload.description = `源剧本：${sourceName}`
+    }
     if (uploaded?.key) {
       // OSS 直传：只回传 key，由服务端经内网读取并解析正文，不再把整份书稿传给浏览器。
       createPayload.source_key = uploaded.key
@@ -213,17 +218,20 @@ async function createProject() {
         throw new Error(uploaded.chapter_validation.message)
       }
       createPayload.content = textContent
-    } else {
+    } else if (sourceMode.value === 'text') {
       createPayload.content = storyText.value.trim()
     }
     createProgress.value = tr('正在创建项目…')
     const response = await api.createNovel(createPayload)
     importedProjectId.value = response.data.id
-    let chapterCount = response.data.total_chapters || 0
-    if (sourceKind.value === 'novel') {
+    let successMessage = tr('空白项目已创建')
+    if (needsChapterSplit.value) {
       createProgress.value = tr('正在识别章节，请稍候…')
       const splitResult = await api.splitNovel(response.data.id)
-      chapterCount = splitResult.data.total_chapters || 0
+      const chapterCount = splitResult.data.total_chapters || 0
+      successMessage = chapterCount ? tr('已识别 {p0} 章，正在进入工作区', { p0: chapterCount }) : tr('内容已保存，正在进入工作区')
+    } else if (!blank) {
+      successMessage = tr('剧本已导入，可直接提取资产和生成分镜')
     }
     sessionStorage.setItem('short-drama-agent-project', JSON.stringify({
       projectId: response.data.id,
@@ -236,7 +244,7 @@ async function createProject() {
       fileName: sourceName,
       sourcePath: uploaded?.file_path,
     }))
-    notice.success(sourceKind.value === 'screenplay' ? tr('剧本已导入，可直接提取资产和生成分镜') : chapterCount ? tr('已识别 {p0} 章，正在进入工作区', { p0: chapterCount }) : tr('内容已保存，正在进入工作区'))
+    notice.success(successMessage)
     await router.push({ name: 'short-drama-agent', params: { projectId: response.data.id } })
   } catch (error) {
     createError.value = error instanceof Error ? error.message : tr('创建失败，请重试')
@@ -255,7 +263,7 @@ async function resumeImport() {
   try {
     // A lost response may hide a successful split. Inspect the same project
     // before retrying so neither the book nor its chapters are duplicated.
-    if (sourceKind.value === 'novel') {
+    if (needsChapterSplit.value) {
       const chapters = await api.chaptersPage(projectId, 1, 1)
       if (!chapters.data.pagination.total) {
         createProgress.value = tr('正在继续识别章节…')
@@ -272,14 +280,15 @@ async function resumeImport() {
 <template>
   <CreationEntryShell
     eyebrow="AI SHORT DRAMA"
-    :description="tr('把小说或剧本带入工作区，逐集制作短剧')"
+    :description="sourceMode === 'blank' ? tr('新增一集开始写剧本，也可以和创作助手一起构思。') : tr('把小说或剧本带入工作区，逐集制作短剧')"
     width="wide"
   >
     <template #title>{{ tr('翻开剧本，创作') }}<span class="creation-entry-accent">{{ tr('精品短剧') }}</span></template>
       <form class="short-drama-form" :aria-busy="creating" @submit.prevent="createProject">
-          <nav class="story-source-tabs" :aria-label="tr('正文导入方式')">
-            <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'file'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'file'"><UploadCloud :size="15" />{{ tr('上传文件') }}</AppButton>
-            <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'text'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'text'"><PencilLine :size="15" />{{ tr('粘贴正文') }}</AppButton>
+          <nav class="story-source-tabs" :aria-label="tr('创作模式')">
+            <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'file'" :aria-pressed="sourceMode === 'file'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'file'"><UploadCloud :size="15" />{{ tr('上传文件') }}</AppButton>
+            <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'text'" :aria-pressed="sourceMode === 'text'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'text'"><PencilLine :size="15" />{{ tr('粘贴正文') }}</AppButton>
+            <AppButton variant="ghost" size="sm" type="button" :active="sourceMode === 'blank'" :aria-pressed="sourceMode === 'blank'" :disabled="creating || Boolean(importedProjectId)" @click="sourceMode = 'blank'"><Plus :size="15" />{{ tr('从空白项目开始') }}</AppButton>
           </nav>
           <Transition name="mode-panel" mode="out-in">
             <AppButton
@@ -311,7 +320,7 @@ async function resumeImport() {
               </template>
             </AppButton>
 
-            <div v-else key="text-input" class="story-text-input">
+            <div v-else-if="sourceMode === 'text'" key="text-input" class="story-text-input">
               <label for="story-content">{{ sourceKind === 'screenplay' ? tr('剧本正文') : tr('小说原文') }}</label><textarea id="story-content" v-model="storyText" :disabled="creating || Boolean(importedProjectId)" rows="9" maxlength="2000000" :placeholder="sourceKind === 'screenplay' ? tr('粘贴现成剧本，可用“第一集”“第二集”划分分集，导入后直接提取资产和生成分镜。') : tr('将正文粘贴到这里，保留“第一章”“第二章”等章节标题，便于逐章创作。')" />
               <small>{{ storyText.length.toLocaleString(dateLocale) }} {{ tr('字') }}</small>
             </div>
@@ -319,7 +328,7 @@ async function resumeImport() {
 
         <CreationConfigBar :modes-label="tr('内容类型')">
           <template #modes>
-            <AppSegmentedSwitch v-model="sourceKind" class="source-kind-switch"
+            <AppSegmentedSwitch v-if="sourceMode !== 'blank'" v-model="sourceKind" class="source-kind-switch"
               :items="[{value:'novel',label:tr('小说原文')},{value:'screenplay',label:tr('现成剧本')}]"
               :label="tr('内容类型')" :disabled="creating || Boolean(importedProjectId)" />
           </template>

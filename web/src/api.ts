@@ -62,7 +62,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|batch|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|chapter\/\d+\/optimize-prompts|\d+\/storyboard-sheet)|video\/(?:generate\/|batch|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
@@ -323,8 +323,10 @@ export const api = {
     return request<SingleResponse<AuthMe['user']>>('/auth/avatar', { method: 'POST', body })
   },
   logout: () => request<SingleResponse<null>>('/auth/logout', { method: 'POST' }),
-  teamBalance: (teamId?: number) => request<SingleResponse<{ team_id: number; balance: number }>>(`/team/balance${qs({ team_id: teamId })}`),
-  teamTopUp: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<{ team_id: number; balance: number }>>('/team/balance/topup', { method: 'POST', body: JSON.stringify(data) }),
+  teamBalance: (teamId?: number) => request<SingleResponse<{ team_id: number; balance: string; last_transaction_id: number }>>(`/team/balance${qs({ team_id: teamId })}`),
+  teamDeduct: (data: { team_id: number; amount: string; note: string; last_transaction_id: number }) => request<SingleResponse<{ team_id: number; balance: string; last_transaction_id: number }>>('/team/balance/deduct', { method: 'POST', body: JSON.stringify(data) }),
+  archiveTeam: (teamId: number) => request<SingleResponse<null>>(`/team/teams/${teamId}`, { method: 'DELETE' }),
+  teamTopUp: (data: { team_id: number; amount: number | string; note?: string; last_transaction_id?: number }) => request<SingleResponse<{ team_id: number; balance: number }>>('/team/balance/topup', { method: 'POST', body: JSON.stringify(data) }),
   createRechargeOrder: (data: { team_id: number; amount: number; note?: string }) => request<SingleResponse<RechargeOrder>>('/team/balance/recharge', { method: 'POST', body: JSON.stringify(data) }),
   queryRechargeOrder: (outTradeNo: string) => request<SingleResponse<RechargeOrderDetail>>(`/team/balance/recharge/${encodeURIComponent(outTradeNo)}`),
   syncRechargeOrder: (outTradeNo: string) => request<SingleResponse<RechargeOrderDetail>>(`/team/balance/recharge/${encodeURIComponent(outTradeNo)}`),
@@ -345,7 +347,10 @@ export const api = {
   userStats: () => request<SingleResponse<UserStats>>('/users/stats'),
   users: (page = 1, pageSize = 100, search?: string) => request<PaginationResponse<UserItem>>(`/users${qs({ page, page_size: pageSize, search })}`),
   updateUser: (id: number, data: { status: number }) => request<SingleResponse<UserItem>>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteUser: (id: number) => request<SingleResponse<null>>(`/users/${id}`, { method: 'DELETE' }),
+  deleteUser: (id: number, archiveTeams: number[] = []) => {
+    const query = new URLSearchParams(archiveTeams.map(team => ['archive_team_id', String(team)]))
+    return request<SingleResponse<null>>(`/users/${id}${query.size ? '?' + query : ''}`, { method: 'DELETE' })
+  },
   novels: () => request<PaginationResponse<Novel>>('/novel?page=1&page_size=100'),
   novel: (id: number) => request<SingleResponse<Novel>>(`/novel/${id}`),
   novelMeta: (id: number) => request<SingleResponse<NovelMeta>>(`/novel/${id}/meta`),
@@ -422,6 +427,12 @@ export const api = {
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
   extractVideoLastFrame: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/last-frame`, { method: 'POST' }),
+  optimizeChapterPrompts: (chapterId: number, shots: Array<{
+    scene_id: number; expected_prompt: string | null; cached_prompt?: string; model_config_id: number
+    generic_prompt: string; generation_mode: 'reference' | 'keyframes'; duration: number; aspect_ratio: string
+    submitted_media: { type: 'image' | 'video' | 'audio'; label: string }[]
+  }>) => request<SingleResponse<AiTask>>(`/scene/chapter/${chapterId}/optimize-prompts`, {method: 'POST', body: JSON.stringify({shots})}),
+  latestPromptBatch: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/scene/chapter/${chapterId}/optimize-prompts/latest`),
   optimizeScenePrompt: (sceneId: number, input: {
     model_config_id: number; generic_prompt: string; generation_mode: 'reference' | 'keyframes'
     duration: number; aspect_ratio: string; submitted_media: { type: 'image' | 'video' | 'audio'; label: string }[]

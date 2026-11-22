@@ -81,3 +81,15 @@ it('aborts owned work without erasing successful canvas nodes', () => {
   expect(store.busySceneIds).toEqual([])
   expect(store.nodes.map(node => node.key)).toEqual(['note-1'])
 })
+
+it('uses the chapter request already started by the workflow page', async () => {
+  setActivePinia(createPinia())
+  const store = useWorkbenchStore()
+  vi.mocked(api.workbenchBootstrap).mockClear()
+  const request = deferred<SingleResponse<WorkbenchBootstrap>>()
+  const loading = store.load(9, 1, request.promise)
+  request.resolve({ code: 0, message: 'ok', data: { chapter: chapter(1, '共享章节'), assets: [], scenes: [], videos: {} } })
+  await loading
+  expect(api.workbenchBootstrap).not.toHaveBeenCalled()
+  expect(store.chapter?.name).toBe('共享章节')
+})

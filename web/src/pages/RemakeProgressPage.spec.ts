@@ -166,7 +166,7 @@ it('shows the saved clip count from the progress snapshot after reopening the pa
   vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snapshot})
   const wrapper = mount(RemakeProgressPage)
   await flushPromises()
-  expect(wrapper.text()).toContain('已保存 14/103 个片段的分镜')
+  expect(wrapper.text()).toContain('已生成 14/103 个分镜')
   expect(api.retryRemakeSource).not.toHaveBeenCalled()
   wrapper.unmount()
 })
@@ -179,5 +179,61 @@ it('offers retry for untouched clips while submitted clips await results', async
   const wrapper = mount(RemakeProgressPage)
   await flushPromises()
   expect(wrapper.findAll('button').some(button => button.text().includes('重试未完成片段（79）'))).toBe(true)
+  wrapper.unmount()
+})
+
+it('shows simultaneous stages and real shot states without marking a pending shot confirmed', async () => {
+  vi.mocked(api.streamRemakeProjectProgress).mockImplementation(async (_id, _update, signal) => {
+    await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  const snap = progressSnapshot()
+  const first = snap.sources[0]!
+  first.task = {...first.task!, stage:'assets_and_scenes'}
+  snap.sources.push({...first, source_id:10, episode_number:2, task:{...first.task, id:'second', stage:'generating_storyboards',
+    completed_clips:1,total_clips:4,shot_states:{1:'completed',2:'boundary_pending',3:'waiting_capacity'}}})
+  snap.source_summary = {total:2,queued:0,processing:2,completed:0,failed:0}
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snap})
+  const wrapper = mount(RemakeProgressPage)
+  await flushPromises()
+  expect(wrapper.findAll('.pipeline-list .is-active')).toHaveLength(3)
+  expect(wrapper.get('.episode-counts').text()).toContain('处理中 2')
+  const dialog = wrapper.get<HTMLDialogElement>('dialog')
+  expect(dialog.element.open).toBe(false)
+  expect(wrapper.findAll('.episode-item li')).toHaveLength(0)
+  expect(wrapper.findAll('.details-trigger')).toHaveLength(1)
+  await wrapper.get('.details-trigger').trigger('click')
+  expect(dialog.element.open).toBe(true)
+  expect(dialog.get('h2').text()).toContain('第 2 集')
+  expect(dialog.findAll('li').map(item => item.text().replace(/\s/g,''))).toEqual(['镜头1已确认','镜头2待衔接校对','镜头3等待模型名额','镜头4待处理'])
+  expect(wrapper.find('.episode-list dialog').exists()).toBe(false)
+  const update = vi.mocked(api.streamRemakeProjectProgress).mock.calls[0]![1]
+  const revised = structuredClone(snap)
+  revised.sources[1]!.task!.shot_states = {2:'completed'}
+  update(revised)
+  await flushPromises()
+  expect(dialog.findAll('li')[1]!.text()).toContain('已确认')
+  await dialog.get('button').trigger('click')
+  expect(dialog.element.open).toBe(false)
+  expect(dialog.findAll('li')).toHaveLength(0)
+  wrapper.unmount()
+})
+
+it.each([0, 2])('shows the failed asset step and links only to written shots (%i)', async count => {
+  const snap = progressSnapshot({aggregate_status:'failed',terminal:true,overall_progress:87,
+    source_summary:{total:1,queued:0,processing:0,completed:0,failed:1}})
+  const source = snap.sources[0]!
+  Object.assign(source,{media_status:'failed',saved_scene_count:count})
+  Object.assign(source.task!,{status:TaskStatusEnum.FAILED,stage:'failed',failed_stage:'extracting_assets',
+    progress:87,completed_clips:2,total_clips:2})
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snap})
+  const wrapper = mount(RemakeProgressPage, {global:{stubs:{RouterLink:{props:['to'],template:'<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('资产识别未完成')
+  expect(wrapper.get('.pipeline-list .is-failed').text()).toContain('识别全局设定')
+  expect(wrapper.findAll('.pipeline-list .is-completed').map(s=>s.text()).join(' ')).toContain('生成专业分镜')
+  expect(wrapper.find('.storyboard-link').exists()).toBe(Boolean(count))
+  expect(wrapper.text()).not.toContain('87%')
+  expect(wrapper.text()).toContain('重试资产识别')
+  expect(replace).not.toHaveBeenCalled()
   wrapper.unmount()
 })

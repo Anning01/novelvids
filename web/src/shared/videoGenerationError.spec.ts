@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { formatVideoGenerationError } from './videoGenerationError'
 
 describe('formatVideoGenerationError', () => {
+  it('explains the discount channel size limit and retains the request ID', () => {
+    const error = formatVideoGenerationError('参考素材总大小不能超过 50 MB（ReferenceMediaTotalSizeExceeded）（HTTP 422，request_id=limit-1）')
+    expect(error.message).toContain('合计不能超过 50 MB')
+    expect(error.suggestion).toContain('减少或压缩')
+    expect(error.requestId).toBe('limit-1')
+  })
+
   it.each([
     ["input image 'content[2]' may contain real person Request id: upstream-123（InputImageSensitiveContentDetected.PrivacyInformation）", 'privacy', 2, 'InputImageSensitiveContentDetected.PrivacyInformation'],
     ['resource download failed: content[1].image_uri Request id: upstream-123（InvalidParameterValue）', 'download', 1, 'InvalidParameterValue'],

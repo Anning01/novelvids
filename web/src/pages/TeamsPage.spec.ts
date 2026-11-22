@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import TeamsPage from './TeamsPage.vue'
 import { api } from '@/api'
+import { resolveAppConfirm } from '@/shared/confirmDialog'
 
 function mountPage() {
   const router = createRouter({
@@ -130,16 +131,36 @@ describe('TeamsPage', () => {
     vi.spyOn(api, 'teamTopUp').mockResolvedValue({
       data: { team_id: 1, balance: 50 },
     } as never)
-    vi.spyOn(window, 'prompt').mockReturnValue('50')
+    vi.spyOn(api, 'teamBalance').mockResolvedValue({data: {team_id: 1, balance: '0', last_transaction_id: 0}} as never)
 
     const wrapper = mountPage()
     await flushPromises()
     const buttons = wrapper.findAll('button')
-    const topUpButton = buttons.find(button => button.text() === '充值')
+    const topUpButton = buttons.find(button => button.text() === '调整额度')
     expect(topUpButton).toBeTruthy()
     await topUpButton!.trigger('click')
     await flushPromises()
 
-    expect(api.teamTopUp).toHaveBeenCalledWith({ team_id: 1, amount: 50, note: '管理端充值' })
+    await wrapper.get('.quota-field input[inputmode="decimal"]').setValue('50')
+    await wrapper.get('.quota-field input[maxlength]').setValue('手工补额')
+    await wrapper.get('.quota-dialog form').trigger('submit')
+    await flushPromises()
+    expect(api.teamTopUp).toHaveBeenCalledWith({ team_id: 1, amount: '50', note: '手工补额', last_transaction_id: 0 })
   })
+})
+
+it('refreshes the list after dissolution and removes the team row', async () => {
+  const team = { id: 4, name: '旧团队', balance: 15, status: 1, member_count: 1 }
+  vi.spyOn(api, 'teams')
+    .mockResolvedValueOnce({ data: { items: [team], pagination: { total: 1 } } } as never)
+    .mockResolvedValue({ data: { items: [], pagination: { total: 0 } } } as never)
+  const archive = vi.spyOn(api, 'archiveTeam').mockResolvedValue({ data: null } as never)
+  const wrapper = mountPage()
+  await flushPromises()
+  await wrapper.get('tbody tr').findAll('button').find(button => button.text() === '解散团队')!.trigger('click')
+  resolveAppConfirm(true)
+  await flushPromises()
+  expect(archive).toHaveBeenCalledWith(team.id)
+  expect(wrapper.find('tbody tr').exists()).toBe(false)
+  wrapper.unmount()
 })

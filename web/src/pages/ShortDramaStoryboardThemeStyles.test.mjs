@@ -13,8 +13,17 @@ describe('分镜页面深色主题与图片回退', () => {
     expect(referenceSource).not.toContain('@media (prefers-color-scheme: dark)')
   })
 
-  it('falls back from generated thumbnails to original asset images', () => {
-    expect(pageSource).toContain('@error="fallbackImage($event, selectedAssetImage(scene, asset))"')
+  it('stretches the embedded scroll area to the toolbar in tall storyboard rows', () => {
+    const css = readFileSync('src/components/ScenePromptEditor.vue', 'utf8')
+    const container = css.match(/\.scene-prompt-editor\.is-embedded\s*\{([^}]+)\}/)[1]
+    const input = css.match(/\.scene-prompt-editor\.is-embedded \.scene-prompt-editor__input\s*\{([^}]+)\}/)[1]
+    expect(container).toContain('align-self: stretch')
+    expect(container).not.toContain('max-height: 600px')
+    expect(input).toContain('min-height: 100%')
+    expect(input).toContain('overflow-y: auto')
+  })
+
+  it('provides original asset images as fallbacks for prompt references', () => {
     expect(pageSource).toContain('fallbackUrl: selectedAssetImage(scene, asset)')
   })
 })

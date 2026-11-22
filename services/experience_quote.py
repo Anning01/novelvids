@@ -14,7 +14,7 @@ from prompts.experience import render_named_references, with_references
 from schemas.experience import ExperienceQuoteIn, ExperienceGenerateIn
 from services.billing.pricing import image_price_tier, compute_image_cost, compute_input_image_cost, compute_video_cost, TOKENS_PER_SECOND
 from services.image_generation.capabilities import validate_selection as image_selection
-from services.video.capabilities import validate_selection as video_selection
+from services.video.capabilities import capabilities_for_config, validate_selection as video_selection
 from services.video.reference_media import reference_mention_syntax, select_referenced_media
 
 
@@ -75,7 +75,7 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
         payload.model_config_id, team_id=ctx.team_id)
     try:
         if payload.task_type == 'video':
-            selected = video_selection(config.video_model_type, api_protocol=config.api_protocol, generation_mode='reference', resolution=payload.resolution,
+            selected = video_selection(capabilities_for_config(config), generation_mode='reference', resolution=payload.resolution,
                 aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
             pricing = _price(config.pricing, 'video', selected.resolution)
             if pricing.get('billing_unit') != 'second' and selected.resolution not in TOKENS_PER_SECOND:

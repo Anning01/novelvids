@@ -46,6 +46,7 @@ function render() {
 
 beforeEach(() => {
   document.body.innerHTML = ''
+  sessionStorage.clear()
   setActivePinia(createPinia())
   useAuthStore().enabled = false
   setLocale('zh')
@@ -99,6 +100,35 @@ it('sorts by recent production activity by default and supports name sorting', a
   expect(wrapper.findAll('.project-overview-card h2')[0]?.text()).toBe('未开始的故事')
   await wrapper.get('select[aria-label="项目排序"]').setValue('name')
   expect(wrapper.findAll('.project-overview-card h2').map(node => node.text())).toEqual(['星河来信', '未开始的故事'].sort((a, b) => a.localeCompare(b)))
+  wrapper.unmount()
+})
+
+it('orders the full filtered list by posted cost after billing loads, keeping pending amounts last', async () => {
+  const items = Array.from({ length: 14 }, (_, i) => project(i + 1, `项目 ${i + 1}`))
+  vi.mocked(api.projectOverview).mockResolvedValue(response(items))
+  let finish!: (v: Awaited<ReturnType<typeof api.billingProjects>>) => void
+  vi.mocked(api.billingProjects).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const wrapper = render()
+  await flushPromises()
+  const select = wrapper.get('select[aria-label="项目排序"]')
+  const titles = () => wrapper.findAll('.project-overview-card h2').map(node => node.text())
+  await select.setValue('cost_desc')
+  finish({ code: 0, message: 'ok', data: {
+    items: [
+      { novel_id: 1, novel_name: '项目 1', total_cost: 90, record_count: 1 },
+      { novel_id: 2, novel_name: '项目 2', total_cost: 8, record_count: 1 },
+      { novel_id: 14, novel_name: '项目 14', total_cost: 120, record_count: 1, pending_records: 1 },
+    ],
+    pagination: { total: 3, page: 1, page_size: 100, pages: 1 },
+  } })
+  await flushPromises()
+  expect(titles().slice(0, 2)).toEqual(['项目 1', '项目 2'])
+  expect(titles()).toHaveLength(12)
+  await wrapper.get('input[type="search"]').setValue('项目 1')
+  expect(titles().at(-1)).toBe('项目 14')
+  await select.setValue('cost_asc')
+  expect(titles()).toEqual(['项目 13', '项目 12', '项目 11', '项目 10', '项目 1', '项目 14'])
+  expect(api.billingProjects).toHaveBeenCalledTimes(1)
   wrapper.unmount()
 })
 
@@ -176,6 +206,8 @@ it('does not expose create or delete controls to a viewer', async () => {
   expect(api.billingProjects).not.toHaveBeenCalled()
   expect(wrapper.find('.projects-summary__item.is-cost').exists()).toBe(false)
   expect(wrapper.find('.project-overview-card__cost').exists()).toBe(false)
+  expect(wrapper.find('option[value="cost_desc"]').exists()).toBe(false)
+  expect(wrapper.find('option[value="cost_asc"]').exists()).toBe(false)
   wrapper.unmount()
 })
 
@@ -444,5 +476,80 @@ it('keeps diagnostic export in the collapsed support disclosure even if project 
   await support.get('button').trigger('click')
   await flushPromises()
   expect(exportDiagnostics).toHaveBeenCalledOnce()
+  wrapper.unmount()
+})
+
+it('filters series and home creations before pagination, retaining the source when the user returns', async () => {
+  const clips = Array.from({ length: 13 }, (_, i) => ({ ...project(i + 2, '单次作品 ' + i), author: '片段创作' }))
+  const series = project(1, '一集的短剧')
+  series.production.chapter_count = 1
+  vi.mocked(api.projectOverview).mockResolvedValue(response([series, ...clips]))
+  let wrapper = render()
+  await flushPromises()
+  const choose = (label: string) => wrapper.get('[aria-label="作品来源"]').findAll('button').find(button => button.text() === label)!.trigger('click')
+  await choose('剧集项目')
+  expect(wrapper.findAll('.project-overview-card h2').map(card => card.text())).toEqual(['一集的短剧'])
+  expect(wrapper.get('.project-overview-card__source').text()).toBe('剧集项目')
+  await choose('首页单次创作')
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(12)
+  expect(wrapper.get('.project-overview-card__source').text()).toBe('首页单次创作')
+  expect(wrapper.get('.project-overview-card').text()).not.toContain('已完成 0 集')
+  await wrapper.get('input[type="search"]').setValue('不存在')
+  expect(wrapper.text()).toContain('没有找到匹配的项目')
+  wrapper.unmount()
+  wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('首页单次创作')
+  await wrapper.get('input[type="search"]').setValue('一集的短剧')
+  await wrapper.get('.projects-page__empty button').trigger('click')
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('全部')
+  wrapper.unmount()
+})
+
+it('gives clips a media preview, media filters and their own summary while keeping controls above statistics', async () => {
+  const clip = { ...project(2, '风中的树', 'ready'), author: '片段创作', clip: { kind: 'image' as const, resolution: '2K', preview: '/media/tree.png' } }
+  vi.mocked(api.projectOverview).mockResolvedValue(response([project(1, '故事'), clip]))
+  const wrapper = render()
+  await flushPromises()
+  const controls = wrapper.get('.projects-library__toolbar')
+  expect(controls.element.compareDocumentPosition(wrapper.get('.projects-summary').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await controls.get('[aria-label="作品来源"]').findAll('button')[2]!.trigger('click')
+  const card = wrapper.get('.project-overview-card')
+  expect(card.get('img').attributes('src')).toContain('tree.png')
+  expect(card.text()).toContain('2K')
+  for (const label of ['章节数', '资产数', '成片时长']) expect(card.text()).not.toContain(label)
+  expect(wrapper.find('.projects-summary__item.is-chapters').exists()).toBe(false)
+  await controls.get('select[aria-label="创作类型"]').setValue('video')
+  expect(wrapper.text()).toContain('没有找到匹配的项目')
+  await controls.get('select[aria-label="创作类型"]').setValue('image')
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(1)
+  wrapper.unmount()
+})
+
+it('separates remake projects, restores their selection and resets search, source, state and sort', async () => {
+  const remake = { ...project(3, '翻拍雨夜', 'in_progress'), workflow_kind: 'remake' as const, remake: { source_count: 3, analyzed_count: 2 } }
+  const clip = { ...project(2, '雨景'), author: '片段创作' }
+  vi.mocked(api.projectOverview).mockResolvedValue(response([project(1, '雨夜'), clip, remake]))
+  let wrapper = render()
+  await flushPromises()
+  const choose = (label: string) => wrapper.get('[aria-label="作品来源"]').findAll('button').find(b => b.text() === label)!.trigger('click')
+  await choose('剧集项目')
+  expect(wrapper.findAll('.project-overview-card h2').map(h => h.text())).toEqual(['雨夜'])
+  await choose('重制工坊')
+  const card = wrapper.get('.project-overview-card')
+  expect(card.get('h2').text()).toBe('翻拍雨夜')
+  expect(card.get('.remake-stages').text()).toContain('2 / 3')
+  expect(card.text()).not.toContain('章节数')
+  wrapper.unmount()
+  wrapper = render()
+  await flushPromises()
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('重制工坊')
+  await wrapper.get('input[type="search"]').setValue('翻拍')
+  await wrapper.get('[aria-label="创作状态"]').setValue('in_progress')
+  await wrapper.get('[aria-label="项目排序"]').setValue('name')
+  await wrapper.get('.projects-library__reset').trigger('click')
+  expect(wrapper.findAll('.project-overview-card')).toHaveLength(3)
+  expect(wrapper.get<HTMLSelectElement>('[aria-label="项目排序"]').element.value).toBe('updated')
+  expect(wrapper.get('[aria-label="作品来源"] [aria-pressed="true"]').text()).toBe('全部')
   wrapper.unmount()
 })

@@ -12,14 +12,14 @@ from services.platform.http_contract import check_upstream_response, public_task
 from services.video.base import BaseVideoGenerator, VideoProviderError
 from services.video.capabilities import capabilities_for, validate_selection
 from services.video.content import prepare_video_content
-from services.video.provider_http import safe_endpoint
+from services.video.provider_http import public_provider_error, request_id, safe_endpoint, structured_video_error
 from utils.enums import TaskStatusEnum
 
 logger = logging.getLogger(__name__)
 
 
 class AutoDLGenerationError(VideoProviderError):
-    """可安全持久化的渠道错误，不回显供应商正文。"""
+    """可安全持久化的渠道错误。"""
 
 
 def _workflow_endpoint(base_url: str) -> str:
@@ -32,7 +32,7 @@ def _workflow_endpoint(base_url: str) -> str:
 
 
 class AutoDLVideoGenerator(BaseVideoGenerator):
-    async def _request(self, method: str, url: str, payload: dict | None = None) -> dict:
+    async def _request(self, method: str, url: str, payload: dict | None = None) -> tuple[dict, dict[str, str]]:
         headers = {"Authorization": self.config.api_key, "Content-Type": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -42,18 +42,26 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
         # 仅记录结构与状态，Token、提示词、参考素材和结果签名 URL 均不入日志。
         logger.info("autodl_response endpoint=%s http_status=%s", safe_endpoint(url), response.status_code)
         check_upstream_response(response)
-        if response.status_code >= 400:
-            raise AutoDLGenerationError(f"AutoDL 视频请求失败（HTTP {response.status_code}）")
         try:
             body = response.json()
         except ValueError as exc:
+            if response.is_error:
+                raise AutoDLGenerationError(f"AutoDL 视频请求失败（HTTP {response.status_code}）") from exc
             raise AutoDLGenerationError("AutoDL 返回了无法解析的响应") from exc
-        if not isinstance(body, dict) or body.get("code") != "Success":
+        if not isinstance(body, dict):
             raise AutoDLGenerationError("AutoDL 视频接口返回错误，请在渠道后台检查任务")
         data = body.get("data")
+        secrets = (self.config.api_key,)
+        error = structured_video_error(body, secrets=secrets)
+        if isinstance(data, dict):
+            error.update(structured_video_error(data, secrets=secrets))
+        if response.is_error or body.get("code") != "Success":
+            detail = public_provider_error({"error": error}, status_code=response.status_code,
+                transport_request_id=request_id(response), secrets=secrets, trusted_details=True)
+            raise AutoDLGenerationError(detail)
         if not isinstance(data, dict):
             raise AutoDLGenerationError("AutoDL 响应缺少任务数据")
-        return data
+        return data, error
 
     async def submit(
         self, prompt: str, negative_prompt: str = "",
@@ -100,7 +108,7 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
             safe_endpoint(url), prepared.reference_image_count, prepared.reference_audio_count,
             selection.duration, payload["resolution"],
         )
-        data = await self._request("POST", url, payload)
+        data, _ = await self._request("POST", url, payload)
         task_id = data.get("task_id")
         if not isinstance(task_id, str) or not task_id.strip():
             raise AutoDLGenerationError("AutoDL 未返回任务 ID")
@@ -108,7 +116,7 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
 
     async def query(self, external_task_id: str) -> dict[str, Any]:
         url = f"{_workflow_endpoint(self.config.base_url)}/result/{quote(external_task_id, safe='')}"
-        data = await self._request("GET", url)
+        data, error = await self._request("GET", url)
         status = str(data.get("status") or "").upper()
         if status in {"SUCCESS", "COMPLETED"}:
             results = data.get("results")
@@ -124,7 +132,10 @@ class AutoDLVideoGenerator(BaseVideoGenerator):
                         return self._build_result(TaskStatusEnum.completed, progress=100, url=video_url)
             raise AutoDLGenerationError("AutoDL 任务成功但未返回视频 URL")
         if status in {"FAILED", "ERROR"}:
-            return self._build_result(TaskStatusEnum.failed, error=public_task_error(data, "AutoDL 视频生成任务失败，请在渠道后台检查任务"))
+            message = error.get("message") or "视频生成失败，渠道未返回具体原因"
+            safe_error = {"error": {"code": error.get("code") or "video_generation_failed", "message": message}}
+            return self._build_result(TaskStatusEnum.failed,
+                error=public_task_error(safe_error, public_provider_error(safe_error, trusted_details=True)))
         if status in {"CANCELLED", "CANCELED"}:
             return self._build_result(TaskStatusEnum.cancelled)
         if status == "QUEUED":

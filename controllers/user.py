@@ -7,6 +7,8 @@ from decimal import Decimal
 from fastapi import HTTPException
 from tortoise.expressions import Q
 from tortoise.functions import Count, Sum
+from tortoise.transactions import in_transaction
+from services.team_lifecycle import archive_locked_team
 
 from auth.security import hash_password
 from auth.models import Team, TeamMember, User
@@ -39,6 +41,13 @@ class UserController:
             .annotate(count=Count("id"))
             .values("user_id", "count")
         }
+        owned = {}
+        for team in await Team.filter(owner_user_id__in=[user.id for user in users]).order_by("id").values(
+            "id", "name", "balance", "owner_user_id"
+        ):
+            owned.setdefault(team["owner_user_id"], []).append({
+                "id": team["id"], "name": team["name"], "balance": format(team["balance"], "f"),
+            })
         items = [
             {
                 "id": user.id,
@@ -49,6 +58,7 @@ class UserController:
                 "created_at": user.created_at,
                 "total_cost": costs.get(user.id, Decimal("0")),
                 "team_count": team_counts.get(user.id, 0),
+                "owned_teams": owned.get(user.id, []),
             }
             for user in users
         ]
@@ -99,17 +109,24 @@ class UserController:
             "team_count": await TeamMember.filter(user=user).count(),
         }
 
-    async def remove_user(self, user_id: int, operator_id: int) -> None:
+    async def remove_user(self, user_id: int, operator_id: int, archive_team_ids: list[int] | None = None) -> None:
         if user_id == operator_id:
             raise HTTPException(status_code=400, detail=localized_message('不能删除自己'))
-        user = await self._get_user(user_id)
-        if user.is_super_admin:
-            raise HTTPException(status_code=400, detail=localized_message('超级管理员账号不可删除'))
-        if await Team.filter(owner_user_id=user.id).exists():
-            raise HTTPException(
-                status_code=400, detail=localized_message('该用户是团队所有人，请先转移或删除其团队')
-            )
-        await user.delete()  # 级联删除成员关系与会话
+        async with in_transaction():
+            # Team creation also locks the owner before assigning ownership.
+            user = await User.filter(id=user_id).select_for_update().first()
+            if user is None:
+                raise HTTPException(404, localized_message("用户不存在"))
+            if user.is_super_admin:
+                raise HTTPException(status_code=400, detail=localized_message('超级管理员账号不可删除'))
+            owned = await Team.filter(owner_user_id=user_id).select_for_update().order_by("id")
+            if owned and not archive_team_ids:
+                raise HTTPException(400, localized_message('该用户是团队所有人，请先解散团队，或确认解散团队并删除用户'))
+            if {team.id for team in owned} != set(archive_team_ids or []):
+                raise HTTPException(409, localized_message("用户拥有的团队已变更，请刷新后重新确认"))
+            for team in owned:
+                await archive_locked_team(team)
+            await user.delete()
 
     async def stats(self) -> dict:
         user_count = await User.all().count()

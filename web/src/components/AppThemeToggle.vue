@@ -13,7 +13,7 @@ withDefaults(defineProps<{
   placement: 'floating',
 })
 
-const theme = inject(appThemeControllerKey) ?? useAppThemeController()
+const theme = inject(appThemeControllerKey, undefined) ?? useAppThemeController()
 const options: Array<{ value: AppThemePreference; label: string; icon: typeof Monitor }> = [
   { value: 'system', get label() { return tr('跟随系统') }, icon: Monitor },
   { value: 'light', get label() { return tr('浅色') }, icon: Sun },

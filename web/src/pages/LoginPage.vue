@@ -109,7 +109,7 @@ async function qilingAuthenticated(session: LoginResult) {
     <div class="cinematic-login__layout">
       <div class="cinematic-login__statement">
         <h1 class="cinematic-login__brand">
-          <img src="/logo.png" alt="" width="72" height="72" />
+          <img src="/studio-logo.webp" alt="" width="72" height="72" />
           <span class="cinematic-login__brand-name">
             <span class="cinematic-login__brand-title">{{ tr('猫影短剧') }}</span>
             <span class="cinematic-login__wordmark" role="img" aria-label="NOVELVIDS">
@@ -206,7 +206,7 @@ async function qilingAuthenticated(session: LoginResult) {
   color: #f8fafc;
   background: #090f1d;
 }
-.cinematic-login__background { position: absolute; z-index: -1; inset: 0; background: #090f1d url('/background-dark.png') center / cover; }
+.cinematic-login__background { position: absolute; z-index: -1; inset: 0; background: #090f1d url('/login-background.webp') center / cover; }
 .cinematic-login__background video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .cinematic-login__background::after {
   position: absolute;

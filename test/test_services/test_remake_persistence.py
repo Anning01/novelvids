@@ -266,3 +266,144 @@ async def test_persistence_rolls_back_all_assets_and_scenes_when_reference_write
     assert chapter.status == TaskStatusEnum.pending.value
     assert chapter.workflow_status == WorkflowStatus.draft.value
     assert source.media_status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_three_episode_binding_uses_scoped_aliases_and_preserves_user_fields():
+    import asyncio
+    from types import SimpleNamespace
+    first = await _source()
+    novel = await first.novel
+    sources = [first]
+    for i in (2, 3):
+        chapter = await Chapter.create(novel=novel, number=i, name=str(i), content='')
+        sources.append(SimpleNamespace(novel_id=novel.id, chapter_id=chapter.id, episode_number=i, id=first.id + i))
+    hero = await Asset.create(novel=novel, asset_type=1, canonical_name='林澈', aliases=['将军'],
+                              description='人工设定', base_traits='人工提示', main_image='/hero.png', metadata={'voice':'原音'})
+    other = await Novel.create(name='其他项目')
+    await Asset.create(novel=other, asset_type=1, canonical_name='将军', aliases=['林澈'])
+    service = RemakeResultPersistence()
+    catalog = await service.project_catalog(first)
+    bound = [await service.bind_assets(first, _assets(), catalog)]
+    seeded = await service.project_catalog(first)
+    bound.extend(await asyncio.gather(*(service.bind_assets(s, _assets(), seeded) for s in reversed(sources[1:]))))
+    assert [b['characters'][0]['project_asset_id'] for b in bound] == [hero.id] * 3
+    assert all(b['characters'][0]['name'] == '林澈' for b in bound)
+    assert len({b['objects'][0]['project_asset_id'] for b in bound}) == 1
+    await hero.refresh_from_db()
+    assert (hero.source_chapters, hero.description, hero.base_traits, hero.main_image, hero.metadata['voice']) == (
+        [1,2,3], '人工设定', '人工提示', '/hero.png', '原音')
+    assert len(catalog) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrently_introduced_same_name_with_different_evidence_keeps_two_identities():
+    from types import SimpleNamespace
+    source = await _source()
+    service = RemakeResultPersistence()
+    first = await service.bind_assets(source, _assets('青年男子'), [])
+    chapter = await Chapter.create(novel_id=source.novel_id, number=2, name='第二集', content='')
+    second = await service.bind_assets(SimpleNamespace(novel_id=source.novel_id, chapter_id=chapter.id, id=99, episode_number=2),
+                                       _assets('白发老妇'), [])
+    assert first['characters'][0]['project_asset_id'] != second['characters'][0]['project_asset_id']
+    assert (await Asset.get(id=second['characters'][0]['project_asset_id'])).canonical_name == '将军 · EP2'
+
+
+@pytest.mark.asyncio
+async def test_named_outfits_reuse_subject_and_persist_the_confirmed_variant_on_the_shot():
+    from models.asset_variant import AssetVariant
+    source = await _source()
+    svc = RemakeResultPersistence()
+    candidates = _assets()
+    candidates['characters'][0]['name'] = '将军（礼服形态）'
+    bound = await svc.bind_assets(source, candidates, [])
+    actor = bound['characters'][0]
+    assert actor['name'] == '将军#礼服形态'
+    variant = await AssetVariant.get(id=actor['project_variant_id'])
+    assert variant.asset_id == actor['project_asset_id'] and variant.chapter_numbers == [1]
+    await svc.persist(source=source, assets=bound, prompt_document={'prompts':[_prompt(1)]},pipeline_metadata={})
+    scene = await Scene.get(chapter_id=source.chapter_id)
+    assert scene.metadata['asset_variant_ids'][str(variant.asset_id)] == [variant.id]
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_homonyms_in_one_episode_survive_normalization():
+    from services.remake.prompt_render import normalize_global_assets
+    source = await _source()
+    one = _assets("值班青年")["characters"][0]
+    two = _assets("另一名年长访客")["characters"][0]
+    # The model's local reference IDs are assigned during normalization.
+    rows = [{k:v for k,v in item.items() if k != 'id'} for item in (one,two,two)]
+    normalized = normalize_global_assets({'characters':rows}, separate_conflicts=True)
+    bound = (await RemakeResultPersistence().bind_assets(source, normalized, []))['characters']
+    assert len(bound) == 2 and bound[0]['project_asset_id'] != bound[1]['project_asset_id']
+    assert bound[1]['identity_review']
+    assert (await Asset.get(id=bound[1]['project_asset_id'])).metadata['identity_review']
+
+
+@pytest.mark.asyncio
+async def test_parallel_inventories_share_confirmed_relationship_and_distinguish_a_homonym():
+    from types import SimpleNamespace
+    first = await _source()
+    svc = RemakeResultPersistence()
+    sources = [first]
+    for i in (2,3,4):
+        chapter = await Chapter.create(novel_id=first.novel_id, number=i, name=str(i), content='')
+        sources.append(SimpleNamespace(novel_id=first.novel_id, chapter_id=chapter.id, id=first.id+i, episode_number=i))
+
+    async def bind(source, form, counterpart):
+        assets = _assets(f'第{source.episode_number}集的独立设定')
+        person = assets['characters'][0]
+        witness = {**person, 'id': 'character-002', 'name': counterpart}
+        person.update(name='文静#'+form, visual_fields={'cross_episode_identity':'spouse:'+counterpart})
+        assets['characters'].append(witness)
+        result = await svc.bind_assets(source, assets, [], use_identity_evidence=True)
+        return result['characters'][0]
+
+    a = await bind(sources[0], '居家形态', '建平')
+    b = await bind(sources[1], '花店形态', '建平')
+    c = await bind(sources[2], '花店形态', '孟川')
+    d = await bind(sources[3], '舞台形态', '孟川')
+    assert a['project_asset_id'] == b['project_asset_id'] != c['project_asset_id'] == d['project_asset_id']
+    assert a['project_variant_id'] != b['project_variant_id']
+
+
+def test_identity_evidence_uses_typed_source_facts_and_stays_out_of_visual_prompts():
+    from prompts.remake import parallel_identity_instruction
+    from services.remake.identity_evidence import identity_anchor
+    from services.remake.asset_validation import render_remake_assets
+    from test.remake_fixtures import design_fields
+    def item(value):
+        return {'name':'甲','description':'人物设定','visual_fields':{**design_fields(),'cross_episode_identity':value}}
+    assert identity_anchor(item('spouse:乙'), 'characters', {'乙'}) == 'spouse:乙'
+    assert identity_anchor(item('spouse:某人'), 'characters', {'乙'}) is None
+    assert identity_anchor(item('spouse:乙'), 'objects', {'乙'}) is None
+    assert identity_anchor(item('serial:AX-391'), 'objects', set()) == 'serial:ax-391'
+    assert identity_anchor(item('红色'), 'objects', set()) is None
+    rendered = render_remake_assets({'characters':[item('spouse:乙')]},synthetic_snapshot(),'zh','9:16')
+    assert 'cross_episode_identity' not in rendered['characters'][0]['description']
+    for language in ('zh','en'):
+        assert 'cross_episode_identity' in parallel_identity_instruction(language)
+
+
+@pytest.mark.asyncio
+async def test_partial_prompts_survive_asset_failure_and_edits_survive_retry():
+    from models.ai_task import AiTask
+    source = await _source()
+    task = await AiTask.create(task_type=6, status=2)
+    source.analysis_task = task
+    await source.save(update_fields=['analysis_task_id'])
+    service = RemakeResultPersistence()
+    prompts = [_legacy_prompt(1), _legacy_prompt(2)]
+    await service.save_available_shots(source, prompts, task.id)
+    scenes = await Scene.filter(chapter_id=source.chapter_id).order_by('sequence')
+    assert [s.prompt for s in scenes] == [p['prompt'] for p in prompts]
+    await Scene.filter(id=scenes[0].id).update(prompt='Edited in workspace')
+    await service.save_available_shots(source, [prompts[0]], task.id)
+    assert await Scene.filter(chapter_id=source.chapter_id).count() == 2
+    await service.persist(source=source,assets=_assets(),prompt_document={'prompts':[_prompt(1),_prompt(2)]},pipeline_metadata={})
+    await scenes[0].refresh_from_db()
+    await scenes[1].refresh_from_db()
+    assert scenes[0].prompt == 'Edited in workspace'
+    assert 'partial_prompt_hash' not in scenes[1].metadata
+    assert await scenes[1].assets.all().count() > 0

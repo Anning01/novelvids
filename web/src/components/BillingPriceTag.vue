@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   pricing?: ModelPricing | null
   prefix?: string
   compact?: boolean
+  showEstimateState?: boolean
 }>(), {
   get prefix() { return tr('约') },
 })
@@ -22,12 +23,13 @@ const description = computed(() => pricingDiscountDescription(props.pricing))
 </script>
 
 <template>
-  <span v-if="cost > 0" class="billing-price-tag" :title="compact && isDiscounted ? `¥${cost.toFixed(2)} → ¥${final.toFixed(2)}` : undefined">
+  <span v-if="Number.isFinite(cost) && (cost > 0 || (showEstimateState && cost === 0))" class="billing-price-tag" :title="isDiscounted ? `¥${cost.toFixed(2)} → ¥${final.toFixed(2)}` : undefined">
     {{ prefix }}
     <s v-if="isDiscounted && !compact" class="billing-price-tag__original">¥{{ cost.toFixed(2) }}</s>
     <span class="billing-price-tag__final">¥{{ final.toFixed(2) }}</span>
     <span v-if="isDiscounted" class="billing-price-tag__badge" :title="description || undefined" :aria-label="tr('优惠')"><BadgePercent :size="14" /></span>
   </span>
+  <span v-else-if="showEstimateState" class="billing-price-tag">{{ tr('暂未报价') }}</span>
 </template>
 
 <style scoped>

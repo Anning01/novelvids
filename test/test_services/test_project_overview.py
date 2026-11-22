@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -161,3 +162,98 @@ def test_only_finite_reported_video_durations_are_accepted(value):
     assert _reported_seconds({"metadata": {"provider_accounting": {
         "usage_reported": True, "reported_seconds": value,
     }}}) is None
+
+
+@pytest.mark.asyncio
+async def test_overlapping_reads_share_only_the_current_scope_and_survive_disconnect(monkeypatch):
+    from services import project_overview as service
+
+    started = asyncio.Queue()
+    release = asyncio.Event()
+    calls = []
+    original = service._load_project_overview
+
+    async def load(team_id):
+        calls.append(team_id)
+        await started.put(team_id)
+        await release.wait()
+        return await original(team_id)
+
+    monkeypatch.setattr(service, '_load_project_overview', load)
+    first = asyncio.create_task(project_overview(7))
+    assert await started.get() == 7
+    same = asyncio.create_task(project_overview(7))
+    other = asyncio.create_task(project_overview(8))
+    global_view = asyncio.create_task(project_overview())
+    assert {await started.get(), await started.get()} == {8, None}
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    release.set()
+    await asyncio.gather(same, other, global_view)
+    assert calls.count(7) == 1
+    await Novel.create(name='New project', team_id=7)
+    assert (await project_overview(7)).summary.project_count == 1
+    assert calls.count(7) == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_overview_can_be_retried(monkeypatch):
+    from unittest.mock import AsyncMock
+    from services import project_overview as service
+
+    expected = await project_overview(7)
+    load = AsyncMock(side_effect=[RuntimeError('read failed'), expected])
+    monkeypatch.setattr(service, '_load_project_overview', load)
+    with pytest.raises(RuntimeError, match='read failed'):
+        await project_overview(7)
+    assert await project_overview(7) == expected
+
+@pytest.mark.asyncio
+async def test_clip_overview_uses_current_output_for_preview_and_readiness():
+    image = await Novel.create(name="Loop", author="片段创作", project_setting='{"task_type":"image","output_format":"gif","resolution":"1K"}')
+    video = await Novel.create(name="Movie", author="片段创作", project_setting='{"task_type":"video"}')
+    await Asset.create(novel=image, asset_type=2, canonical_name="成图", main_image="/media/loop.gif")
+    await Asset.create(novel=video, asset_type=2, canonical_name="输入图", main_image="/media/input.png")
+    shot = await Scene.create(chapter=await chapter_for(video), sequence=1)
+    items = {i.id: i for i in (await project_overview()).items}
+    assert items[image.id].clip.kind == "gif" and items[image.id].clip.resolution == "1K"
+    assert items[image.id].clip.preview == "/media/loop.gif" and items[image.id].production.state == "ready"
+    assert items[video.id].clip.preview is None and items[video.id].production.state != "ready"
+    output = await video_for(shot)
+    await Video.filter(id=output.id).update(metadata={"poster_url": "/media/poster.webp"})
+    item = next(i for i in (await project_overview()).items if i.id == video.id)
+    assert item.clip.kind == "video" and item.clip.preview == "/media/poster.webp"
+    assert item.production.state == "ready" and item.production.completed_episode_count == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_clip_without_settings_still_lists_without_exposing_private_settings():
+    project = await Novel.create(name="Legacy clip", author="片段创作", project_setting="unstructured legacy settings")
+    await chapter_for(project)
+    item = (await project_overview()).items[0]
+    assert item.clip.kind is None and item.clip.preview is None
+    assert "project_setting" not in item.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_remake_summary_counts_only_its_own_sources_and_current_analysis():
+    from test.test_services.test_remake_progress import create_source
+    from utils.enums import TaskStatusEnum
+
+    remake = await Novel.create(name="Remake", workflow_kind="remake", team_id=7)
+    await create_source(remake, 1, status=TaskStatusEnum.completed, stage="completed", progress=100)
+    running = await create_source(remake, 2, status=TaskStatusEnum.running, stage="analyzing", progress=20)
+    # A new analysis takes precedence over a previously completed media status.
+    running.media_status = "completed"
+    await running.save()
+    legacy = await create_source(remake, 3, status=None, stage="", progress=0)
+    legacy.media_status = "completed"
+    await legacy.save()
+    other = await Novel.create(name="Other", workflow_kind="remake", team_id=8)
+    await create_source(other, 1, status=None, stage="", progress=0)
+    overview = await project_overview(7)
+    assert len(overview.items) == 1
+    item = overview.items[0]
+    assert item.remake.source_count == 3 and item.remake.analyzed_count == 2
+    assert item.production.state == "in_progress"

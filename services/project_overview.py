@@ -1,21 +1,27 @@
 """Batch-read project progress without loading manuscripts or estimating runtime."""
 
+import asyncio
 from collections import defaultdict
+import json
 import math
 
 from models.asset import Asset
 from models.asset_variant import AssetVariant
 from models.audio_reference import AudioReference
 from models.chapter import Chapter
-from models.novel import Novel
+from models.novel import CLIP_AUTHOR, Novel
+from models.remake_source import RemakeSource
 from models.scene import Scene
 from models.video import Video
 from schemas.project_overview import (
-    ProjectOverview, ProjectOverviewItem, ProjectOverviewSummary, ProjectProduction,
+    ClipOverview, ProjectOverview, ProjectOverviewItem, ProjectOverviewSummary, ProjectProduction, RemakeOverview,
 )
-from services.oss import normalize_media_url
+from services.oss import normalize_media_url, resolve_media_url
+from services.cover_derivatives import image_derivative_reference
+from services.video.poster import video_media_url
 from services.finished_episodes import completed_edit_rows
 from services.audio_references import audio_reference_accessible
+from utils.enums import TaskStatusEnum
 
 
 def _mapping(value):
@@ -46,7 +52,43 @@ def _reported_seconds(video):
     return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
+_pending_overviews: dict[int | None, asyncio.Task[ProjectOverview]] = {}
+
+
 async def project_overview(team_id: int | None = None) -> ProjectOverview:
+    task = _pending_overviews.get(team_id)
+    if task is None:
+        task = asyncio.create_task(_load_project_overview(team_id))
+        _pending_overviews[team_id] = task
+
+        def finished(completed: asyncio.Task[ProjectOverview]) -> None:
+            _pending_overviews.pop(team_id)
+            if not completed.cancelled():
+                completed.exception()  # Also observe failures if every HTTP caller disconnected.
+
+        task.add_done_callback(finished)
+    return await asyncio.shield(task)
+
+
+async def _clip_overviews(projects) -> dict[int, ClipOverview]:
+    ids = [p["id"] for p in projects if p["author"] == CLIP_AUTHOR]
+    if not ids:
+        return {}
+    clips = {}
+    for key, raw in await Novel.filter(id__in=ids).values_list("id", "project_setting"):
+        try:
+            settings = _mapping(json.loads(raw or "{}"))
+        except ValueError:
+            settings = {}
+        kind = settings.get("task_type")
+        if kind == "image" and settings.get("output_format") == "gif":
+            kind = "gif"
+        clips[key] = ClipOverview(kind=kind if kind in ("image", "gif", "video") else None,
+                                  resolution=settings.get("resolution") if isinstance(settings.get("resolution"), str) else None)
+    return clips
+
+
+async def _load_project_overview(team_id: int | None) -> ProjectOverview:
     projects = await Novel.filter(**({"team_id": team_id} if team_id is not None else {})).values(
         "id", "name", "author", "description", "cover", "total_chapters", "workflow_kind",
         "aspect_ratio", "resolution", "tags", "project_type", "created_at", "updated_at",
@@ -55,6 +97,7 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
     )
     if not projects:
         return ProjectOverview(items=[], summary=ProjectOverviewSummary())
+    clips = await _clip_overviews(projects)
     ids = [project["id"] for project in projects]
     chapters = await Chapter.filter(novel_id__in=ids).values("id", "novel_id", "number", "updated_at")
     assets = await Asset.filter(novel_id__in=ids).values(
@@ -92,11 +135,32 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
     def touch(project_id, value):
         metrics[project_id].latest_activity_at = max(metrics[project_id].latest_activity_at, value)
 
+    remakes = {p["id"]: RemakeOverview() for p in projects if p["workflow_kind"] == "remake"}
+    if remakes:
+        sources = await RemakeSource.filter(novel_id__in=list(remakes), chapter_id__in=[c["id"] for c in chapters]).values(
+            "novel_id", "media_status", "updated_at", "analysis_task__status", "analysis_task__updated_at",
+        )
+        for source in sources:
+            key = source["novel_id"]
+            remake = remakes[key]
+            remake.source_count += 1
+            status = source["analysis_task__status"]
+            if status == TaskStatusEnum.completed or (status is None and source["media_status"] == "completed"):
+                remake.analyzed_count += 1
+            touch(key, source["updated_at"])
+            if source["analysis_task__updated_at"]:
+                touch(key, source["analysis_task__updated_at"])
+
     asset_projects = {asset["id"]: asset["novel_id"] for asset in assets}
     for project in projects:
         add_voice(project["id"], project["narrator_audio_reference_id"])
+    clip_images = {}
     for asset in assets:
         project_id = asset["novel_id"]
+        if project_id in clips and asset["main_image"]:
+            previous = clip_images.get(project_id)
+            if previous is None or (asset["updated_at"], asset["id"]) > (previous["updated_at"], previous["id"]):
+                clip_images[project_id] = asset
         for field in ("main_image", "angle_image_1", "angle_image_2"):
             add_media(project_id, asset[field])
         add_voice(project_id, _mapping(asset["metadata"]).get("voice_reference_id"))
@@ -151,6 +215,13 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
                 and (active_id is None or video["id"] == active_id)), None)
             if selected is None:
                 continue
+            clip = clips.get(project_id)
+            if clip and clip.kind in (None, "video") and not clip.preview:
+                meta = _mapping(selected["metadata"])
+                if isinstance(poster := meta.get("poster_url"), str):
+                    clip.preview = video_media_url(poster)
+                if isinstance(thumbnail := meta.get("poster_thumbnail_url"), str):
+                    clip.thumbnail = video_media_url(thumbnail)
             completed += 1
             metric.completed_shot_count += 1
             add_media(project_id, selected["url"])
@@ -195,8 +266,23 @@ async def project_overview(team_id: int | None = None) -> ProjectOverview:
         metric.video_seconds = round(metric.video_seconds, 3)
         metric.finished_seconds = round(metric.finished_seconds, 3)
         metric.state = "ready" if metric.completed_episode_count else "in_progress" if metric.shot_count or metric.asset_count else "not_started"
+        remake = remakes.get(project["id"])
+        if remake and remake.source_count and metric.state == "not_started":
+            metric.state = "in_progress"
+        clip = clips.get(project["id"])
+        if clip:
+            image = clip_images.get(project["id"])
+            if clip.kind is None:
+                clip.kind = "video" if metric.shot_count else "image" if image else None
+            if clip.kind in ("image", "gif") and image:
+                reference = normalize_media_url(image["main_image"])
+                clip.preview = resolve_media_url(reference)
+                clip.thumbnail = resolve_media_url(image_derivative_reference(reference, "thumbnail"))
+                metric.state = "ready"
+            elif clip.kind == "video" and metric.completed_shot_count:
+                metric.state = "ready"
         items.append(ProjectOverviewItem.model_validate({
-            **project, "tags": project["tags"] or [], "production": metric,
+            **project, "tags": project["tags"] or [], "production": metric, "clip": clip, "remake": remake,
         }))
     items.sort(key=lambda item: (item.production.latest_activity_at, item.id), reverse=True)
     return ProjectOverview(items=items, summary=ProjectOverviewSummary(

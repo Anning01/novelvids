@@ -39,7 +39,7 @@ const workspace = useCreationAgentWorkspace()
 workspace.enterProject(props.projectId)
 const composer = ref<InstanceType<typeof AgentComposer> | null>(null)
 const messageList = ref<BubbleListInstance | null>(null)
-const modelId = computed({ get: () => workspace.modelId, set: value => { workspace.modelId = value } })
+const modelId = computed({ get: () => workspace.modelId || String(store.capabilities?.models[0]?.id ?? ''), set: value => { workspace.modelId = value } })
 const draftKey = computed(() => store.conversationId ? `conversation:${store.conversationId}` : 'new')
 const draft = computed({ get: () => workspace.drafts[draftKey.value] ?? '', set: value => { workspace.drafts[draftKey.value] = value } })
 const selected = computed({
@@ -202,7 +202,7 @@ watch(() => [props.projectId, props.chapterId], () => {
   void loadTargets()
 }, { immediate: true })
 watch(() => store.capabilities?.models, models => {
-  if (!models?.some(model => String(model.id) === modelId.value)) modelId.value = String(models?.[0]?.id ?? '')
+  if (workspace.modelId && !models?.some(model => String(model.id) === workspace.modelId)) workspace.modelId = ''
 })
 watch(() => (props.selectedTargets ?? []).map(targetKey).join('|'), applyDefaults)
 watch(() => [ready.value, store.loading], () => {
@@ -228,8 +228,11 @@ watch(pickerOpen, open => { if (open) void refreshTargetStatus() })
 async function send(text: string) {
   if (!text.trim() || !ready.value || store.busy || props.suspended) return
   const key = draftKey.value
-  if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(modelId.value) || null,
-    targets: targets.value, write_scope: writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : effectiveWriteScope.value })) {
+  const scope = writeScope.value === 'read_only' ? 'read_only' : targets.value.length ? 'selected' : effectiveWriteScope.value
+  // For a chapter retry, the server can reuse the previous extraction model unless the user picked one.
+  const requestedModel = scope === 'chapter' ? workspace.modelId : modelId.value
+  if (await store.send({ message: text.trim(), chapter_id: props.chapterId || null, model_config_id: Number(requestedModel) || null,
+    targets: targets.value, write_scope: scope })) {
     workspace.drafts[key] = ''
     // The first accepted request creates a conversation with its own draft slot.
     workspace.drafts[draftKey.value] = ''

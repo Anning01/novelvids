@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowRight, BookOpen, Clock3, Coins, FolderOpen, Image, Info, Plus, Search, Upload, X } from 'lucide-vue-next'
+import { ArrowRight, BookOpen, Clapperboard, Clock3, Coins, Film, FolderOpen, Image, Info, Plus, RotateCcw, Search, Sparkles, Upload, X } from 'lucide-vue-next'
 import { exportProject, importProject } from '@/features/project-transfer/transfer'
 import { api, ApiRequestError, exportDiagnostics } from '@/api'
 import { tr } from '@/i18n'
@@ -12,7 +12,8 @@ import { useAuthStore } from '@/features/auth/authStore'
 import { money } from '@/features/billing/recordDisplay'
 import { appConfirm } from '@/shared/confirmDialog'
 import { notice } from '@/shared/notice'
-import { projectKind, projectNumber, projectRuntime } from '@/shared/projectOverview'
+import { projectSource } from '@/shared/shortDramaProject'
+import { projectKind, projectNumber, projectRuntime, projectSourceLabel } from '@/shared/projectOverview'
 import type { ProjectOverview, ProjectOverviewItem } from '@/types'
 
 const auth = useAuthStore()
@@ -24,21 +25,39 @@ const pendingCosts = ref(new Set<number>())
 const costState = ref<'loading' | 'ready' | 'error'>('loading')
 const costError = ref('')
 const search = ref('')
+type SourceFilter = 'all' | ReturnType<typeof projectSource>
+const sourceStorageKey = 'projects-source-filter'
+const savedSource = sessionStorage.getItem(sourceStorageKey)
+const sourceFilter = ref<SourceFilter>(savedSource === 'series' || savedSource === 'clip' || savedSource === 'remake' ? savedSource : 'all')
+const sourceOptions = ['all', 'series', 'clip', 'remake'] as const
 const typeFilter = ref('all')
+const mediaFilter = ref('all')
 const stateFilter = ref('all')
 const sort = ref('updated')
+const sortingByCost = computed(() => sort.value === 'cost_desc' || sort.value === 'cost_asc')
 const page = ref(1)
 const pageSize = ref(12)
 const deletingIds = ref<Set<number>>(new Set())
 let requestRevision = 0
 const editable = computed(() => auth.enabled === false || ['admin', 'creator', 'super'].includes(auth.role ?? ''))
+const sourceItems = computed(() => (overview.value?.items ?? []).filter(project =>
+  sourceFilter.value === 'all' || projectSource(project) === sourceFilter.value))
 const filtered = computed(() => {
   const keyword = search.value.trim().toLocaleLowerCase()
-  return (overview.value?.items ?? []).filter(project => (
+  return sourceItems.value.filter(project => (
     (!keyword || project.name.toLocaleLowerCase().includes(keyword))
-    && (typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
+    && (sourceFilter.value !== 'clip' || mediaFilter.value === 'all' || project.clip?.kind === mediaFilter.value)
+    && (sourceFilter.value === 'clip' || sourceFilter.value === 'remake' || typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
     && (stateFilter.value === 'all' || project.production.state === stateFilter.value)
   )).sort((left, right) => {
+    if (sortingByCost.value && auth.canAccessBilling && costState.value === 'ready') {
+      const pendingOrder = Number(pendingCosts.value.has(left.id)) - Number(pendingCosts.value.has(right.id))
+      if (pendingOrder) return pendingOrder
+      if (!pendingCosts.value.has(left.id)) {
+        const difference = (costs.value.get(left.id) ?? 0) - (costs.value.get(right.id) ?? 0)
+        if (difference) return sort.value === 'cost_asc' ? difference : -difference
+      }
+    }
     if (sort.value === 'name') return left.name.localeCompare(right.name)
     const leftDate = sort.value === 'created' ? left.created_at : left.production.latest_activity_at
     const rightDate = sort.value === 'created' ? right.created_at : right.production.latest_activity_at
@@ -46,29 +65,69 @@ const filtered = computed(() => {
   })
 })
 const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
-const hasFilters = computed(() => Boolean(search.value.trim()) || typeFilter.value !== 'all' || stateFilter.value !== 'all')
-const runtime = computed(() => projectRuntime(overview.value?.summary.finished_seconds ?? 0, overview.value?.summary.unknown_finished_duration_count ?? 0))
+const hasFilters = computed(() => Boolean(search.value.trim()) || sourceFilter.value !== 'all' || typeFilter.value !== 'all' || stateFilter.value !== 'all')
+const seriesSummary = computed(() => {
+  if (sourceFilter.value === 'all') return overview.value?.summary
+  return sourceItems.value.reduce((totals, { production: p }) => ({
+    chapter_count: totals.chapter_count + p.chapter_count,
+    asset_count: totals.asset_count + p.asset_count,
+    finished_seconds: totals.finished_seconds + (p.finished_seconds ?? 0),
+    unknown_finished_duration_count: totals.unknown_finished_duration_count + (p.unknown_finished_duration_count ?? 0),
+    unknown_duration_count: totals.unknown_duration_count + p.unknown_duration_count,
+  }), { chapter_count: 0, asset_count: 0, finished_seconds: 0, unknown_finished_duration_count: 0, unknown_duration_count: 0 })
+})
+const runtime = computed(() => projectRuntime(seriesSummary.value?.finished_seconds ?? 0, seriesSummary.value?.unknown_finished_duration_count ?? 0))
 const costHint = computed(() => auth.role === 'creator' ? tr('仅本人已入账费用') : tr('当前项目已入账费用'))
-// Sum the same visible projects as the cards, including historical calls and versions.
-const totalCost = computed(() => (overview.value?.items ?? []).reduce((sum, project) => sum + Math.round((costs.value.get(project.id) ?? 0) * 1_000_000), 0) / 1_000_000)
-const stats = computed(() => [
-  { key: 'projects', label: tr('项目总数'), value: projectNumber(overview.value?.summary.project_count ?? 0), unit: '', hint: tr('个创作项目'), icon: FolderOpen },
-  { key: 'chapters', label: tr('累计章节'), value: projectNumber(overview.value?.summary.chapter_count ?? 0), unit: '', hint: tr('已有文字章节'), icon: BookOpen },
-  { key: 'assets', label: tr('累计资产'), value: projectNumber(overview.value?.summary.asset_count ?? 0), unit: '', hint: tr('项目内文件去重'), icon: Image },
-  { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已合成作品的实际时长'), icon: Clock3 },
-  ...(auth.canAccessBilling ? [{ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? pendingCosts.value.size ? tr('待结算') : money(totalCost.value) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins }] : []),
+const stats = computed(() => {
+  const items = sourceItems.value
+  const remakes = items.filter(item => projectSource(item) === 'remake')
+  const clips = items.filter(item => projectSource(item) === 'clip')
+  const count = (key: string, label: string, value: number, icon: typeof Image, hint = '') => ({ key, label, value: projectNumber(value), unit: '', icon, hint })
+  const result = [count('projects', tr('作品总数'), items.length, FolderOpen)]
+  if (sourceFilter.value === 'clip') {
+    result.push(count('images', tr('图片'), clips.filter(p => p.clip?.kind === 'image' || p.clip?.kind === 'gif').length, Image, tr('含 GIF 动图')),
+      count('videos', tr('视频'), clips.filter(p => p.clip?.kind === 'video').length, Clapperboard),
+      count('ready', tr('已有结果'), clips.filter(p => p.production.state === 'ready').length, Sparkles))
+  } else if (sourceFilter.value === 'remake') {
+    result.push(count('sources', tr('原片数量'), remakes.reduce((n, p) => n + (p.remake?.source_count ?? 0), 0), Film),
+      count('analyzed', tr('已拆解原片'), remakes.reduce((n, p) => n + (p.remake?.analyzed_count ?? 0), 0), Clapperboard),
+      count('shots', tr('分镜数'), remakes.reduce((n, p) => n + p.production.shot_count, 0), Image))
+  } else if (sourceFilter.value === 'all' && (clips.length || remakes.length)) {
+    result.push(count('series', tr('剧集项目'), items.length - clips.length - remakes.length, BookOpen),
+      count('clips', tr('首页单次创作'), clips.length, Sparkles),
+      ...(remakes.length ? [count('remakes', tr('重制工坊'), remakes.length, Film)] : []),
+      count('ready', tr('已有结果'), items.filter(p => p.production.state === 'ready').length, Clapperboard))
+  } else {
+    result.push(count('chapters', tr('累计章节'), seriesSummary.value?.chapter_count ?? 0, BookOpen, tr('已有文字章节')),
+      count('assets', tr('累计资产'), seriesSummary.value?.asset_count ?? 0, Image, tr('项目内文件去重')),
+      { key: 'runtime', label: tr('累计成片时长'), value: runtime.value.value, unit: runtime.value.unit, hint: tr('已合成作品的实际时长'), icon: Clock3 })
+  }
+  if (auth.canAccessBilling) {
+    const pending = items.some(p => pendingCosts.value.has(p.id))
+    const total = items.reduce((sum, p) => sum + Math.round((costs.value.get(p.id) ?? 0) * 1_000_000), 0) / 1_000_000
+    result.push({ key: 'cost', label: tr('累计已花费'), value: costState.value === 'ready' ? pending ? tr('待结算') : money(total) : costState.value === 'loading' ? tr('正在读取…') : tr('读取失败'), unit: '', hint: costHint.value, icon: Coins })
+  }
+  return result
+})
+const mediaOptions = computed(() => [
+  { value: 'all', label: tr('全部类型') }, { value: 'image', label: tr('图片') },
+  { value: 'video', label: tr('视频') }, { value: 'gif', label: tr('GIF 动图') },
 ])
 const typeOptions = computed(() => [
-  { value: 'all', label: tr('全部类型') }, { value: 'clip', label: tr('独立片段') }, { value: 'agent', label: tr('AI 创作') },
-  { value: 'manual', label: tr('手动创作') }, { value: 'remake', label: tr('视频重制') },
+  { value: 'all', label: tr('全部类型') }, { value: 'agent', label: tr('AI 创作') },
+  { value: 'manual', label: tr('手动创作') },
   { value: 'script', label: tr('小说 / 剧本') },
 ])
 const stateOptions = computed(() => [
   { value: 'all', label: tr('全部状态') }, { value: 'not_started', label: tr('未开始') },
-  { value: 'in_progress', label: tr('制作中') }, { value: 'ready', label: tr('已有作品') },
+  { value: 'in_progress', label: tr('制作中') }, { value: 'ready', label: sourceFilter.value === 'clip' ? tr('已有结果') : tr('已有作品') },
 ])
 const sortOptions = computed(() => [
-  { value: 'updated', label: tr('最近更新优先') }, { value: 'created', label: tr('最近创建优先') }, { value: 'name', label: tr('按项目名称') },
+  { value: 'updated', label: tr('最近更新') }, { value: 'created', label: tr('最近创建') }, { value: 'name', label: tr('按项目名称') },
+  ...(auth.canAccessBilling ? [
+    { value: 'cost_desc', label: tr('高消费优先') },
+    { value: 'cost_asc', label: tr('低消费优先') },
+  ] : []),
 ])
 
 async function load() {
@@ -88,6 +147,7 @@ async function load() {
 
 async function loadCosts(revision: number) {
   costs.value = new Map()
+  pendingCosts.value = new Set()
   costState.value = 'loading'
   costError.value = ''
   if (!auth.canAccessBilling) return
@@ -116,9 +176,13 @@ async function loadCosts(revision: number) {
 }
 
 function resetFilters() {
+  sourceFilter.value = 'all'
   search.value = ''
   typeFilter.value = 'all'
+  mediaFilter.value = 'all'
   stateFilter.value = 'all'
+  sort.value = 'updated'
+  page.value = 1
 }
 
 const filePicker = ref<HTMLInputElement | null>(null)
@@ -200,7 +264,11 @@ async function remove(project: ProjectOverviewItem) {
   }
 }
 
-watch([search, typeFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
+watch(() => auth.canAccessBilling, allowed => {
+  if (!allowed && sortingByCost.value) sort.value = 'updated'
+})
+watch(sourceFilter, value => { sessionStorage.setItem(sourceStorageKey, value) })
+watch([search, sourceFilter, typeFilter, mediaFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })
 watch([() => auth.activeTeamId, () => auth.role, () => auth.enabled], () => { cancelTransfers(); overview.value = null; void load() })
 const exporting = ref(false)
@@ -232,31 +300,42 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
       </div>
     </header>
 
+    <div class="projects-library__toolbar">
+      <div class="project-sources" role="group" :aria-label="tr('作品来源')">
+        <button v-for="source in sourceOptions" :key="source" type="button" :aria-pressed="sourceFilter === source" @click="sourceFilter = source">
+          <Clapperboard v-if="source === 'series'" :size="15" aria-hidden="true" />
+          <Film v-if="source === 'remake'" :size="15" aria-hidden="true" />
+          <Sparkles v-if="source === 'clip'" :size="15" aria-hidden="true" />
+          {{ source === 'all' ? tr('全部') : projectSourceLabel(source) }}
+        </button>
+      </div>
+      <div class="projects-library__filters">
+        <label class="projects-search"><Search :size="17" aria-hidden="true" /><span class="projects-sr-only">{{ tr('搜索项目名称') }}</span><input v-model="search" type="search" :placeholder="tr('搜索项目名称')"><button v-if="search" type="button" :aria-label="tr('清空搜索')" @click="search = ''"><X :size="14" aria-hidden="true" /></button></label>
+        <AppSelect v-if="sourceFilter === 'series' || sourceFilter === 'all'" v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
+        <AppSelect v-else-if="sourceFilter === 'clip'" v-model="mediaFilter" :options="mediaOptions" :ariaLabel="tr('创作类型')" />
+        <AppSelect v-model="stateFilter" :options="stateOptions" :ariaLabel="tr('创作状态')" />
+        <AppSelect v-model="sort" :options="sortOptions" :ariaLabel="tr('项目排序')" />
+        <AppButton class="projects-library__reset" variant="ghost" size="sm" :disabled="!hasFilters && mediaFilter === 'all' && sort === 'updated' && page === 1"
+          @click="resetFilters"><RotateCcw :size="14" aria-hidden="true" />{{ tr('重置筛选') }}</AppButton>
+      </div>
+    </div>
+
     <div v-if="loading && !overview" class="projects-page__loading" role="status">
       <div class="projects-page__summary-skeleton" :class="{ 'has-cost': auth.canAccessBilling }"><span v-for="n in stats.length" :key="n" /></div>
       <p>{{ tr('正在加载项目…') }}</p>
     </div>
     <template v-else-if="overview">
-      <section class="projects-summary" :class="{ 'has-cost': auth.canAccessBilling }" :aria-label="tr('全部项目统计')" :aria-busy="loading || (auth.canAccessBilling && costState === 'loading')">
+      <section class="projects-summary" :class="{ 'has-cost': auth.canAccessBilling }" :aria-label="tr('作品概况')" :aria-busy="loading || (auth.canAccessBilling && costState === 'loading')">
         <article v-for="stat in stats" :key="stat.key" class="projects-summary__item" :class="`is-${stat.key}`">
           <span class="projects-summary__icon"><component :is="stat.icon" :size="23" :stroke-width="1.7" aria-hidden="true" /></span>
-          <div><h2>{{ stat.label }}</h2><p :class="{ 'is-pending': (stat.key === 'runtime' && runtime.incomplete && !runtime.unit) || (stat.key === 'cost' && costState !== 'ready') }">{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></p><span>{{ stat.hint }}</span></div>
+          <div><h2>{{ stat.label }}</h2><p :class="{ 'is-pending': (stat.key === 'runtime' && runtime.incomplete && !runtime.unit) || (stat.key === 'cost' && costState !== 'ready') }">{{ stat.value }}<small v-if="stat.unit">{{ stat.unit }}</small></p><span v-if="stat.hint">{{ stat.hint }}</span></div>
         </article>
       </section>
-      <p v-if="overview.summary.unknown_duration_count" class="projects-page__duration-note"><Info :size="13" aria-hidden="true" />{{ tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: overview.summary.unknown_duration_count }) }}</p>
+      <p v-if="stats.some(stat => stat.key === 'runtime') && seriesSummary?.unknown_duration_count" class="projects-page__duration-note"><Info :size="13" aria-hidden="true" />{{ tr('另有 {p0} 个视频的实际时长待确认，未使用剧本预计时长。', { p0: seriesSummary.unknown_duration_count }) }}</p>
       <div v-if="auth.canAccessBilling && costError" class="projects-page__cost-error" role="alert"><span>{{ tr('费用读取失败：{p0}', { p0: costError }) }}</span><AppButton variant="ghost" size="sm" @click="loadCosts(requestRevision)">{{ tr('重试') }}</AppButton></div>
 
       <section class="projects-library" :aria-label="tr('项目列表')">
-        <div class="projects-library__toolbar">
-          <div class="projects-library__heading"><h2>{{ tr('全部项目') }}</h2><span role="status" aria-live="polite">{{ tr('共 {p0} 个项目', { p0: projectNumber(filtered.length) }) }}</span></div>
-          <div class="projects-library__filters">
-            <label class="projects-search"><Search :size="17" aria-hidden="true" /><span class="projects-sr-only">{{ tr('搜索项目名称') }}</span><input v-model="search" type="search" :placeholder="tr('搜索项目名称')"><button v-if="search" type="button" :aria-label="tr('清空搜索')" @click="search = ''"><X :size="14" aria-hidden="true" /></button></label>
-            <AppSelect v-model="typeFilter" :options="typeOptions" :ariaLabel="tr('项目类型')" />
-            <AppSelect v-model="sort" :options="sortOptions" :ariaLabel="tr('项目排序')" />
-            <AppSelect v-model="stateFilter" :options="stateOptions" :ariaLabel="tr('创作状态')" />
-          </div>
-        </div>
-
+        <div class="projects-library__heading"><h2>{{ tr('项目列表') }}</h2><span role="status" aria-live="polite">{{ tr('共 {p0} 个项目', { p0: projectNumber(filtered.length) }) }}</span></div>
         <div v-if="visible.length" class="projects-library__grid" :aria-busy="loading">
           <ProjectOverviewCard v-for="project in visible" :key="project.id" :project="project" :editable="editable" :export-only="auth.deploymentRole === 'platform'" :deleting="deletingIds.has(project.id)" :exporting="exportsByProject.has(project.id)" @download="downloadProject" @cancel-download="cancelDownload" :cost="costs.get(project.id) ?? 0" :cost-state="auth.canAccessBilling ? pendingCosts.has(project.id) ? 'pending' : costState : undefined" :cost-hint="costHint" @remove="remove" />
         </div>
@@ -309,7 +388,7 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-page__cost-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; color: var(--app-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .projects-library { margin-top: 32px; }
 .projects-library__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
-.projects-library__heading { display: flex; flex: 0 0 auto; align-items: baseline; gap: 12px; }
+.projects-library__heading { margin-bottom: 14px; display: flex; flex: 0 0 auto; align-items: baseline; gap: 12px; }
 .projects-library__heading h2 { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.4; }
 .projects-library__heading > span { color: var(--app-text-secondary); font-size: 12px; }
 .projects-library__filters { display: flex; flex: 0 1 720px; align-items: center; gap: 10px; }
@@ -320,8 +399,14 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-search input::-webkit-search-cancel-button { display: none; }
 .projects-search button { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--app-text-secondary); background: var(--app-surface-muted); cursor: pointer; }
 .projects-search button:focus-visible { outline: 2px solid var(--app-accent); }
+.projects-library__reset { white-space: nowrap; }
 .projects-library__filters :deep(.app-select) { min-width: 0; flex: 0 0 124px; }
 .projects-library__filters :deep(.app-select__trigger) { height: 40px; }
+.project-sources { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--app-border); border-radius: 10px; background: var(--app-surface-muted); }
+.project-sources button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 4px 10px; border: 0; border-radius: 7px; font: inherit; font-size: 13px; color: var(--app-text-secondary); background: transparent; cursor: pointer; }
+.project-sources button:hover { color: var(--app-text); background: var(--app-surface-hover); }
+.project-sources button[aria-pressed="true"] { color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong); font-weight: 650; }
+.project-sources button:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 1px; }
 .projects-library__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .projects-page__empty, .projects-page__error { display: grid; min-height: 285px; place-items: center; align-content: center; gap: 12px; text-align: center; }
 .projects-page__empty-icon { display: grid; width: 64px; height: 64px; margin-bottom: 4px; place-items: center; border-radius: 18px; color: var(--app-text-secondary); background: var(--app-surface-muted); }
@@ -332,12 +417,28 @@ onBeforeUnmount(() => { cancelTransfers(); ++requestRevision; window.removeEvent
 .projects-page__summary-skeleton span { min-height: 119px; border-radius: 16px; background: var(--app-surface-muted); }
 .projects-page__loading p { padding: 35px; color: var(--app-text-secondary); font-size: 13px; text-align: center; }
 .projects-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@container projects (min-width: 1101px) {
+  .projects-summary:has(.is-remakes) { grid-auto-columns: minmax(0,1fr); grid-template-columns: none; grid-auto-flow: column; }
+}
+@container projects (max-width: 420px) {
+  .project-sources { width: 100%; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
 @container projects (min-width: 1800px) { .projects-library__grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @container projects (max-width: 1160px) { .projects-library__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .projects-summary__item { padding: 17px; gap: 11px; } }
 @container projects (max-width: 1100px) { .projects-summary.has-cost, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container projects (max-width: 870px) { .projects-library__grid, .projects-summary, .projects-summary.has-cost, .projects-page__summary-skeleton, .projects-page__summary-skeleton.has-cost { grid-template-columns: repeat(2, minmax(0, 1fr)); } .projects-library__filters { flex-basis: 100%; } }
-@container projects (max-width: 560px) { .projects-library__grid { grid-template-columns: minmax(0, 1fr); } .projects-library__filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .projects-search, .projects-library__filters :deep(.app-select:last-child) { grid-column: 1 / -1; } .projects-summary__item { min-height: 112px; gap: 9px; padding: 14px; } .projects-summary__icon { width: 34px; height: 34px; border-radius: 9px; } .projects-summary__icon svg { width: 19px; } .projects-summary p { font-size: 23px; } .projects-summary__item > div > span { font-size: 11px; } }
+@container projects (max-width: 560px) { .projects-library__grid { grid-template-columns: minmax(0, 1fr); } .projects-library__filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .projects-search { grid-column: 1 / -1; } .projects-summary__item { min-height: 112px; gap: 9px; padding: 14px; } .projects-summary__icon { width: 34px; height: 34px; border-radius: 9px; } .projects-summary__icon svg { width: 19px; } .projects-summary p { font-size: 23px; } .projects-summary__item > div > span { font-size: 11px; } }
 @container projects (max-width: 380px) { .projects-summary__icon { display: none; } .projects-summary__item > div > span { font-size: 11px; } }
+@container projects (max-width: 560px) {
+  .projects-library__filters { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .projects-library__filters :deep(.app-select__trigger) { padding-inline: 7px; }
+  .projects-summary, .projects-summary.has-cost { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+  .projects-summary__item { min-height: 66px; padding: 10px; border-radius: 10px; }
+  .projects-summary__icon { display: none; }
+  .projects-summary__item:not(.is-cost) > div > span { display: none; }
+  .projects-summary p { margin: 4px 0 0; font-size: 19px; }
+  .projects-library { margin-top: 20px; }
+}
 @media (max-width: 720px) { .projects-page { padding: 24px 16px 45px; } .projects-page__header { gap: 10px; margin-bottom: 23px; } .projects-page__create { padding: 0 12px; font-size: 12px; } }
 @media (prefers-reduced-motion: reduce) { .projects-page__create { transition: none; } }
 </style>

@@ -1,8 +1,13 @@
 """Share each configured model's request capacity across task entry points."""
 import asyncio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from models.config import AiModelConfig
+
+
+# A caller may publish a real queue transition without changing the shared model limit.
+capacity_observer = ContextVar("capacity_observer", default=None)
 
 
 class ModelSlots:
@@ -21,12 +26,24 @@ class ModelSlots:
             # The caller retains its existing unavailable-model validation and failure handling.
             yield
             return
+        observer = capacity_observer.get()
+        announced = False
         async with self.condition:
             self.limits[model_id] = max(1, config.concurrency)
             self.condition.notify_all()
-            await self.condition.wait_for(lambda: self.active.get(model_id, 0) < self.limits[model_id])
-            self.active[model_id] = self.active.get(model_id, 0) + 1
+        while True:
+            async with self.condition:
+                if self.active.get(model_id, 0) < self.limits[model_id]:
+                    self.active[model_id] = self.active.get(model_id, 0) + 1
+                    break
+                if not observer or announced:
+                    await self.condition.wait()
+                    continue
+            announced = True
+            await observer("waiting_capacity")
         try:
+            if announced:
+                await observer("admitted")
             yield
         finally:
             async with self.condition:

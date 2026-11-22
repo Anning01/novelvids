@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, ref } from 'vue'
 import catalog from './messages.json'
-import { applySavedLocale, beginLocaleChange, dateLocale, elementLocale, locale, localeSaving, LOCALE_CACHE_KEY, refreshLocale, setLocale, tr } from './index'
+import { applySavedLocale, beginLocaleChange, dateLocale, elementLocale, initializeLocale, locale, localeSaving, LOCALE_CACHE_KEY, refreshLocale, setLocale, tr } from './index'
 import AppThemeToggle from '@/components/AppThemeToggle.vue'
 
 const reply = (value: unknown) => ({ ok: true, json: async () => ({ code: 0, data: { locale: value } }) })
@@ -36,6 +36,23 @@ describe('application language', () => {
     await nextTick()
     expect(wrapper.text()).toContain('Appearance')
     expect(wrapper.text()).not.toContain('外观')
+  })
+
+  it('applies the cached language immediately while the startup request is pending', async () => {
+    localStorage.setItem(LOCALE_CACHE_KEY, 'en')
+    let finish!: (value: ReturnType<typeof reply>) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => { finish = resolve })))
+    const listener = vi.spyOn(window, 'addEventListener')
+    try {
+      expect(initializeLocale()).toBeUndefined()
+      expect(document.documentElement.lang).toBe('en')
+      finish(reply('zh'))
+      await vi.waitFor(() => expect(locale.value).toBe('zh'))
+    } finally {
+      const focus = listener.mock.calls.find(([event]) => event === 'focus')
+      if (focus) window.removeEventListener('focus', focus[1])
+      listener.mockRestore()
+    }
   })
 
   it('loads only the public locale endpoint and caches a valid response', async () => {

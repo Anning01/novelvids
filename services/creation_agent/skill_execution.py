@@ -174,6 +174,7 @@ class SkillExecution:
         additional_instructions: str = "",
         output_validator: Callable[[BaseModel], Awaitable[None]] | None = None,
         activity_label: str | None = None,
+        receipt_segment: str | None = None,
     ):
         from services.creation_agent.handler import configured_model
         from schemas.agent_workflow import RemakeShot
@@ -194,7 +195,7 @@ class SkillExecution:
         from utils.enums import TaskStatusEnum
 
         segment = str(facts.get("segment", "")) if isinstance(facts, dict) else ""
-        key = f"model:{skill}:{output_type.__name__}:{segment}"
+        key = f"model:{skill}:{output_type.__name__}:{receipt_segment or segment}"
         if self.params.get('media_preparation_key'):
             key += ':' + self.params['media_preparation_key']
         from models.agent_operation import AgentOperation
@@ -265,7 +266,8 @@ class SkillExecution:
                     model_config.id,
                     team_id=self.params.get("team_id"),
                 )
-                if not (available.supports_tool_calls or skill == 'remake' and available.supports_json_output):
+                from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
+                if not (available.supports_tool_calls or (skill == 'remake' or output_type in (RemakeContinuityVerdict, RemakeSpeechEvidence)) and available.supports_json_output):
                     raise ValueError(localized_message("视频理解模型需要支持工具调用"))
 
         from services.creation_agent.event_log import agent_event_log
@@ -302,7 +304,7 @@ class SkillExecution:
             limits=limits,
             on_activity=report_activity,
             # Each detected clip is a separate model step with its own durable retry allowance.
-            repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
+            repair_root=str(child.id) if skill == "remake" and issubclass(output_type, RemakeShot) else await self.repair_root(),
             stage=skill,
             repair_attempts=2 if skill == "remake" else 1,
         )
@@ -321,8 +323,12 @@ class SkillExecution:
         if skill in {'storyboard', 'video'}:
             from prompts.creation_plan import resolved_storyboard_resources_instructions
             additional_instructions += '\n' + resolved_storyboard_resources_instructions(self.language)
+        direct_remake = skill == 'remake' and self.params.get('remake_action_memory') == 'timeline'
         agent_output = storyboard_candidates.draft_type if storyboard_candidates else output_type
-        if chosen.supports_json_output:
+        if direct_remake:
+            from pydantic_ai import StructuredDict
+            agent_output = str if chosen.supports_json_output else [StructuredDict(output_type.model_json_schema()), str]
+        elif chosen.supports_json_output:
             agent_output = PromptedOutput(agent_output)
         agent = Agent(
             deps_type=SkillSnapshot,
@@ -331,7 +337,7 @@ class SkillExecution:
                 "\n" + additional_instructions if additional_instructions else ""
             ),
             output_type=agent_output,
-            retries=2,
+            retries=0 if direct_remake else 2,
         )
 
         def read_skill(ctx: RunContext[SkillSnapshot], name: str) -> str:
@@ -345,6 +351,8 @@ class SkillExecution:
 
         @agent.output_validator
         async def validate_output(ctx: RunContext[SkillSnapshot], output):
+            if direct_remake:
+                return output
             if skill == 'remake' and isinstance(facts, dict) and facts.get('output_kind') == 'global_key_assets':
                 from services.remake.asset_validation import render_remake_assets
                 from pydantic_ai import ModelRetry
@@ -439,6 +447,8 @@ class SkillExecution:
                     if key in self.params
                 },
             }
+            if direct_remake:
+                request_facts["response_schema"] = output_type.model_json_schema()
             if storyboard_candidates and isinstance(facts, dict) and 'storyboard_repair' in facts:
                 request_facts['input'] = {key: value for key, value in facts.items() if key != 'storyboard_repair'}
             from services.creation_agent.step_context import step_context
@@ -484,7 +494,7 @@ class SkillExecution:
                         model=recorded,
                         event_stream_handler=tool_activity,
                         usage_limits=UsageLimits(
-                            request_limit=limits.request_limit,
+                            request_limit=1 if skill == "remake" and self.params.get("remake_context_version") == 5 else limits.request_limit,
                             tool_calls_limit=limits.tool_calls_limit,
                             total_tokens_limit=limits.total_tokens_limit,
                         ),
@@ -497,6 +507,14 @@ class SkillExecution:
                     await AgentMessage.filter(id=child_message.id).update(
                         native_messages=_audit_messages(run_messages)
                     )
+            if direct_remake:
+                from services.remake.delivered_output import decoded, delivered_assets, delivered_shot
+                if facts['output_kind'] == 'global_key_assets':
+                    return delivered_assets(result.output, self.snapshot, self.language, request_aspect_ratio)
+                if facts['output_kind'] == 'short_video_storyboard':
+                    data = decoded(result.output)
+                    return data if isinstance(data, dict) else {'shots':data}
+                return delivered_shot(result.output)
             return result.output.model_dump(mode="json")
 
         try:
@@ -509,7 +527,7 @@ class SkillExecution:
             child.status = TaskStatusEnum.completed.value
             child.response_data = payload
             await child.save(update_fields=["status", "response_data"])
-            return output_type.model_validate(payload)
+            return payload if direct_remake else output_type.model_validate(payload)
         except BaseException as error:
             child.status = TaskStatusEnum.failed.value
             await child.save(update_fields=["status"])

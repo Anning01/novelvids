@@ -1,6 +1,6 @@
 
 import { tr } from '@/i18n'
-export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'moderation' | 'other'
+export type VideoGenerationErrorCategory = 'privacy' | 'download' | 'moderation' | 'reference-size' | 'other'
 
 export interface VideoGenerationErrorInfo {
   title: string
@@ -16,6 +16,7 @@ export interface VideoGenerationErrorInfo {
 
 const PRIVACY_ERROR_CODE = 'InputImageSensitiveContentDetected.PrivacyInformation'
 const OUTPUT_MODERATION_ERROR_CODE = 'OutputVideoSensitiveContentDetected'
+const REFERENCE_SIZE_ERROR_CODE = 'ReferenceMediaTotalSizeExceeded'
 
 function firstMatch(value: string, expressions: RegExp[]) {
   for (const expression of expressions) {
@@ -56,6 +57,19 @@ export function formatVideoGenerationError(rawError: string): VideoGenerationErr
     /content\[(\d+)\]/iu,
   ])
   const referenceNumber = contentIndexText ? Number(contentIndexText) : undefined
+
+  if (raw.includes(REFERENCE_SIZE_ERROR_CODE)) {
+    return {
+      title: tr('参考素材总大小超出限制'),
+      message: tr('这个 MiniMax 优惠渠道的参考素材合计不能超过 50 MB。'),
+      suggestion: tr('请减少或压缩参考素材后重试。'),
+      raw,
+      errorCode: REFERENCE_SIZE_ERROR_CODE,
+      requestId,
+      httpStatus,
+      category: 'reference-size',
+    }
+  }
 
   if (raw.includes(OUTPUT_MODERATION_ERROR_CODE) || /output video may contain sensitive information/iu.test(raw)) {
     return {

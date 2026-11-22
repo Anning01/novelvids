@@ -14,6 +14,7 @@
   --app-text-secondary: #656b7b;
   --app-text-muted: #9398a8;
   --app-accent: #5b5cf6;
+  --wb-on-accent: #fff;
   --app-accent-soft: #eeefff;
   --app-shadow: 0 12px 34px rgb(37 41 57 / 7%);
   --creation-success: #2d805e;
@@ -21,10 +22,7 @@
   --creation-warning: #9a6a12;
 }
 
-:root[data-app-theme='dark'],
-.creation-agent-panel.is-workflow,
-.agent-conversation-popover.is-workflow,
-.short-drama-workspace-shell.is-immersive .short-drama-header-end {
+:root[data-app-theme='dark'] {
   color-scheme: dark;
   --app-canvas: #161616;
   --app-surface: #202020;
@@ -38,6 +36,7 @@
   --app-text-secondary: #c2c2c2;
   --app-text-muted: #999999;
   --app-accent: #b8a7ff;
+  --wb-on-accent: #201c2b;
   --app-accent-soft: #292929;
   --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
   --creation-success: #82d5ad;
@@ -60,6 +59,7 @@
     --app-text-secondary: #c2c2c2;
     --app-text-muted: #999999;
     --app-accent: #b8a7ff;
+    --wb-on-accent: #201c2b;
     --app-accent-soft: #292929;
     --app-shadow: 0 16px 42px rgb(0 0 0 / 24%);
     --creation-success: #82d5ad;
@@ -85,71 +85,71 @@
 :root[data-app-theme='dark'] .app-nav-item:hover { color: var(--app-text); background: var(--app-surface-hover); }
 :root[data-app-theme='dark'] .app-nav-item.is-active { color: var(--app-accent); background: var(--app-accent-soft); }
 
-/* Central AppButton variants for themed application surfaces. Workflow canvases are excluded here. */
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--secondary {
+/* Shared button variants follow the application theme, including the canvas shell. */
+:root[data-app-theme='dark'] .app-shell .app-button--secondary {
   color: var(--app-text-secondary);
   background: var(--app-surface-muted);
   box-shadow: inset 0 0 0 1px var(--app-border);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--secondary:hover:not(:disabled) {
+:root[data-app-theme='dark'] .app-shell .app-button--secondary:hover:not(:disabled) {
   color: var(--app-text);
   background: var(--app-surface-hover);
   box-shadow: inset 0 0 0 1px var(--app-border-strong);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--soft {
+:root[data-app-theme='dark'] .app-shell .app-button--soft {
   color: var(--app-accent);
   background: var(--app-accent-soft);
   box-shadow: inset 0 0 0 1px rgb(184 167 255 / 10%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--soft:hover:not(:disabled),
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--soft.is-active {
+:root[data-app-theme='dark'] .app-shell .app-button--soft:hover:not(:disabled),
+:root[data-app-theme='dark'] .app-shell .app-button--soft.is-active {
   color: var(--app-accent);
   background: var(--app-surface-hover);
   box-shadow: inset 0 0 0 1px rgb(184 167 255 / 18%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--ghost { color: var(--app-text-secondary); background: transparent; }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--ghost:hover:not(:disabled),
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--ghost.is-active {
+:root[data-app-theme='dark'] .app-shell .app-button--ghost { color: var(--app-text-secondary); background: transparent; }
+:root[data-app-theme='dark'] .app-shell .app-button--ghost:hover:not(:disabled),
+:root[data-app-theme='dark'] .app-shell .app-button--ghost.is-active {
   color: var(--app-accent);
   background: var(--app-accent-soft);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--danger {
+:root[data-app-theme='dark'] .app-shell .app-button--danger {
   color: #d98278;
   background: rgb(174 67 58 / 10%);
   box-shadow: inset 0 0 0 1px rgb(213 112 100 / 16%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--danger:hover:not(:disabled) {
+:root[data-app-theme='dark'] .app-shell .app-button--danger:hover:not(:disabled) {
   color: #f0a097;
   background: rgb(190 73 63 / 18%);
   box-shadow: inset 0 0 0 1px rgb(225 124 113 / 28%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-button--dark {
+:root[data-app-theme='dark'] .app-shell .app-button--dark {
   color: var(--app-text);
   background: var(--app-surface-muted);
   box-shadow: inset 0 0 0 1px var(--app-border);
 }
 
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-badge--neutral {
+:root[data-app-theme='dark'] .app-shell .app-badge--neutral {
   border-color: var(--app-border);
   color: var(--app-text-secondary);
   background: var(--app-surface-muted);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-badge--accent {
+:root[data-app-theme='dark'] .app-shell .app-badge--accent {
   border-color: rgb(184 167 255 / 16%);
   color: var(--app-accent);
   background: var(--app-accent-soft);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-badge--success {
+:root[data-app-theme='dark'] .app-shell .app-badge--success {
   border-color: rgb(98 196 151 / 18%);
   color: #82d5ad;
   background: rgb(66 151 109 / 14%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-badge--warning {
+:root[data-app-theme='dark'] .app-shell .app-badge--warning {
   border-color: rgb(210 162 114 / 18%);
   color: #d2a272;
   background: rgb(185 119 63 / 12%);
 }
-:root[data-app-theme='dark'] .app-shell:not(.is-workflow-surface) .app-badge--danger {
+:root[data-app-theme='dark'] .app-shell .app-badge--danger {
   border-color: rgb(224 138 146 / 18%);
   color: #e08a92;
   background: rgb(190 73 85 / 12%);
@@ -369,7 +369,6 @@
   background: var(--app-surface-muted);
   box-shadow: inset 0 0 0 1px var(--app-border);
 }
-:root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .selected-asset-row :is(.asset-name-button,.asset-voice-button) { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .prompt-panel > footer > div > span { color: var(--app-text-secondary); background: var(--app-surface-muted); box-shadow: inset 0 0 0 1px var(--app-border); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .prompt-panel input { color: var(--app-text); }
 :root[data-app-theme='dark'] .storyboard-page:not(.is-workflow-view) .preview-timeline { background: var(--app-surface); }

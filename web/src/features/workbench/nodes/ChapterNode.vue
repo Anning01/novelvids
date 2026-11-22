@@ -54,6 +54,7 @@ watch(content, (value) => {
   <article
     class="workbench-note workbench-chapter-note"
     :class="{ 'is-selected': selected }"
+    :style="data.ui?.color ? { '--workbench-note-color': data.ui.color } : undefined"
     :aria-label="tr('{p0}章节便签', { p0: title })"
   >
     <header class="workbench-node-drag-handle">

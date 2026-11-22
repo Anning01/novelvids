@@ -367,6 +367,7 @@ async def test_gateway_records_safe_request_duration(tmp_path: Path):
         "index": 3,
         "schema_name": "professional_video_prompt_material",
         "duration_ms": 250,
+        "start_offset_ms": 0,
         "attempts": 1,
         "status": "completed",
     }]
@@ -457,6 +458,7 @@ async def test_studio_remake_sends_media_link_with_sampling_rate(tmp_path, monke
         await gateway.analyze_one(**args)
     finally:
         current_execution.reset(token)
+    upload.assert_awaited_once_with(video)  # The studio uploader streams from disk.
     item = execution.generate.call_args.kwargs['media'][0]
     expected = {'type':'video_url', 'video_url':{'url':url,'fps':1.0}}
     assert await UsagePreservingChatModel._map_video_url_item(None, item) == expected
@@ -493,3 +495,206 @@ async def test_partial_retry_skips_saved_and_uncertain_without_renumbering(tmp_p
         prompt='', schema_name='shots', response_schema={}, completed_results={1:{}}, held_shots=frozenset({2}))
     assert [item['shot_index'] for item in results] == [1, 3]
     assert analyze.await_count == 1 and analyze.await_args.kwargs['index'] == 3
+
+
+@pytest.mark.asyncio
+async def test_continuous_shots_use_last_confirmed_result_including_after_resume(tmp_path):
+    gateway = RemakeVideoAnalysisGateway(_config(concurrency=4), client=_Client([]))
+    seen = {}
+    async def analyze_one(**kw):
+        i = kw['index']
+        seen[i] = kw['context']
+        return {'actions': [f'action {i}'], 'dialogue': [f'line {i}']}
+    gateway.analyze_one = analyze_one
+    paths = [tmp_path / f'{n}.mp4' for n in range(4)]
+    results = await gateway.analyze_many(paths, prompt='', schema_name='shots', response_schema={},
+        continuity_language='zh', completed_results={1: {'actions': ['拿起杯子'], 'dialogue': ['我走了。']}},
+        context_builder=lambda i: {'duration_seconds': 4, 'assets': []})
+    assert list(seen) == [2, 3, 4] and len(results) == 4
+    assert seen[2]['previous_shot']['actions'] == ['拿起杯子']
+    assert seen[3]['previous_shot']['dialogue'] == ['line 2']
+    assert 'previous_shot' not in seen[4]['previous_shot']
+
+
+@pytest.mark.asyncio
+async def test_continuity_rules_are_instructions_but_prior_shot_and_asset_names_remain_facts(tmp_path):
+    from unittest.mock import AsyncMock
+    from services.creation_agent.skill_execution import current_execution
+    from schemas.agent_workflow import RemakeAssets
+    from schemas.remake import RemakeContinuityVerdict
+    from prompts.remake import continuity_audit_instruction
+    gateway = RemakeVideoAnalysisGateway(_config(),client=_Client([]))
+    path = tmp_path/'clip.mp4'
+    path.write_bytes(b'video')
+    execution = SimpleNamespace(params={'remake_context_version':2}, language='en',
+        generate=AsyncMock(return_value=RemakeAssets(characters=[],scenes=[],objects=[])))
+    token = current_execution.set(execution)
+    try:
+        await gateway.analyze_one(index=1,path=path,prompt='',schema_name='global_key_assets',
+            response_schema={},context={'project_assets':[{'name':'UntrustedName'}]})
+        call = execution.generate.await_args
+        assert 'canonical name' in call.kwargs['additional_instructions']
+        assert 'UntrustedName' not in call.kwargs['additional_instructions']
+        assert call.args[1]['assets']['project_assets'][0]['name'] == 'UntrustedName'
+        execution.generate.return_value = RemakeContinuityVerdict(consistent=True,reason='Intentional replay in this clip.')
+        response = await gateway.analyze_one(index=4,path=path,prompt=continuity_audit_instruction('en'),
+            schema_name='shot_continuity_check',response_schema={},context={'segment':4})
+        assert response['consistent'] and execution.generate.await_args.args[0] == 'structured'
+    finally:
+        current_execution.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_default_new_project_runs_long_episode_in_parallel_and_checks_its_seams(tmp_path,monkeypatch):
+    from models.ai_task import AiTask
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.analysis_capacity import window_for
+    cfg = _config(id=997,concurrency=6)
+    gateway = RemakeVideoAnalysisGateway(cfg,client=_Client([]))
+    task = await AiTask.create(task_type=6,status=2)
+    execution = SimpleNamespace(params={'task_id':str(task.id),'remake_context_version':3})
+    active = peak = 0
+    observed = []
+    checked = asyncio.Event()
+    async def request(**call):
+        nonlocal active,peak
+        active += 1
+        peak = max(peak,active)
+        try:
+            i,stage = call['index'],call['schema_name']
+            if i == 35 and call['draft']:
+                await asyncio.wait_for(checked.wait(), 2)
+            await asyncio.sleep(.003)
+            observed.append((stage,i))
+            if stage == 'shot_continuity_check':
+                assert '相邻两镜的初稿' in call['prompt']
+                assert call['context']['preceding']['sequence'] == i-1
+                checked.set()
+                return {'consistent':True,'reason':'Continuous source action.'}
+            return {'actions':[str(i)]}
+        finally:
+            active -= 1
+    monkeypatch.setattr(gateway,'_request_one',request)
+    token = current_execution.set(execution)
+    try:
+        rows = await gateway.analyze_many([tmp_path/f'{i}.mp4' for i in range(35)],
+            continuity_language='zh',block_size=None,context_builder=lambda _: {},
+            prompt='',schema_name='professional_video_prompt_material',response_schema={})
+    finally:
+        current_execution.reset(token)
+    assert [r['shot_index'] for r in rows] == list(range(1,36))
+    assert peak == cfg.concurrency
+    assert sorted(i for stage,i in observed if stage=='shot_continuity_check') == list(range(2,36))
+    assert len(observed) == 69 and window_for(997).active == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('limit', [1, 6, 100])
+async def test_three_ready_episodes_share_selected_model_limit_without_a_shot_group_size(tmp_path, monkeypatch, limit):
+    from time import monotonic
+    from models.ai_task import AiTask
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.analysis_capacity import window_for
+
+    gateway = RemakeVideoAnalysisGateway(_config(id=1234, concurrency=limit), client=_Client([]))
+    full = asyncio.Event()
+    active = peak = checks = shots = 0
+
+    async def request(**call):
+        nonlocal active, peak, checks, shots
+        active += 1
+        peak = max(peak, active)
+        if active == limit:
+            full.set()
+        try:
+            await asyncio.wait_for(full.wait(), 5)
+            await asyncio.sleep(.001)
+            if call['schema_name'] == 'shot_continuity_check':
+                checks += 1
+                return {'consistent': True, 'reason': 'Original ending matches.'}
+            shots += 1
+            return {'actions': [str(call['index'])], 'shot_index': call['index']}
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(gateway, '_request_one', request)
+
+    async def episode(count):
+        task = await AiTask.create(task_type=6, status=2)
+        token = current_execution.set(SimpleNamespace(params={'task_id': str(task.id), 'remake_context_version': 3}))
+        try:
+            result = await gateway.analyze_many([tmp_path/f'{i}.mp4' for i in range(count)],
+                continuity_language='zh', block_size=None, context_builder=lambda _: {},
+                prompt='', schema_name='professional_video_prompt_material', response_schema={})
+            assert [r['shot_index'] for r in result] == list(range(1, count+1))
+        finally:
+            current_execution.reset(token)
+
+    started = monotonic()
+    await asyncio.gather(*(episode(count) for count in (35, 35, 33)))
+    assert peak == limit and window_for(1234).active == 0
+    assert shots == 103 and checks == (0 if limit == 1 else 100)
+    print(f'schedule_replay slots={limit} peak={peak} shots={shots} checks={checks} elapsed={monotonic()-started:.3f}s')
+
+
+@pytest.mark.asyncio
+async def test_parallel_retry_uses_each_failed_requests_own_evidence(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    from uuid import uuid4, uuid5
+    from exceptions.remake import RemakeError
+    from models.agent_operation import AgentOperation
+    from models.ai_task import AiTask
+    from models.creation_agent import AgentConversation, AgentMessage
+    from models.novel import Novel
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.checkpoints import reconcile_retry
+
+    monkeypatch.setattr("services.remake.analysis_capacity.AnalysisWindow.slow_down", AsyncMock())
+    novel = await Novel.create(name="parallel retry", workflow_kind="remake")
+    conversation = await AgentConversation.create(novel=novel)
+    task = await AiTask.create(task_type=6, status=4, request_params={"remake_context_version": 3},
+                               error_message="Only one error reached the parent")
+    gateway = RemakeVideoAnalysisGateway(_config(concurrency=3), client=_Client([]))
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"clip")
+
+    async def failed_call(i, schema, detail):
+        segment = str(i)
+        kwargs = {}
+        if schema == "professional_video_prompt_material":
+            segment = "draft-" + segment
+            key = f"model:remake:RemakeShot:{segment}"
+            kwargs["draft"] = True
+        else:
+            key = f"model:structured:RemakeContinuityVerdict:{segment}"
+        receipt = await AgentOperation.create(task=task, key=key, state="uncertain", external=True)
+        child = await AiTask.create(id=uuid5(task.id, key), task_type=8, status=4)
+        await AgentMessage.create(task=child, conversation=conversation, role="assistant", request_id=uuid4(),
+                                  request_hash="", usage={"calls": [{"status": "failed"}]})
+        execution = SimpleNamespace(params={"task_id": str(task.id), "remake_context_version": 3},
+                                    language="zh", generate=AsyncMock(side_effect=RuntimeError(detail)))
+        token = current_execution.set(execution)
+        try:
+            with pytest.raises(RemakeVideoAnalysisError):
+                await gateway.analyze_one(index=i, path=path, prompt="", schema_name=schema,
+                                          response_schema={}, context={"segment": i}, **kwargs)
+        finally:
+            current_execution.reset(token)
+        return receipt
+
+    draft, audit = await asyncio.gather(
+        failed_call(3, "professional_video_prompt_material", "System protection triggered by request burst."),
+        failed_call(4, "shot_continuity_check", "Unable to handle additional requests due to server overload."))
+    await reconcile_retry(task)
+    for receipt in (draft, audit):
+        await receipt.refresh_from_db()
+        assert receipt.state == "failed" and receipt.result["retryable"]
+
+    # A lost connection on the same shot as the last parent error is still ambiguous.
+    lost = await failed_call(3, "shot_continuity_check", "Connection dropped while reading response")
+    task.error_message = "第 3 个视频片段分析失败：System protection triggered by request burst."
+    await task.save()
+    with pytest.raises(RemakeError):
+        await reconcile_retry(task)
+    await lost.refresh_from_db()
+    assert lost.state == "uncertain"

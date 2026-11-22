@@ -160,12 +160,12 @@ function handleEnded() {
   gap: 8px;
   min-height: 68px;
   padding: 10px;
-  border: 1px solid #403a35;
+  border: 1px solid var(--app-border);
   border-radius: 12px;
-  color: #eee9e2;
+  color: var(--app-text);
   background:
-    radial-gradient(circle at 10% 0%, rgb(143 115 223 / 13%), transparent 40%),
-    linear-gradient(145deg, #211e1b, #191715);
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--app-accent) 13%, transparent), transparent 40%),
+    linear-gradient(145deg, var(--app-surface), var(--app-surface-muted));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
@@ -179,10 +179,10 @@ function handleEnded() {
   height: 38px;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #4a433d;
+  border: 1px solid var(--app-border);
   border-radius: 10px;
-  color: #b8a6ef;
-  background: #2b2632;
+  color: var(--app-accent);
+  background: var(--app-fill-subtle);
 }
 
 .workbench-audio-media__identity img {
@@ -204,7 +204,7 @@ function handleEnded() {
 
 .workbench-audio-media button:focus-visible,
 .workbench-audio-media__range:focus-visible {
-  outline: 2px solid #a88cf4;
+  outline: 2px solid var(--app-accent);
   outline-offset: 2px;
 }
 
@@ -212,14 +212,14 @@ function handleEnded() {
   width: 32px;
   height: 32px;
   border-radius: 999px;
-  color: #171315 !important;
-  background: #b29af2;
+  color: var(--app-text) !important;
+  background: var(--app-accent);
   box-shadow: 0 4px 14px rgb(122 91 202 / 25%);
 }
 
 .workbench-audio-media__play:hover {
-  color: #110f10 !important;
-  background: #c2adfa;
+  color: var(--app-text) !important;
+  background: var(--app-accent);
   transform: translateY(-1px);
 }
 
@@ -258,13 +258,13 @@ function handleEnded() {
 
 .workbench-audio-media__heading small {
   flex: none;
-  color: #887f77;
+  color: var(--app-text-secondary);
   font-size: 9px;
 }
 
 .workbench-audio-media__heading time {
   flex: none;
-  color: #aaa198;
+  color: var(--app-text-secondary);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
@@ -277,38 +277,38 @@ function handleEnded() {
   outline: none;
   appearance: none;
   cursor: pointer;
-  background: linear-gradient(to right, #a88cf4 var(--audio-progress), #4b4540 var(--audio-progress));
+  background: linear-gradient(to right, var(--app-accent) var(--audio-progress), var(--app-fill-subtle) var(--audio-progress));
 }
 
 .workbench-audio-media__range::-webkit-slider-thumb {
   width: 10px;
   height: 10px;
-  border: 2px solid #211e1b;
+  border: 2px solid var(--app-border);
   border-radius: 999px;
   appearance: none;
-  background: #c2adfa;
+  background: var(--app-accent);
   box-shadow: 0 0 0 1px #a88cf4;
 }
 
 .workbench-audio-media__range::-moz-range-thumb {
   width: 8px;
   height: 8px;
-  border: 2px solid #211e1b;
+  border: 2px solid var(--app-border);
   border-radius: 999px;
-  background: #c2adfa;
+  background: var(--app-accent);
 }
 
 .workbench-audio-media__volume {
   width: 28px;
   height: 28px;
   border-radius: 7px;
-  color: #aaa198 !important;
+  color: var(--app-text-secondary) !important;
   background: transparent;
 }
 
 .workbench-audio-media__volume:hover {
-  color: #eee9e2 !important;
-  background: #302b27;
+  color: var(--app-text) !important;
+  background: var(--app-surface-hover);
 }
 
 @media (prefers-reduced-motion: reduce) {

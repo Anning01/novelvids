@@ -2,6 +2,8 @@
 import { tr } from '@/i18n'
 
 import { onMounted, ref } from 'vue'
+import TeamQuotaDialog from '@/components/TeamQuotaDialog.vue'
+import { appConfirm } from '@/shared/confirmDialog'
 import { api } from '@/api'
 import AppPagination from '@/components/AppPagination.vue'
 import { useAuthStore } from '@/features/auth/authStore'
@@ -77,14 +79,30 @@ async function toggleStatus(user: UserItem) {
   }
 }
 
+const quotaTeam = ref<{ id: number; name: string } | null>(null)
+const deletingId = ref<number | null>(null)
+
 async function removeUser(user: UserItem) {
-  if (!window.confirm(tr('确认删除用户「{p0}」？其团队关系与会话将一并删除。', { p0: user.nickname || user.username }))) return
+  if (deletingId.value !== null) return
+  const teams = user.owned_teams ?? []
+  const confirmed = await appConfirm({
+    title: tr('删除用户「{p0}」？', { p0: user.nickname || user.username }),
+    message: teams.length ? tr('以下团队将一并解散并归档。作品、余额、订单和流水保留；成员和邀请将失效。') : tr('该账号的登录会话与团队关系将一并删除。'),
+    details: teams.map(team => tr('「{p0}」 · 余额 ¥{p1}', { p0: team.name, p1: team.balance })),
+    confirmLabel: teams.length ? tr('解散团队并删除用户') : tr('删除用户'), tone: 'danger',
+  })
+  if (!confirmed) return
+  deletingId.value = user.id
   try {
-    await api.deleteUser(user.id)
+    if (teams.length) await api.deleteUser(user.id, teams.map(team => team.id))
+    else await api.deleteUser(user.id)
     notice.success(tr('用户已删除'))
-    await load()
+    if (auth.activeTeamId && teams.some(team => team.id === auth.activeTeamId)) await auth.refreshMe()
   } catch (error) {
     notice.error(error instanceof Error ? error.message : tr('删除失败'))
+  } finally {
+    deletingId.value = null
+    await load()
   }
 }
 
@@ -153,13 +171,19 @@ onMounted(load)
             </td>
             <td>{{ user.created_at || '—' }}</td>
             <td class="cost">{{ money(user.total_cost) }}</td>
-            <td>{{ user.team_count ?? 0 }}</td>
+            <td>
+              <span>{{ user.team_count ?? 0 }}</span>
+              <div v-for="team in user.owned_teams" :key="team.id" class="user-owned-team">
+                <span>{{ team.name }} · ¥{{ money(team.balance) }}</span>
+                <button type="button" class="ghost-button" @click="quotaTeam = team">{{ tr('调整额度') }}</button>
+              </div>
+            </td>
             <td class="actions">
               <template v-if="!user.is_super_admin">
                 <button type="button" class="ghost-button" @click="toggleStatus(user)">
                   {{ user.status === 1 ? tr('禁用登录') : tr('恢复登录') }}
                 </button>
-                <button type="button" class="danger-button" @click="removeUser(user)">{{ tr('删除') }}</button>
+                <button type="button" class="danger-button" :disabled="deletingId !== null" @click="removeUser(user)">{{ tr('删除') }}</button>
               </template>
               <span v-else class="dim">—</span>
             </td>
@@ -176,6 +200,7 @@ onMounted(load)
       />
     </section>
 
+    <TeamQuotaDialog v-if="quotaTeam" :team="quotaTeam" @close="quotaTeam = null" @saved="quotaTeam = null; load()" />
     <div v-if="showCreateDialog" class="dialog-mask" @click.self="showCreateDialog = false">
       <form class="dialog-card" @submit.prevent="createUser">
         <h2>{{ tr('创建用户') }}</h2>
@@ -202,6 +227,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.user-owned-team { display: flex; align-items: center; gap: 6px; margin-block: 4px; flex-wrap: wrap; color: var(--app-text-secondary); }
 .users-page { max-width: 1080px; margin: 0 auto; padding: 28px 24px; display: flex; flex-direction: column; gap: 18px; color: var(--app-text, #303442); background: var(--app-surface, #fff); min-height: 100%; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-header h1 { margin: 0; font-size: 22px; color: var(--app-text, #303442); }

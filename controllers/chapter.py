@@ -97,7 +97,7 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
 
     async def extract(
         self, chapter_id: int, team_id: int | None = None, user_id: int | None = None, conversation_id: int | None = None,
-        *, assistant_model_config_id: int | None = None, skill_id: int | None = None,
+        *, assistant_model_config_id: int | None = None, skill_id: int | None = None, require_new_task: bool = False,
     ) -> AiTask:
         """提交提取任务，返回任务记录供前端轮询。"""
         chapter = await self.get(chapter_id)
@@ -140,6 +140,8 @@ class ChapterController(CRUDBase[Chapter, ChapterCreate, ChapterUpdate]):
                 return previous
             for existing in await AiTask.filter(task_type=AiTaskTypeEnum.extraction.value, status__in=[1,2,6]).using_db(connection):
                 if existing.request_params.get('chapter_id') == chapter_id:
+                    if require_new_task:
+                        raise HTTPException(409, localized_message('本集仍有任务执行中'))
                     if assistant_model_config_id is not None and existing.request_params.get("assistant_model_config_id") != assistant_model_config_id:
                         raise HTTPException(409, localized_message("请等待当前任务完成后再切换模型"))
                     previous_method = existing.request_params.get('creative_method')

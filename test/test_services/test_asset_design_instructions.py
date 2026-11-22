@@ -99,21 +99,21 @@ def test_creative_requirements_preserve_user_text_inside_mandatory_format():
     assert '不要求固定自然语言栏位' not in editing
 
 
-def test_asset_wire_contract_requires_explicit_identity_label_and_nullable_variant():
+def test_asset_wire_contract_accepts_base_and_variant_shapes_in_both_languages():
     from schemas.text_task_contracts import asset_contract
-    from services.extraction.strict_result import extraction_result
+    from prompts.text_tasks import builtin_method
 
-    specifications = synthetic_asset_contract()['zh']
-    schema = asset_contract(specifications)
-    branches = schema['properties']['persons']['items']['anyOf']
-    for branch in branches:
-        assert {'label', 'variant'} <= set(branch['required'])
-        assert '不能省略' in branch['properties']['label']['description']
-        assert 'null' in branch['properties']['variant']['description']
-    payload = {'persons': [{'name': '周砚', 'aliases': ['周伯'], 'description': '58岁木匠',
-        'design': '左颊旧疤，粗麻褐袍。', 'visual_fields': {}}], 'scenes': [], 'items': []}
-    with pytest.raises(ValueError, match='persons\\[0\\] 缺少字段 variant'):
-        extraction_result(payload, {'asset_specifications': specifications, 'aspect_ratio': '16:9'})
+    for language, specs in synthetic_asset_contract().items():
+        schema = asset_contract(specs)
+        for field, array in schema['properties'].items():
+            branches = array['items']['anyOf']
+            assert {('variant' in branch['properties']) for branch in branches} == {False, True}
+            for branch in branches:
+                assert branch['required'] == list(branch['properties'])
+                if field == 'persons':
+                    assert 'label' in branch['required']
+        method = builtin_method('assets')
+        assert '可省略 variant 或填 null' in str(method['references']) + method['instructions']
 
 
 @pytest.mark.parametrize(('language', 'empty_scene'), [('zh', '空场景'), ('en', 'unoccupied')])

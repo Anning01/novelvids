@@ -259,6 +259,10 @@ const pixelTierLabels: Record<string, string> = {
 const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'image' && editedBillingUnit.value === 'pixel_tier') return Object.keys(tierPrices.value)
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
+  if (selectedCategoryId.value === 'video' && editingSyncedPricing.value && editedBillingUnit.value === 'second') {
+    const tiers = Object.keys(tierPrices.value)
+    if (tiers.length) return tiers
+  }
   if (selectedCategoryId.value === 'video') return selectedVideoProtocol.value?.resolutions
     || generationCapabilities.value.video[form.value.video_model_type] || []
   return []

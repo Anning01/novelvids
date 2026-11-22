@@ -11,7 +11,7 @@ from auth.deps import AuthContext, ensure_novel_access, ensure_project_creation_
 from controllers.config import ai_model_config_controller
 from controllers.creation_agent import creation_agent_controller
 from controllers.novel import novel_controller
-from models.novel import Novel
+from models.novel import CLIP_AUTHOR, Novel
 from models.chapter import Chapter
 from models.scene import Scene
 from models.asset import Asset
@@ -24,10 +24,9 @@ from schemas.agent_workflow import ProductionIntent
 from services.creation_agent.skill_execution import require_agent
 from services.experience_quote import require_clip_funds
 from services.image_generation.capabilities import validate_selection as image_selection
-from services.video.capabilities import validate_selection as video_selection
+from services.video.capabilities import capabilities_for_config, validate_selection as video_selection
 from utils.enums import AiTaskTypeEnum, AssetTypeEnum
 
-CLIP_AUTHOR = '片段创作'
 
 
 def _settings(project: Novel):
@@ -67,7 +66,7 @@ async def create_clip(payload: ExperienceGenerateIn, ctx: AuthContext):
     task_type = AiTaskTypeEnum.video if payload.task_type == 'video' else AiTaskTypeEnum.reference_image
     config = await ai_model_config_controller.get_active(task_type.value, payload.model_config_id, team_id=ctx.team_id)
     if payload.task_type == 'video':
-        selected = video_selection(config.video_model_type, api_protocol=config.api_protocol, generation_mode='reference', resolution=payload.resolution,
+        selected = video_selection(capabilities_for_config(config), generation_mode='reference', resolution=payload.resolution,
             aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
         resolution = selected.resolution
     else:

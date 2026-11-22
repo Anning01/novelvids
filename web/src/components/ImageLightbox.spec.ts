@@ -76,3 +76,12 @@ it('stays open until the animated close finishes, including repeated cancel requ
   expect(dialog.element.open).toBe(false)
   expect(wrapper.emitted('close')).toHaveLength(1)
 })
+
+it('opens the clicked asset when two cards share the same original image', async () => {
+  const { wrapper, screen } = await viewer()
+  const src = '/shared.png'
+  await wrapper.setProps({ src, alt: '替身', images: [{ src, alt: '主角' }, { src, alt: '替身' }] })
+  await flushPromises()
+  expect(screen.get('[role=status]').text()).toContain('2 / 2 · 替身')
+  wrapper.unmount()
+})

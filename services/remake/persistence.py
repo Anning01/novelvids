@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import re
 from typing import Any
 
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
 
 from models.asset import Asset
+from models.asset_variant import AssetVariant
 from models.chapter import Chapter
 from models.novel import Novel
 from models.remake_source import RemakeSource
@@ -27,7 +31,119 @@ _ASSET_GROUPS = (
 )
 
 
+def named_form(name):
+    if "#" in name:
+        base, _, form = name.partition("#")
+        if base.strip() and form.strip():
+            return base.strip(), form.strip()
+    match = re.fullmatch(r"(.+?)[（(]([^（）()]+形态)[）)]", name)
+    return (match[1].strip(), match[2].strip()) if match else (name, "")
+
+
 class RemakeResultPersistence:
+    async def wait_for_seed(self, seed_task_id, source):
+        """Other episodes can cut media now and read the first episode's committed identities before extraction."""
+        from models.agent_operation import AgentOperation
+        from models.ai_task import AiTask
+        if not seed_task_id or not await RemakeSource.filter(novel_id=source.novel_id, analysis_task_id=seed_task_id).exists():
+            return
+        while await AiTask.filter(id=seed_task_id, status__in=[
+            TaskStatusEnum.pending, TaskStatusEnum.queued, TaskStatusEnum.running,
+        ]).exists():
+            if await AgentOperation.filter(task_id=seed_task_id, key="remake:bindings", state="completed").exists():
+                return
+            await asyncio.sleep(.5)
+
+    async def project_catalog(self, source):
+        from prompts.remake_render import _asset_visual_content
+        rows = await Asset.filter(novel_id=source.novel_id).order_by("id").values(
+            "id", "canonical_name", "asset_type", "aliases", "description")
+        types = {kind.value: group for group, kind in _ASSET_GROUPS}
+        variants = {}
+        for asset_id, name in await AssetVariant.filter(asset_id__in=[row["id"] for row in rows]).order_by("id").values_list("asset_id", "name"):
+            variants.setdefault(asset_id, []).append(name)
+        return [{"project_asset_id": row["id"], "forms": variants.get(row["id"], []), "name": row["canonical_name"], "type": types[row["asset_type"]],
+                 "aliases": row["aliases"] or [], "visual_identity": _asset_visual_content(row["description"])[:350]}
+                for row in rows if row["asset_type"] in types]
+
+    async def bind_assets(self, source, assets, catalog, *, use_identity_evidence=False):
+        """Resolve episode-local reference IDs before shot generation, in one short project transaction."""
+        seen_ids = {item["project_asset_id"] for item in catalog}
+        async with in_transaction() as connection:
+            await Novel.filter(id=source.novel_id).using_db(connection).select_for_update().get()
+            rows = await Asset.filter(novel_id=source.novel_id).using_db(connection).order_by("id")
+            by_name = {(row.asset_type, row.canonical_name): row for row in rows}
+            from services.remake.identity_evidence import identity_anchor, identity_name
+            characters = {identity_name(named_form(p["name"])[0]) for p in assets.get("characters", [])}
+            characters.update(identity_name(p["name"]) for p in catalog if p.get("type") == "character")
+            witnessed = {}
+            aliases = {}
+            for row in rows:
+                metadata = row.metadata or {}
+                if anchor := metadata.get("remake_identity_anchor"):
+                    witnessed.setdefault((row.asset_type, metadata.get("remake_identity_name", row.canonical_name), anchor), []).append(row)
+                for alias in row.aliases or []:
+                    aliases.setdefault((row.asset_type, alias), set()).add(row.canonical_name)
+            canonical = {}
+            for group, kind in _ASSET_GROUPS:
+                canonical[group] = []
+                for candidate in assets.get(group, []):
+                    name = candidate["name"]
+                    names = aliases.get((kind.value, name), set())
+                    # An existing fully qualified historical asset remains addressable by its original ID.
+                    name, form = (name, "") if (kind.value, name) in by_name else named_form(name)
+                    anchor = identity_anchor(candidate, group, characters - {identity_name(name)}) if use_identity_evidence else None
+                    matches = witnessed.get((kind.value, name, anchor), [])
+                    original_name = name
+                    existing = matches[0] if len(matches) == 1 else by_name.get((kind.value, name))
+                    if existing is None and len(names) == 1:
+                        existing = by_name[(kind.value, next(iter(names)))]
+                    ambiguous = len(names - {name}) > 0 if existing and existing.canonical_name == name else len(names) > 1
+                    if len(matches) > 1 or (existing and anchor and (existing.metadata or {}).get("remake_identity_anchor") not in (None, anchor)):
+                        ambiguous = True
+                    if candidate.get("identity_review") and existing:
+                        ambiguous = True
+                    known_label = existing.metadata.get("remake_label") if existing and isinstance(existing.metadata, dict) else None
+                    if kind == AssetTypeEnum.person and known_label and candidate.get("label") and known_label != candidate["label"]:
+                        ambiguous = True
+                    if existing and existing.id not in seen_ids and len(matches) != 1 and (kind == AssetTypeEnum.item or existing.description != candidate["description"]):
+                        # Another episode introduced this name after extraction. Name alone is not an identity.
+                        ambiguous = True
+                    if ambiguous:
+                        suffix = f" · EP{source.episode_number}"
+                        base = name
+                        ordinal = 1
+                        while (kind.value, base[:100 - len(suffix)] + suffix) in by_name:
+                            ordinal += 1
+                            suffix = f" · EP{source.episode_number}-{ordinal}"
+                        name = base[:100 - len(suffix)] + suffix
+                        existing = None
+                    item = {**candidate, "name": existing.canonical_name if existing else name}
+                    if anchor:
+                        item.update(remake_identity_anchor=anchor, remake_identity_name=original_name)
+                    if form:
+                        item["form_name"] = form
+                    if ambiguous:
+                        item["identity_review"] = True
+                    if existing:
+                        item["project_asset_id"] = existing.id
+                    canonical[group].append(item)
+            bound = await self._persist_assets(connection, source=source, assets=canonical, preserve_existing=True)
+            for items in canonical.values():
+                for item in items:
+                    asset = bound[item["id"]]
+                    item["project_asset_id"] = asset.id
+                    if form := item.get("form_name"):
+                        variant, _ = await AssetVariant.get_or_create(asset=asset, name=form, using_db=connection,
+                            defaults={"description": item["description"], "base_traits": item["description"]})
+                        chapters = sorted(set(variant.chapter_numbers or []) | {source.episode_number})
+                        if variant.chapter_numbers != chapters:
+                            variant.chapter_numbers = chapters
+                            await variant.save(using_db=connection, update_fields=["chapter_numbers", "updated_at"])
+                        item["project_variant_id"] = variant.id
+                        item["name"] = f"{asset.canonical_name}#{form}"
+            return canonical
+
     async def persist(
         self,
         *,
@@ -54,16 +170,26 @@ class RemakeResultPersistence:
             if isinstance(item, dict)
         ]
         async with in_transaction() as connection:
+            await Novel.filter(id=source.novel_id).using_db(connection).select_for_update().get()
             asset_index = await self._persist_assets(
                 connection,
                 source=source,
                 assets=assets,
             )
+            forms = {item["id"]: item.get("project_variant_id") for items in assets.values() for item in items
+                     if item.get("project_asset_id")}
+            variant_ids = {variant for variant in forms.values() if variant is not None}
+            if variant_ids:
+                owners = dict(await AssetVariant.filter(id__in=list(variant_ids)).using_db(connection)
+                              .select_for_update().values_list("id", "asset_id"))
+                if any(owners.get(variant) != asset_index[key].id for key, variant in forms.items() if variant is not None):
+                    raise RemakePersistenceError("重制引用的资产形态已变化，请核对后再保存")
             scene_count = await self._persist_scenes(
                 connection,
                 source=source,
                 prompts=prompts,
                 asset_index=asset_index,
+                forms=forms,
                 pipeline_metadata=pipeline_metadata,
             )
             await Chapter.filter(id=source.chapter_id).using_db(connection).update(
@@ -82,9 +208,8 @@ class RemakeResultPersistence:
         *,
         source: RemakeSource,
         assets: dict[str, list[dict[str, Any]]],
+        preserve_existing: bool = False,
     ) -> dict[str, Asset]:
-        from services.extraction.extractor import validate_asset_design
-
         result: dict[str, Asset] = {}
         chapter = await Chapter.get(id=source.chapter_id).using_db(connection)
         for group, asset_type in _ASSET_GROUPS:
@@ -96,14 +221,17 @@ class RemakeResultPersistence:
                 if not reference_id or not name:
                     continue
                 description = str(item.get("description", "")).strip()
-                validate_asset_design(description)
                 layout = ({'reference_layout':GROUP_PORTRAIT if item.get('label') == '群像' else CHARACTER_TURNAROUND}
                           if asset_type == AssetTypeEnum.person else {})
-                existing = await Asset.get_or_none(
-                    novel_id=source.novel_id,
-                    asset_type=asset_type.value,
-                    canonical_name=name,
-                ).using_db(connection)
+                identity = item.get("project_asset_id")
+                if identity is not None:
+                    existing = await Asset.get_or_none(id=identity, novel_id=source.novel_id,
+                                                       asset_type=asset_type.value).using_db(connection)
+                    if existing is None:
+                        raise RemakePersistenceError(f"重制资产已移除：{name}")
+                else:
+                    existing = await Asset.get_or_none(novel_id=source.novel_id, asset_type=asset_type.value,
+                                                       canonical_name=name).using_db(connection)
                 if existing is None:
                     existing = await Asset.create(
                         using_db=connection,
@@ -123,6 +251,9 @@ class RemakeResultPersistence:
                             "remake_source_ids": [source.id],
                             "remake_reference_id": reference_id,
                             "remake_label": str(item.get("label", "")),
+                            **({k: item[k] for k in ("remake_identity_anchor", "remake_identity_name")}
+                               if item.get("remake_identity_anchor") else {}),
+                            **({"identity_review": True} if item.get("identity_review") else {}),
                         },
                     )
                 else:
@@ -141,7 +272,7 @@ class RemakeResultPersistence:
                         source_ids.sort()
                     owned = (
                         metadata.get("analysis_source") == "remake_decomposition"
-                        and legacy_source_id == source.id
+                        and not preserve_existing and identity is None and legacy_source_id == source.id
                     )
                     chapters = list(existing.source_chapters or [])
                     if chapter.number not in chapters:
@@ -177,6 +308,15 @@ class RemakeResultPersistence:
                 result[reference_id] = existing
         return result
 
+    async def save_available_shots(self, source, prompts, task_id):
+        """Make completed prompts available without marking the failed asset branch complete."""
+        async with in_transaction() as connection:
+            await Novel.filter(id=source.novel_id).using_db(connection).select_for_update().get()
+            if not await RemakeSource.filter(id=source.id, analysis_task_id=task_id).using_db(connection).exists():
+                return
+            await self._persist_scenes(connection, source=source, prompts=prompts, asset_index={}, forms={},
+                pipeline_metadata={"asset_inventory": "failed"}, insert_only=True)
+
     async def _persist_scenes(
         self,
         connection: BaseDBAsyncClient,
@@ -184,7 +324,9 @@ class RemakeResultPersistence:
         source: RemakeSource,
         prompts: list[dict[str, Any]],
         asset_index: dict[str, Asset],
+        forms: dict,
         pipeline_metadata: dict[str, Any],
+        insert_only: bool = False,
     ) -> int:
         sequences: set[int] = set()
         for position, item in enumerate(prompts, start=1):
@@ -194,6 +336,8 @@ class RemakeResultPersistence:
                 chapter_id=source.chapter_id,
                 sequence=sequence,
             ).using_db(connection)
+            if insert_only and scene is not None:
+                continue
             metadata = scene.metadata if scene and isinstance(scene.metadata, dict) else {}
             if scene is not None and metadata.get("remake_source_id") != source.id:
                 raise RemakePersistenceError(
@@ -207,6 +351,20 @@ class RemakeResultPersistence:
                 "confidence": item.get("confidence"),
                 "pipeline": dict(pipeline_metadata),
             }
+            if insert_only:
+                scene_metadata["partial_prompt_hash"] = hashlib.sha256(item["prompt"].encode()).hexdigest()
+            elif saved_hash := scene_metadata.pop("partial_prompt_hash", None):
+                if hashlib.sha256((scene.prompt or "").encode()).hexdigest() != saved_hash:
+                    continue  # An editor has already changed this recovered prompt.
+            if forms:
+                bindings = {}
+                for ref in item.get("asset_refs", []):
+                    key = ref["asset_id"]
+                    if key in forms:
+                        choices = bindings.setdefault(str(asset_index[key].id), [])
+                        if forms[key] not in choices:
+                            choices.append(forms[key])
+                scene_metadata["asset_variant_ids"] = bindings
             if scene is None:
                 scene = await Scene.create(
                     using_db=connection,
@@ -246,6 +404,9 @@ class RemakeResultPersistence:
                     referenced.append(asset)
             if referenced:
                 await scene.assets.add(*referenced, using_db=connection)
+
+        if insert_only or len(sequences) < pipeline_metadata.get("segment_count", 0):
+            return len(sequences)
 
         owned_scenes = await Scene.filter(chapter_id=source.chapter_id).using_db(connection)
         for scene in owned_scenes:

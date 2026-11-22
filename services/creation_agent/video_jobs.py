@@ -35,11 +35,10 @@ async def submit_video(req, *, media_base_url="", team_id=None, user_id=None):
     config = await ai_model_config_controller.get_active(
         AiTaskTypeEnum.video.value, req.model_config_id, team_id=team_id
     )
-    from services.video.capabilities import validate_selection
+    from services.video.capabilities import capabilities_for_config, validate_selection
 
     selection = validate_selection(
-        config.video_model_type,
-        api_protocol=config.api_protocol,
+        capabilities_for_config(config),
         generation_mode=req.generation_mode,
         resolution=req.resolution,
         aspect_ratio=req.aspect_ratio,

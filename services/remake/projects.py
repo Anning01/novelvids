@@ -61,6 +61,8 @@ class RemakeProjectService:
     @staticmethod
     def _payload_hash(payload: RemakeProjectCreate) -> str:
         normalized = payload.model_dump(mode="json", exclude={"idempotency_key"})
+        if payload.shot_duration_max is None:
+            normalized.pop("shot_duration_max", None)
         if payload.model_config_id is None:
             normalized.pop("model_config_id", None)  # Preserve hashes for existing creation requests.
         encoded = json.dumps(
@@ -174,6 +176,7 @@ class RemakeProjectService:
                     content="",
                     total_chapters=len(prepared),
                     workflow_kind="remake",
+                    **({"shot_duration_max": payload.shot_duration_max} if payload.shot_duration_max is not None else {}),
                     aspect_ratio=project_config["aspect_ratio"],
                     resolution=project_config["resolution"],
                     style_key=project_config.get("style_key"),
@@ -226,6 +229,17 @@ class RemakeProjectService:
                         progress=0,
                         request_params={
                             **workflow,
+                            "remake_context_version": 5,
+                            "remake_shot_limit": novel.shot_duration_max,
+                            "remake_action_memory": "timeline",
+                            "remake_visible_references": True,
+                            "remake_identity_evidence": True,
+                            "remake_cast_appearances": True,
+                            "remake_asset_appearances": True,
+                            "remake_assets_first": True,
+                            "remake_short_storyboard": False,
+                            "source_checksum": source.checksum,
+                            **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
                             "novel_id": novel.id,
                             "chapter_id": chapter.id,
@@ -296,7 +310,6 @@ class RemakeProjectService:
             return [self._upload_item(upload, media, 1)], []
 
         if payload.source_mode == "folder_upload":
-            uploads = []
             seen_tokens = set()
             for source_input in payload.sources:
                 if source_input.episode_number is None or source_input.upload_token is None or source_input.source_chapter_id is not None:
@@ -304,14 +317,22 @@ class RemakeProjectService:
                 if source_input.upload_token in seen_tokens:
                     raise RemakeError(422, "REMAKE_SOURCE_MODE_MISMATCH", localized_message('同一上传 token 不能重复使用'))
                 seen_tokens.add(source_input.upload_token)
+
+            async def ready(source_input):
                 upload = await self.upload_service.get_ready(source_input.upload_token, team_id=team_id, user_id=user_id)
-                uploads.append((upload.original_filename, source_input.episode_number, (upload, source_input)))
+                return upload.original_filename, source_input.episode_number, (upload, source_input)
+
+            uploads = await asyncio.gather(*(ready(item) for item in payload.sources))
             batch, missing = validate_episode_batch(uploads)
-            prepared = []
-            for item in batch:
+
+            async def prepare(item):
+                from services.remake.media_capacity import media_capacity
                 upload, _ = item.value
-                media = await self.upload_service.revalidate(upload)
-                prepared.append(self._upload_item(upload, media, item.episode_number))
+                async with media_capacity():
+                    media = await self.upload_service.revalidate(upload)
+                return self._upload_item(upload, media, item.episode_number)
+
+            prepared = await asyncio.gather(*(prepare(item) for item in batch))
             warnings = ([{"code": "REMAKE_EPISODE_GAPS", "missing_episode_numbers": missing}] if missing else [])
             return prepared, warnings
 
@@ -432,7 +453,8 @@ class RemakeProjectService:
             from services.creation_agent.skill_execution import current_execution
             parent = current_execution.get()
             origin = {"origin_run_id": parent.params["task_id"]} if parent else {}
-            from services.remake.checkpoints import partial_retry, resume_position
+            from services.remake.checkpoints import partial_retry, reconcile_retry, resume_position
+            await reconcile_retry(previous)
             stage, progress, _, total = await resume_position(previous, source)
             held, retryable = await partial_retry(previous, total)
             attempt = max(1, int(previous_params.get("attempt", 1) or 1)) + 1
@@ -443,7 +465,7 @@ class RemakeProjectService:
                 stage=stage,
                 progress=progress,
                 request_params={
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_visible_references", "remake_assets_first", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

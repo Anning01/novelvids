@@ -41,7 +41,9 @@ export function estimateImageCost(
 export function estimateAssetImageCost(
   model: ImageGenerationModel | null, params: { clarity: string; aspectRatio: string; generationCount: number }, inputs: number,
 ) {
-  const caps = model?.capabilities
+  if (model?.pricing?.type !== 'image') return NaN
+  if (model.pricing.billing_unit !== 'pixel_tier' && model.pricing.prices?.[params.clarity] == null) return NaN
+  const caps = model.capabilities
   const size = caps?.sizes?.[params.clarity]?.[caps.aspect_ratios.indexOf(params.aspectRatio)]
   const [width, height] = size?.split('x').map(Number) ?? []
   return estimateImageCost(model?.pricing, params.clarity, params.generationCount, inputs, width && height ? width * height : undefined)

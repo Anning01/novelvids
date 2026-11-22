@@ -122,3 +122,12 @@ def test_remake_renders_music_decision_without_automatic_overlay_bans():
     assert "no subtitles" not in scored.lower() and "no background music" not in scored.lower()
     assert "No background music in this shot." in render({"has_bgm": False})
     assert "[Background music]" not in render({})
+
+
+def test_parallel_boundary_review_names_adjacent_drafts_in_the_requested_language():
+    from prompts.remake import continuity_audit_instruction
+    zh = continuity_audit_instruction('zh', parallel_drafts=True)
+    en = continuity_audit_instruction('en', parallel_drafts=True)
+    assert '初稿' in zh and '跨切点的真实语音' in zh
+    assert 'adjacent drafts' in en and 'speech' in en
+    assert 'confirmed predecessor' in continuity_audit_instruction('en')

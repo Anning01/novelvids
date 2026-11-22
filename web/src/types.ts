@@ -76,7 +76,11 @@ export interface ProjectProduction {
   latest_activity_at: string
   state: 'not_started' | 'in_progress' | 'ready'
 }
-export interface ProjectOverviewItem extends Novel { production: ProjectProduction }
+export interface ProjectOverviewItem extends Novel {
+  remake?: { source_count: number; analyzed_count: number } | null
+  production: ProjectProduction
+  clip?: { kind?: 'image' | 'gif' | 'video' | null; resolution?: string | null; preview?: string | null; thumbnail?: string | null } | null
+}
 export interface ProjectOverviewSummary {
   finished_seconds?: number
   unknown_finished_duration_count?: number
@@ -286,6 +290,7 @@ export interface PaginationResponse<T> {
 export interface SingleResponse<T> { code: number; message: string; data: T }
 
 export interface RemakeCapabilities {
+  shot_duration?: { default: number; minimum: number; maximum: number }
   analysis_models: Array<{ id: number; name: string }>
   media: { extensions: string[]; max_bytes: number; max_duration_seconds: number }
   aspect_ratios: string[]
@@ -310,6 +315,7 @@ export interface RemakeUpload {
   expires_at: string
 }
 export interface RemakeProjectCreate {
+  shot_duration_max?: number
   model_config_id?: number
   name: string
   source_mode: 'single_upload' | 'folder_upload' | 'history'
@@ -351,6 +357,8 @@ export interface RemakeProjectCreateResult {
 }
 export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
 export interface RemakeProgressTask {
+  failed_stage?: string | null
+  shot_states?: Record<number, string>
   completed_clips?: number
   total_clips?: number | null
   retryable_clips?: number
@@ -363,6 +371,7 @@ export interface RemakeProgressTask {
   updated_at: string
 }
 export interface RemakeProgressSource {
+  saved_scene_count?: number | null
   source_id: number
   chapter_id: number
   episode_number: number
@@ -455,6 +464,7 @@ export interface UserItem {
   created_at?: string
   total_cost?: number | string
   team_count?: number
+  owned_teams?: { id: number; name: string; balance: string }[]
 }
 
 export interface VisualStyleItem { key: string; label: string }

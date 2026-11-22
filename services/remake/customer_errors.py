@@ -9,6 +9,7 @@ from utils.messages import localized_message
 
 _SEGMENT = re.compile(r'(?:第\s*(\d+)\s*个视频片段|Video segment\s+(\d+))', re.I)
 _SERVICE_ERRORS = {
+    "REMAKE_DEADLINE_EXCEEDED": "上次任务因旧版五分钟限制停止，可重试未完成部分。",
     'REMAKE_ANALYSIS_AUTH_FAILED': '视频分析服务未通过身份验证，请联系管理员检查模型密钥。',
     'REMAKE_MODEL_UNAVAILABLE': '请联系管理员配置可用的视频分析模型，然后重试。',
     'REMAKE_ANALYSIS_MODEL_NOT_FOUND': '请联系管理员配置可用的视频分析模型，然后重试。',
@@ -27,7 +28,7 @@ _STAGES = {
 }
 
 
-async def failure_message(task):
+async def failure_message(task, *, failed_stage=None):
     if task.status == TaskStatusEnum.cancelled:
         return localized_message('本集拆解已取消。')
     if task.status != TaskStatusEnum.failed:
@@ -42,19 +43,20 @@ async def failure_message(task):
         return localized_message('视频分析账户的可用额度不足，请检查余额和限额后重试。')
 
     match = _SEGMENT.search(diagnostic)
-    if match and task.stage == 'generating_storyboards':
+    if match and (failed_stage or task.stage) == 'generating_storyboards':
         index = int(match[1] or match[2])
         reason = await _shot_reason(task.id, index)
         keys = await AgentOperation.filter(task=task, state='completed', key__startswith='model:remake:').values_list('key', flat=True)
         done = sorted(int(k.rsplit(':', 1)[1]) for k in keys if re.fullmatch(r'model:remake:RemakeShot:\d+', k))
         parts = [localized_message(reason, p0=index)]
-        if 'model:remake:RemakeAssets:1' in keys:
+        from services.remake.checkpoints import ASSET_RECEIPT_KEYS
+        if ASSET_RECEIPT_KEYS.intersection(keys):
             parts.append(localized_message('本集的人物、场景和道具设定已保留。'))
         if done:
             parts.append(localized_message('已保留 {p0} 个片段的分镜结果。', p0=len(done)))
         parts.append(localized_message('点击「重试」继续处理未完成的片段。'))
         return ' '.join(parts)
-    return localized_message(_STAGES.get(task.stage, '本集拆解未完成，请重试。'))
+    return localized_message(_STAGES.get(failed_stage or task.stage, '本集拆解未完成，请重试。'))
 
 
 async def _shot_reason(task_id, index):

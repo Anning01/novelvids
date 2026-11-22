@@ -326,3 +326,48 @@ async def test_unknown_catalog_types_skip_one_channel_and_preserve_local_prices(
     await studio_platform.sync_platform_models()
     await row.refresh_from_db()
     assert row.is_active is (not locally_disabled) and row.pricing["prices"]["low"] == .4
+
+
+@pytest.mark.asyncio
+async def test_refresh_public_h3_channel_uses_advertised_resolution_prices(monkeypatch):
+    from fastapi import HTTPException
+    from controllers.config import ai_model_config_controller
+    from services.video.capabilities import capabilities_for_config, validate_selection
+
+    tariff = {'type': 'video', 'currency': 'CNY', 'billing_unit': 'second', 'prices': {'480p': .08, '768p': .10},
+              'video_reference_prices': {'480p': 0, '768p': 0}, 'discount': .6,
+              'input_image': {'first_free': 9, 'price_per_image': 0}}
+    entry = {'id': 'nv-14', 'name': '优惠渠道', 'task_types': [4], 'video_model_type': 'minimax_h3', 'pricing': tariff}
+    client = httpx.AsyncClient
+    monkeypatch.setattr(studio_platform.httpx, 'AsyncClient', lambda **kw: client(**kw,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json={'data': [entry]}))))
+    await studio_platform.sync_platform_models('nv_test')
+    row = await AiModelConfig.get(model='nv-14')
+    assert row.pricing == tariff
+    await AiModelConfig.filter(id=row.id).update(pricing={**tariff, 'discount': .8,
+        'prices': {'768P': .05, '2K': 0}, 'video_reference_prices': {'768P': .05, '2K': 0}})
+    await studio_platform.sync_platform_models()
+    await row.refresh_from_db()
+    assert row.pricing == {**tariff, 'discount': .8}
+    capabilities = capabilities_for_config(row)
+    assert capabilities.resolutions == ('480p', '768p') and capabilities.default_resolution == '768p'
+    assert (await ai_model_config_controller.list_active_video_models())[0]['capabilities'] == capabilities.public_dict()
+    ai_model_config_controller._validate_pricing({'pricing': row.pricing}, row)
+    options = dict(generation_mode='reference', duration=6, aspect_ratio='16:9', generate_audio=None, output_format=None)
+    for tier in ('480p', '768p'):
+        assert validate_selection(capabilities, resolution=tier.upper(), **options).resolution == tier
+    with pytest.raises(HTTPException):
+        validate_selection(capabilities, resolution='2K', **options)
+    with pytest.raises(HTTPException):
+        ai_model_config_controller._validate_pricing({'pricing': {**row.pricing, 'prices': {'2K': 1}}}, row)
+
+    from services.video import get_generator
+    from unittest.mock import AsyncMock
+    generator = get_generator(row)
+    send = AsyncMock(return_value={'id': 'test-task'})
+    monkeypatch.setattr(generator, '_request', send)
+    await generator.submit('测试镜头', resolution='480P', duration=6)
+    assert send.await_args.kwargs['payload']['resolution'] == '480p'
+    with pytest.raises(HTTPException):
+        await generator.submit('测试镜头', resolution='2K', duration=6)
+    assert send.await_count == 1

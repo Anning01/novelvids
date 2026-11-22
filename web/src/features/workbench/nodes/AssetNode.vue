@@ -10,6 +10,7 @@ import type { Asset, DigitalHuman, ImageGenerationModel } from '@/types'
 import { AssetTypeEnum } from '@/types'
 import { downloadFile } from '@/shared/downloadFile'
 import { notice } from '@/shared/notice'
+import { imageReferenceCount } from '@/shared/assetImageDependencies'
 import { estimateAssetImageCost } from '@/shared/modelPricing'
 import AssetDefaultImage from '../components/AssetDefaultImage.vue'
 import ImageGenerationParameterPanel, { type ImageGenerationParameters } from '@/components/ImageGenerationParameterPanel.vue'
@@ -24,7 +25,6 @@ import ProjectAssetPicker from '../components/ProjectAssetPicker.vue'
 import type { ReusableAssetChoice } from '../components/reusableAsset'
 import { assetTypeIconFor, assetTypePresentationOptions, editableAssetTypeOptions } from '../components/assetTypePresentation'
 import { disambiguateMaterialMentionNames, materialMentionAssetCategory } from '../components/materialMentionTypes'
-import { useWorkbenchNodeDimensionSync } from '../composables/useWorkbenchNodeDimensionSync'
 import {
   assetImageMediaMetadata,
   assetImageCandidates,
@@ -41,7 +41,7 @@ import {
 import { registerWorkbenchPromptAction } from '../prompt/promptActionRegistry'
 import { registerWorkbenchNodeRun } from '../run/nodeRunRegistry'
 import { promptEditorFromData, workbenchPromptEditorKey } from '../prompt/promptEditor'
-import { balanceMediaGalleryRows, containedAspectRatioSize, mediaAspectRatioCss, mediaGalleryItemWidth } from '../graph/mediaAspectRatio'
+import { containedAspectRatioSize, mediaAspectRatioCss } from '../graph/mediaAspectRatio'
 import { useWorkbenchStore } from '../store/workbenchStore'
 
 const props = defineProps<NodeProps>()
@@ -57,7 +57,7 @@ const prompt = ref('')
 const config = ref<AssetWorkbenchConfig>(normalizeAssetConfig(asset.value, projectDefaults.value))
 const imageModels = computed(() => (props.data.imageModelOptions as ImageGenerationModel[] | undefined) || [])
 const imageModelOptions = computed(() => imageModels.value.map(model => ({ value: model.config_id, label: model.name || model.model })))
-const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) || null)
+const selectedImageModel = computed(() => imageModels.value.find(model => model.config_id === config.value.modelConfigId) ?? imageModels.value[0] ?? null)
 const saving = ref(false)
 const changingMainImage = ref(false)
 const uploadingImage = ref(false)
@@ -89,27 +89,21 @@ watch(activeAsset, value => {
   description.value = value.description || ''
   prompt.value = value.base_traits || ''
   config.value = normalizeAssetConfig(value, projectDefaults.value)
-  if (!imageModelOptions.value.some(option => option.value === config.value.modelConfigId)) {
-    config.value.modelConfigId = imageModelOptions.value[0]?.value ?? null
-  }
 }, { immediate: true })
 watch(prompt, value => store.updateNodeDraft(props.id, { prompt_dirty: value !== (activeAsset.value.base_traits || '') }))
 
-watch(projectDefaults, value => {
-  config.value = normalizeAssetConfig(activeAsset.value, value)
-}, { deep: true })
-
-watch(imageModelOptions, options => {
-  if (!options.some(option => option.value === config.value.modelConfigId)) {
-    config.value.modelConfigId = options[0]?.value ?? null
+watch(() => projectDefaults.value?.aspectRatio, (aspectRatio, previous) => {
+  const oldDefaults = normalizeAssetConfig(activeAsset.value, { aspectRatio: previous })
+  if (config.value.aspectRatio === oldDefaults.aspectRatio) {
+    config.value.aspectRatio = normalizeAssetConfig(activeAsset.value, { aspectRatio }).aspectRatio
   }
-}, { immediate: true })
+})
 
 const busy = computed(() => store.busyAssetIds.includes(asset.value.id))
 const promptEditorConfig = computed(() => promptEditorFromData(props.data.prompt_editor))
 const promptEditorOpen = computed(() => props.data.prompt_editor_open === true && Boolean(promptEditorConfig.value))
 const imageMetadata = computed(() => assetImageMediaMetadata(activeAsset.value))
-watch(() => [selectedVariantValue.value, activeAsset.value.main_image], () => {
+watch([() => asset.value.id, selectedVariantValue, () => activeAsset.value.main_image], () => {
   loadedImageWidth.value = 0
   loadedImageHeight.value = 0
   loadedGalleryImageSizes.value = {}
@@ -154,52 +148,45 @@ const primaryImage = computed(() => (
 ))
 const hasImagePreview = computed(() => Boolean(activeAsset.value.main_image))
 const hasMultipleImages = computed(() => assetImages.value.length > 1)
+watch(hasMultipleImages, multiple => {
+  if (!multiple) imageGalleryExpanded.value = false
+})
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
+const galleryImages = computed(() => primaryImage.value ? [primaryImage.value, ...stackedAssetImages.value] : [])
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
+const primaryImageSize = computed(() => {
+  const width = loadedImageWidth.value || imageMetadata.value.width || 0
+  const height = loadedImageHeight.value || imageMetadata.value.height || 0
+  return width > 0 && height > 0 ? { width, height } : null
+})
+const primaryPreviewRatio = computed(() => {
+  const size = primaryImageSize.value
+  // Reserve a portrait slot while the original loads. Later dimensions can only shrink it.
+  return size && size.width / size.height >= 9 / 16 ? `${size.width}:${size.height}` : '9:16'
+})
 const assetImageStageStyle = computed(() => {
   const stackOffset = assetImageStackDepth.value * 4
-  return stackOffset
-    ? { marginRight: `${stackOffset}px` }
-    : undefined
+  return {
+    aspectRatio: mediaAspectRatioCss(primaryPreviewRatio.value),
+    marginRight: stackOffset ? `${stackOffset}px` : undefined,
+  }
 })
 const showDefaultVisualImage = computed(() => !hasImagePreview.value)
 const defaultVisualImageStyle = computed(() => ({
   aspectRatio: mediaAspectRatioCss(config.value.aspectRatio),
 }))
 const annotations = computed(() => imageMetadata.value.annotations || [])
-const imagePixelSize = computed(() => {
-  const width = loadedImageWidth.value || imageMetadata.value.width || 0
-  const height = loadedImageHeight.value || imageMetadata.value.height || 0
-  return width > 0 && height > 0 ? `${Math.round(width)} × ${Math.round(height)}` : ''
-})
+const imagePixelSize = computed(() => primaryImageSize.value
+  ? `${Math.round(primaryImageSize.value.width)} × ${Math.round(primaryImageSize.value.height)}`
+  : '')
 function assetImageAspectRatio(image: { key: string; url: string } | null | undefined) {
   if (!image) return config.value.aspectRatio
   const loaded = loadedGalleryImageSizes.value[image.key]
   if (loaded?.width && loaded.height) return `${loaded.width}:${loaded.height}`
-  if (image.key === primaryImage.value?.key) {
-    const width = loadedImageWidth.value || imageMetadata.value.width || 0
-    const height = loadedImageHeight.value || imageMetadata.value.height || 0
-    if (width > 0 && height > 0) return `${width}:${height}`
-  }
+  if (image.key === primaryImage.value?.key && primaryImageSize.value)
+    return `${primaryImageSize.value.width}:${primaryImageSize.value.height}`
   return config.value.aspectRatio
 }
-const primaryImageAspectRatio = computed(() => assetImageAspectRatio(primaryImage.value))
-function assetGalleryItemStyle(image: { key: string; url: string }) {
-  const ratio = assetImageAspectRatio(image)
-  return {
-    '--workbench-asset-image-aspect-ratio': mediaAspectRatioCss(ratio),
-    '--workbench-asset-gallery-item-width': `${mediaGalleryItemWidth(ratio)}px`,
-  }
-}
-const assetGalleryRows = computed(() => balanceMediaGalleryRows(
-  assetImages.value,
-  assetImageAspectRatio,
-  { targetRowWidth: 1280, maxItemsPerRow: 4 },
-))
-const assetGalleryLayoutSignature = computed(() => assetImages.value
-  .map(image => `${image.key}:${assetImageAspectRatio(image)}`)
-  .join('|'))
-useWorkbenchNodeDimensionSync(props.id, () => `${imageGalleryExpanded.value}:${assetGalleryLayoutSignature.value}`)
 const imageDownloadFilename = computed(() => {
   const extension = imageMetadata.value.mimeType?.includes('webp')
     ? 'webp'
@@ -276,7 +263,7 @@ const materialMentions = computed<MaterialMention[]>(() => {
 const personAsset = computed(() => assetType.value === AssetTypeEnum.PERSON)
 const backendCanGenerate = computed(() => props.data.generate_capability === true)
 const generatorSupportsType = computed(() => ![AssetTypeEnum.PRODUCT, AssetTypeEnum.STYLE].includes(assetType.value))
-const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && config.value.modelConfigId !== null && !busy.value && !saving.value)
+const canGenerate = computed(() => backendCanGenerate.value && generatorSupportsType.value && Boolean(selectedImageModel.value) && !busy.value && !saving.value)
 const assetTypeOptions = editableAssetTypeOptions
 const assetTypeValue = computed({
   get: () => imageMetadata.value.source === 'upload' && !assetTypeExplicit.value ? 'image' : String(assetType.value),
@@ -292,12 +279,20 @@ const assetTypeValue = computed({
   },
 })
 const imageParameterValue = computed<ImageGenerationParameters>({
-  get: () => ({
-    clarity: config.value.clarity,
-    aspectRatio: config.value.aspectRatio,
-    outputFormat: config.value.outputFormat,
-    generationCount: config.value.generationCount,
-  }),
+  get() {
+    const { clarity, aspectRatio, outputFormat, generationCount } = config.value
+    const caps = selectedImageModel.value?.capabilities
+    if (!caps) return { clarity, aspectRatio, outputFormat, generationCount }
+    const format = caps.output_formats.includes(outputFormat) ? outputFormat : caps.default_output_format
+    const clarities = caps.clarities_by_format?.[format] ?? caps.clarities
+    const defaultClarity = clarities.includes(caps.default_clarity) ? caps.default_clarity : clarities[0]!
+    return {
+      clarity: clarities.includes(clarity) ? clarity : defaultClarity,
+      aspectRatio: caps.aspect_ratios.includes(aspectRatio) ? aspectRatio : caps.default_aspect_ratio,
+      outputFormat: format,
+      generationCount: caps.generation_counts.includes(generationCount) ? generationCount : caps.default_generation_count,
+    }
+  },
   set: value => {
     config.value = {
       ...config.value,
@@ -313,27 +308,19 @@ const imageParameterValue = computed<ImageGenerationParameters>({
 })
 
 function normalizedDraftConfig(): AssetWorkbenchConfig {
+  const parameters = imageParameterValue.value
   return {
     ...config.value,
-    resolution: config.value.clarity,
-    size: config.value.aspectRatio,
-    format: config.value.outputFormat.toUpperCase(),
+    ...parameters,
+    generationCount: parameters.generationCount as AssetWorkbenchConfig['generationCount'],
+    modelConfigId: selectedImageModel.value?.config_id ?? null,
+    resolution: parameters.clarity,
+    size: parameters.aspectRatio,
+    format: parameters.outputFormat.toUpperCase(),
     digitalHumanAssetId: personAsset.value ? config.value.digitalHumanAssetId : '',
     digitalHumanPreviewUrl: personAsset.value ? config.value.digitalHumanPreviewUrl : '',
   }
 }
-
-watch(selectedImageModel, model => {
-  if (!model) return
-  const current = imageParameterValue.value
-  const capabilities = model.capabilities
-  imageParameterValue.value = {
-    clarity: capabilities.clarities.includes(current.clarity) ? current.clarity : capabilities.default_clarity,
-    aspectRatio: capabilities.aspect_ratios.includes(current.aspectRatio) ? current.aspectRatio : capabilities.default_aspect_ratio,
-    outputFormat: capabilities.output_formats.includes(current.outputFormat) ? current.outputFormat : capabilities.default_output_format,
-    generationCount: capabilities.generation_counts.includes(current.generationCount) ? current.generationCount : capabilities.default_generation_count,
-  }
-}, { immediate: true })
 
 async function save() {
   saving.value = true
@@ -403,6 +390,13 @@ async function focusVariant(value: string) {
   else store.selectNode(key)
 }
 
+const generationReferenceCount = computed(() => {
+  const saved = activeAsset.value.metadata?.generation_reference_images
+  const connected = store.assetGenerationReferenceImages(asset.value.id, selectedVariantId.value)
+  const references = [...(Array.isArray(saved) ? saved.filter((url): url is string => typeof url === 'string') : []), ...connected]
+  return imageReferenceCount(asset.value, selectedVariant.value, store.assets, references)
+})
+
 registerWorkbenchPromptAction(props.id, {
   id: 'asset-image-generation',
   get label() { return tr('生成资产图片') },
@@ -410,7 +404,7 @@ registerWorkbenchPromptAction(props.id, {
   enabled: canGenerate,
   busy,
   cost: computed(() => estimateAssetImageCost(
-    selectedImageModel.value, imageParameterValue.value, materialMentions.value.filter(item => item.hasImage).length,
+    selectedImageModel.value, imageParameterValue.value, generationReferenceCount.value,
   )),
   costPricing: computed(() => selectedImageModel.value?.pricing),
   controls: [
@@ -421,7 +415,7 @@ registerWorkbenchPromptAction(props.id, {
         options: imageModelOptions.value,
         get label() { return tr('图片模型') },
       })),
-      modelValue: computed(() => config.value.modelConfigId),
+      modelValue: computed(() => selectedImageModel.value?.config_id ?? null),
       updateModelValue(value) {
         const modelConfigId = Number(value)
         if (Number.isFinite(modelConfigId)) config.value.modelConfigId = modelConfigId
@@ -467,13 +461,10 @@ registerWorkbenchNodeRun(props.id, { enabled: canGenerate, run: generate })
 
 function handlePromptFocusOut(event: FocusEvent) {
   const panel = event.currentTarget as HTMLElement | null
-  if (event.relatedTarget instanceof Node && panel?.contains(event.relatedTarget)) return
-  void save()
-}
-
-function handleNodeFocusOut(event: FocusEvent) {
-  const content = event.currentTarget as HTMLElement | null
-  if (event.relatedTarget instanceof Node && content?.contains(event.relatedTarget)) return
+  const next = event.relatedTarget
+  if (next instanceof Node && panel?.contains(next)) return
+  const popup = next instanceof Element ? next.closest('.image-parameters__panel') : null
+  if (popup && panel?.querySelector('[aria-controls="' + CSS.escape(popup.id) + '"]')) return
   void save()
 }
 
@@ -511,7 +502,7 @@ function imageRoleLabel(image: { key: string; url: string }) {
 function assetImageStackLayerStyle(image: { key: string; url: string }, layerIndex: number) {
   const xOffset = layerIndex * 4
   return {
-    ...containedAspectRatioSize(assetImageAspectRatio(image), primaryImageAspectRatio.value),
+    ...containedAspectRatioSize(assetImageAspectRatio(image), primaryPreviewRatio.value),
     transform: `translateX(${xOffset}px)`,
     transformOrigin: 'top left',
     zIndex: -layerIndex,
@@ -731,11 +722,11 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
           <small>{{ tr('选择当前生成形态，或新增人物变装、场景升级和道具形态。') }}</small>
         </section>
       </template>
-      <div class="workbench-node-content" @focusout="handleNodeFocusOut">
+      <div class="workbench-node-content">
         <div
-          v-if="hasImagePreview && !imageGalleryExpanded"
+          v-if="hasImagePreview"
           class="workbench-asset-image-stage"
-          :class="{ 'is-multi-image': hasMultipleImages }"
+          :class="{ 'is-multi-image': hasMultipleImages, 'is-gallery-open': imageGalleryExpanded }"
           :style="assetImageStageStyle"
         >
           <span
@@ -758,39 +749,33 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
             v-if="hasMultipleImages"
             type="button"
             class="workbench-asset-image-count nodrag"
+            :class="{ 'workbench-asset-gallery__collapse': imageGalleryExpanded }"
             :aria-expanded="imageGalleryExpanded"
-            :aria-label="tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
+            :aria-label="imageGalleryExpanded
+              ? tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })
+              : tr('展开{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
             @pointerdown.stop
-            @click.stop="imageGalleryExpanded = true"
+            @keydown.space.stop
+            @click.stop="imageGalleryExpanded = !imageGalleryExpanded"
           >
-            <Maximize2 :size="17" aria-hidden="true" />
-            <span>{{ assetImages.length }}{{ tr('张') }}</span>
+            <Minimize2 v-if="imageGalleryExpanded" :size="17" aria-hidden="true" />
+            <Maximize2 v-else :size="17" aria-hidden="true" />
+            <span v-if="imageGalleryExpanded">{{ tr('收起') }}</span>
+            <span v-else>{{ assetImages.length }}{{ tr('张') }}</span>
           </button>
-        </div>
-        <section
-          v-if="hasMultipleImages && imageGalleryExpanded"
-          class="workbench-asset-gallery nodrag"
-          role="region"
-          :aria-label="tr('{p0}图片列表', { p0: assetName })"
-          @pointerdown.stop
-        >
-          <button
-            type="button"
-            class="workbench-asset-gallery__collapse"
-            :aria-label="tr('收起{p0}的 {p1} 张图片', { p0: assetName, p1: assetImages.length })"
+          <section
+            v-if="hasMultipleImages && imageGalleryExpanded"
+            class="workbench-asset-gallery nodrag"
+            :style="{ '--gallery-columns': Math.ceil(Math.sqrt(galleryImages.length)) }"
+            role="region"
+            :aria-label="tr('{p0}图片列表', { p0: assetName })"
             @pointerdown.stop
-            @click.stop="imageGalleryExpanded = false"
           >
-            <Minimize2 :size="17" aria-hidden="true" />
-            <span>{{ tr('收起') }}</span>
-          </button>
-          <div v-for="row in assetGalleryRows" :key="row.map(image => image.key).join('|')" class="workbench-media-gallery__row">
             <article
-              v-for="image in row"
+              v-for="image in galleryImages"
               :key="image.key"
               class="workbench-asset-gallery__item"
               :class="{ 'is-primary': imageIsPrimary(image) }"
-              :style="assetGalleryItemStyle(image)"
               role="button"
               :tabindex="imageIsPrimary(image) ? -1 : 0"
               :aria-label="imageIsPrimary(image) ? tr('{p0}主图', { p0: assetName }) : tr('设{p0}{p1}为主图', { p0: assetName, p1: imageRoleLabel(image) })"
@@ -816,8 +801,8 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
                 </button>
               </div>
             </article>
-          </div>
-        </section>
+          </section>
+        </div>
         <AssetDefaultImage
           v-if="showDefaultVisualImage"
           :icon="assetTypeIconFor(assetTypeValue)"
@@ -888,7 +873,7 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
 }
 .workbench-asset-variant-popover > header {
   justify-content: space-between;
-  color: #eee8e1;
+  color: var(--app-text);
   font-size: 12px;
 }
 .workbench-asset-variant-popover button {
@@ -896,22 +881,22 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
   min-width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid #4a433d;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: #aaa39c;
-  background: #292522;
+  color: var(--app-text-secondary);
+  background: var(--app-fill-subtle);
   cursor: pointer;
 }
 .workbench-asset-variant-popover button:hover,
 .workbench-asset-variant-popover button:focus-visible {
-  border-color: #8f76d8;
-  color: #eee8e1;
+  border-color: var(--app-accent);
+  color: var(--app-text);
   outline: none;
 }
 .workbench-asset-variant-popover button.is-danger:hover,
 .workbench-asset-variant-popover button.is-danger:focus-visible {
-  border-color: #b96666;
-  color: #ef9a9a;
+  border-color: var(--creation-danger);
+  color: var(--creation-danger);
 }
 .workbench-asset-variant-popover button:disabled {
   cursor: not-allowed;
@@ -925,18 +910,18 @@ async function chooseReusableAsset(choice: ReusableAssetChoice) {
 .workbench-asset-variant-popover__create input {
   height: 34px;
   padding: 0 9px;
-  border: 1px solid #48413b;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: #eee9e4;
+  color: var(--app-text);
   outline: none;
-  background: #131210;
+  background: var(--app-surface-muted);
 }
 .workbench-asset-variant-popover__create button {
   min-width: 58px;
   padding: 0 10px;
 }
 .workbench-asset-variant-popover > small {
-  color: #817870;
+  color: var(--app-text-secondary);
   font-size: 10px;
   line-height: 1.45;
 }

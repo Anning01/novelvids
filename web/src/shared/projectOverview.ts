@@ -1,15 +1,20 @@
 import { dateLocale, tr } from '@/i18n'
-import { readShortDramaSettings } from '@/shared/shortDramaProject'
+import { projectSource, readShortDramaSettings } from '@/shared/shortDramaProject'
 import type { Novel } from '@/types'
 
 export function projectKind(project: Novel) {
-  if (project.author === '片段创作') return 'clip'
+  if (projectSource(project) === 'clip') return 'clip'
   if (project.workflow_kind === 'remake') return 'remake'
   return readShortDramaSettings(project).mode ?? 'script'
 }
 
 export function projectKindLabel(project: Novel) {
   return { clip: tr('独立片段'), agent: tr('AI 创作'), manual: tr('手动创作'), remake: tr('视频重制'), script: tr('小说 / 剧本') }[projectKind(project)]
+}
+
+export function projectSourceLabel(source: ReturnType<typeof projectSource>) {
+  if (source === 'remake') return tr('重制工坊')
+  return source === 'clip' ? tr('首页单次创作') : tr('剧集项目')
 }
 
 export function projectNumber(value: number): string {

@@ -63,18 +63,27 @@ it.each(['light', 'dark'])('loads originals on the canvas and repairs thumbnail 
   expect(image.attributes('src')).toBe('/media/original.png')
   expect(image.attributes('loading')).toBe('lazy')
   expect(wrapper.get('.workbench-asset-image-stack-layer img').attributes('src')).toBe('/media/side-thumbnail.webp')
-  Object.defineProperties(image.element, { naturalWidth: { value: 2048 }, naturalHeight: { value: 1152 } })
+  Object.defineProperties(image.element, { naturalWidth: { value: 2048, configurable: true }, naturalHeight: { value: 1152, configurable: true } })
   await image.trigger('load')
   expect(updateMetadata).toHaveBeenCalledWith(90, { width: 2048, height: 1152 }, undefined)
   expect(wrapper.get('.workbench-node-frame__media-size').text()).toBe('2048 × 1152')
   await wrapper.get('[aria-label="展开原图角色的 2 张图片"]').trigger('click')
   expect(wrapper.findAll('.workbench-asset-gallery__item img').map(item => item.attributes('src')))
-    .toEqual(['/media/side.png', '/media/original.png'])
+    .toEqual(['/media/original.png', '/media/side.png'])
   await wrapper.get('[aria-label="收起原图角色的 2 张图片"]').trigger('click')
   await wrapper.setProps({ data: { asset: { ...asset, main_image: '/media/replacement.png',
     metadata: { workbenchImage: {} } }, generate_capability: false } })
   expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/media/replacement.png')
   expect(wrapper.find('.workbench-node-frame__media-size').exists()).toBe(false)
+  const stage = wrapper.get<HTMLElement>('.workbench-asset-image-stage')
+  expect(stage.element.style.aspectRatio).toBe('9 / 16')
+  const replacement = wrapper.get<HTMLImageElement>('.workbench-uploaded-image-preview')
+  Object.defineProperties(replacement.element, {
+    naturalWidth: { value: 600, configurable: true },
+    naturalHeight: { value: 400, configurable: true },
+  })
+  await replacement.trigger('load')
+  expect(stage.element.style.aspectRatio).toBe('600 / 400')
   wrapper.unmount()
   delete document.documentElement.dataset.appTheme
 })
@@ -288,6 +297,7 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   const pinia = createPinia()
   setActivePinia(pinia)
   const store = useWorkbenchStore()
+  const save = vi.spyOn(store, 'saveAsset').mockResolvedValue(undefined)
   const setMainImage = vi.spyOn(store, 'setAssetMainImage').mockResolvedValue(undefined as never)
   const wrapper = mount(AssetNode, {
     props: {
@@ -332,10 +342,32 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   expect(wrapper.find('[aria-label="替换资产图片"]').exists()).toBe(true)
   await wrapper.get('[aria-label="管理衍生形态"]').trigger('click')
   expect(wrapper.find('[role="dialog"][aria-label="衍生形态管理"]').exists()).toBe(true)
+  const toggle = wrapper.get('.workbench-asset-image-count').element
+  const canvasKeydown = vi.fn()
+  wrapper.element.addEventListener('keydown', canvasKeydown)
+  await wrapper.get('.workbench-asset-image-count').trigger('keydown', { key: ' ', code: 'Space' })
+  expect(canvasKeydown).not.toHaveBeenCalled()
   await wrapper.get('[aria-label="展开三图角色的 3 张图片"]').trigger('click')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(true)
-  expect(wrapper.findAll('.workbench-media-gallery__row').length).toBeGreaterThan(0)
+  expect(wrapper.get('.workbench-asset-image-count').element).toBe(toggle)
+  expect(wrapper.get('.workbench-asset-image-count').attributes('aria-expanded')).toBe('true')
+  expect(wrapper.get('.workbench-asset-image-stage .workbench-asset-gallery').findAll('article')).toHaveLength(3)
+  const nodeData = wrapper.props().data
+  await wrapper.get('.workbench-node-content').trigger('focusout')
+  expect(save).not.toHaveBeenCalled()
+  await wrapper.setProps({ data: { ...nodeData, asset: { ...nodeData.asset } } })
+  expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(true)
 
+
+  for (const [count, columns] of [[2, 2], [3, 2], [4, 2], [5, 3]] as const) {
+    const urls = Array.from({ length: count - 2 }, (_, i) => `/media/extra-${i}.png`)
+    await wrapper.setProps({ data: { ...nodeData, asset: { ...nodeData.asset, metadata: { image_gallery: urls } } } })
+    const gallery = wrapper.get<HTMLElement>('.workbench-asset-gallery')
+    expect(gallery.element.style.getPropertyValue('--gallery-columns')).toBe(String(columns))
+    expect(gallery.findAll('article img').map(image => image.attributes('src')))
+      .toEqual(['/media/front.png', '/media/side.png', ...urls])
+  }
+  await wrapper.setProps({ data: nodeData })
   await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('pointerdown')
   await wrapper.get('[aria-label="收起三图角色的 3 张图片"]').trigger('click')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(false)
@@ -345,6 +377,11 @@ it('renders a stacked multi-image card and promotes an expanded gallery image', 
   await wrapper.get('[aria-label="设三图角色参考图 1为主图"]').trigger('click')
   expect(setMainImage).toHaveBeenCalledWith(2, '/media/side.png')
   expect(wrapper.find('[aria-label="三图角色图片列表"]').exists()).toBe(false)
+
+  await wrapper.get('[aria-label="展开三图角色的 3 张图片"]').trigger('click')
+  await wrapper.setProps({ data: { ...nodeData, asset: { ...nodeData.asset, angle_image_1: null, metadata: {} } } })
+  expect(wrapper.find('.workbench-asset-gallery').exists()).toBe(false)
+  expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/media/front.png')
 })
 
 it.each(['light', 'dark'])('keeps base and independent variant cards visible without mixing their edits (%s)', async theme => {

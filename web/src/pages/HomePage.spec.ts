@@ -451,3 +451,27 @@ it('displays the action button with estimated prices, strikethrough original pri
   expect(wrapper.text()).not.toContain('预计生成费用')
   expect(wrapper.text()).not.toContain('可用余额')
 })
+
+it('keeps model controls usable while recent clips and the gallery wait, and retries only the failed section', async () => {
+  let rejectRecent!: (reason: Error) => void
+  let rejectGallery!: (reason: Error) => void
+  vi.mocked(clipApi.recent).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRecent = reject }))
+  vi.mocked(api.experienceShowcase).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectGallery = reject }))
+  const { wrapper } = await render()
+  expect(wrapper.get('.upload-reference').attributes('disabled')).toBeUndefined()
+  expect(wrapper.find('.gallery-loading').exists()).toBe(true)
+  expect(wrapper.find('.recent-section [role="status"]').exists()).toBe(true)
+  rejectRecent(new Error('offline'))
+  rejectGallery(new Error('offline'))
+  await flushPromises()
+  await wrapper.get('.gallery-state button').trigger('click')
+  await flushPromises()
+  expect(api.experienceShowcase).toHaveBeenCalledTimes(2)
+  expect(clipApi.recent).toHaveBeenCalledTimes(1)
+  await wrapper.get('.recent-section button').trigger('click')
+  await flushPromises()
+  expect(clipApi.recent).toHaveBeenCalledTimes(2)
+  expect(api.videoGenerationModels).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('.recent-section').exists()).toBe(false)
+  wrapper.unmount()
+})

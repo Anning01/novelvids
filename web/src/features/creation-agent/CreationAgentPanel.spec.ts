@@ -369,6 +369,21 @@ it('does not show status returned for a previous chapter after switching chapter
   wrapper.unmount()
 })
 
+it('only overrides the extraction model when the user chooses a model', async () => {
+  const pinia = createPinia()
+  const wrapper = mount(CreationAgentPanel, { props: { projectId: 7, chapterId: 3 }, global: { plugins: [pinia] } })
+  await flushPromises()
+  const send = vi.spyOn(useCreationAgentStore(pinia), 'send').mockResolvedValue(true)
+  await wrapper.get('[aria-label="创作要求"]').setValue('提取资产')
+  await wrapper.get('[data-testid="sender"]').trigger('click')
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ model_config_id: null }))
+  await wrapper.get('[aria-label="助手模型"]').setValue('1')
+  await wrapper.get('[aria-label="创作要求"]').setValue('提取资产')
+  await wrapper.get('[data-testid="sender"]').trigger('click')
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ model_config_id: 1 }))
+  wrapper.unmount()
+})
+
 it('preserves draft and model choice after closing and reopening the assistant', async () => {
   vi.mocked(agentApi.capabilities).mockResolvedValue({ code: 0, message: '', data: {
     enabled: true, can_write: true, max_targets: 2, models: [{ id: 1, name: '默认模型', model: 'first', concurrency: 4 }, { id: 2, name: '所选模型', model: 'second', concurrency: 4 }],

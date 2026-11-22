@@ -386,7 +386,17 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
     assert await RemakeSource.filter(novel_id=result["novel_id"]).count() == 3
     assert len({item["task_id"] for item in result["sources"]}) == 3
     for item in result["sources"]:
-        assert (await AiTask.get(id=item["task_id"])).request_params["model_config_id"] == selected.id
+        params = (await AiTask.get(id=item["task_id"])).request_params
+        assert params["model_config_id"] == selected.id
+        assert params["remake_context_version"] == 5
+        assert params["remake_action_memory"] == "timeline"
+        assert params["remake_shot_limit"] == (await Novel.get(id=result["novel_id"])).shot_duration_max
+        assert params["remake_short_storyboard"] is False
+        assert params["remake_assets_first"] is True
+        assert params["remake_cast_appearances"] is True
+        assert params["remake_asset_appearances"] is True
+        assert "catalog_seed_task_id" not in params and "remake_deadline_at" not in params
+        assert "remake_block_size" not in params
     for upload in (first, second, third):
         await upload.refresh_from_db()
         assert upload.status == "committed"
@@ -546,7 +556,8 @@ async def test_one_folder_episode_failure_and_retry_does_not_change_sibling_task
 @pytest.mark.asyncio
 @pytest.mark.parametrize('media_status', ['failed', 'processing'])
 @pytest.mark.parametrize('has_uncertain_clip', [False, True])
-async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent, has_uncertain_clip, media_status):
+@pytest.mark.parametrize("continuity_version", [0, 1])
+async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_path, configured_creation_agent, has_uncertain_clip, media_status, continuity_version):
     upload_service = RemakeUploadService(
         validator=FakeValidator(),
         provider=LocalProvider(),
@@ -557,6 +568,10 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     created = await service.create(payload(upload.id), team_id=3, user_id=5)
     source = await RemakeSource.get(id=created["sources"][0]["source_id"])
     old_task = await AiTask.get(id=source.analysis_task_id)
+    old_task.request_params["remake_deadline_at"] = 1
+    if not continuity_version:
+        old_task.request_params.pop("remake_context_version")
+    await old_task.save(update_fields=["request_params"])
     old_task.status = TaskStatusEnum.failed.value
     await old_task.save(update_fields=["status", "updated_at"])
     source.media_status = media_status
@@ -574,10 +589,18 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     if has_uncertain_clip:
         await AgentOperation.create(task=old_task,key='model:remake:RemakeShot:2',state='uncertain',external=True)
     with patch('services.remake.checkpoints.scene_cache_directory', return_value=tmp_path):
+        if continuity_version and has_uncertain_clip:
+            with pytest.raises(RemakeError) as error:
+                await service.retry(source.id, team_id=3, user_id=5)
+            assert error.value.error_code == "REMAKE_AWAITING_RECEIPT"
+            await source.refresh_from_db()
+            assert source.analysis_task_id == old_task.id
+            return
         result = await service.retry(source.id, team_id=3, user_id=5)
 
     await source.refresh_from_db()
     task = await AiTask.get(id=result["task_id"])
+    assert 'remake_deadline_at' not in task.request_params
     assert task.request_params.get('held_shots', []) == []
     assert task.id != old_task.id
     assert (task.stage,task.progress) == ('generating_storyboards', 71)
@@ -585,6 +608,7 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     assert task.request_params["attempt"] == 2
     assert task.request_params["ai_task_id"] == str(task.id)
     assert task.request_params["retry_of_task_id"] == str(old_task.id)
+    assert task.request_params.get("remake_assets_first") == old_task.request_params.get("remake_assets_first")
     assert source.analysis_task_id == task.id
     assert source.media_status == "ready"
 

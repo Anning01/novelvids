@@ -13,4 +13,5 @@ import './features/workbench/styles/shengshimedia-workbench.css'
 import './app-theme.css'
 
 initializeAppTheme()
-void initializeLocale().then(() => createApp(App).use(i18n).component('AppButton', AppButton).use(createPinia()).use(router).mount('#app'))
+initializeLocale()
+createApp(App).use(i18n).component('AppButton', AppButton).use(createPinia()).use(router).mount('#app')

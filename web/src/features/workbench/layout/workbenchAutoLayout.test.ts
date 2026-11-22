@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { Point, WorkbenchEdge, WorkbenchNode } from '../types/workbenchTypes'
-import { buildWorkbenchAutoLayout } from './workbenchAutoLayout'
+import { buildWorkbenchAutoLayout, buildWorkbenchGroupedAutoLayout } from './workbenchAutoLayout'
 
 const timestamp = '2026-07-25T00:00:00.000Z'
 
@@ -82,4 +82,32 @@ it('does not move fixed nodes', () => {
   })
 
   expect(positions.fixed).toEqual({ x: 740, y: 310 })
+})
+
+it('centers mixed widths on the same column axis using measured card sizes', () => {
+  const [portrait, landscape] = makeShotNodes(2, { width: 360, height: 520 })
+  const positions = buildWorkbenchAutoLayout([portrait!, landscape!], [], {
+    sizes: {
+      [portrait!.key]: { width: 384, height: 684 },
+      [landscape!.key]: { width: 544, height: 306 },
+    },
+  })
+  const portraitPosition = positions[portrait!.key]!
+  const landscapePosition = positions[landscape!.key]!
+  expect(portraitPosition.x + 192).toEqual(landscapePosition.x + 272)
+  expect(landscapePosition.y - portraitPosition.y - 684).toBeGreaterThanOrEqual(96)
+})
+
+it('keeps the chapter in place and wraps tall asset lanes alongside it', () => {
+  const chapter = makeNode('chapter', { x: 200, y: 100 }, 'chapter')
+  const assets = Array.from({ length: 5 }, (_, i) => makeNode(`asset-${i}`, { x: 0, y: i }, 'asset'))
+  const positions = buildWorkbenchGroupedAutoLayout([chapter, ...assets], [], {
+    sizes: { chapter: { width: 460, height: 220 } },
+    columnGap: 100,
+    maxColumnHeight: 1200,
+  })
+  expect(positions.chapter).toBeUndefined()
+  expect(Math.min(...assets.map(n => positions[n.key]!.x))).toBe(760)
+  expect(new Set(assets.map(n => positions[n.key]!.x)).size).toBe(3)
+  expectNoOverlaps(assets, positions)
 })

@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from services.team_lifecycle import ARCHIVED_TEAM_STATUS
 from fastapi import Depends, HTTPException, Request
 
-from auth.models import TeamMember, User, UserSession
+from auth.models import Team, TeamMember, User, UserSession
 from auth.security import hash_token
 from config import settings
 from models.ai_task import AiTask
@@ -100,6 +101,8 @@ async def context_for_team(user: User, team_id: int | None) -> AuthContext:
         membership = await query.select_related("team").first()
     if membership is None:
         if user.is_super_admin:
+            if team_id and await Team.filter(id=team_id, status=ARCHIVED_TEAM_STATUS).exists():
+                raise HTTPException(403, localized_message("团队已归档"))
             return AuthContext(user=user, team_id=team_id, is_super_admin=True)
         raise HTTPException(status_code=403, detail=localized_message('没有加入任何可用团队'))
     return AuthContext(

@@ -2,12 +2,18 @@
 import { tr } from '@/i18n'
 
 import { computed, onMounted, ref } from 'vue'
+import TeamQuotaDialog from '@/components/TeamQuotaDialog.vue'
+import { appConfirm } from '@/shared/confirmDialog'
+import { useAuthStore } from '@/features/auth/authStore'
 import { api } from '@/api'
 import AppPagination from '@/components/AppPagination.vue'
 import AppSelect from '@/components/AppSelect.vue'
 import { notice } from '@/shared/notice'
 import type { TeamItem, UserItem } from '@/types'
 
+const auth = useAuthStore()
+const quotaTeam = ref<TeamItem | null>(null)
+const archiving = ref(false)
 const teams = ref<TeamItem[]>([])
 const loading = ref(false)
 const page = ref(1)
@@ -19,7 +25,7 @@ const candidates = ref<UserItem[]>([])
 const createForm = ref({ name: '', memberLimit: '3', ownerUserId: null as number | null })
 const creating = ref(false)
 
-const statusLabel = (status: number) => (status === 1 ? tr('正常') : tr('已停用'))
+const statusLabel = (status: number) => (status === 2 ? tr('已归档') : status === 1 ? tr('正常') : tr('已停用'))
 
 const ownerOptions = computed(() => candidates.value.map(user => {
   const name = user.nickname || (user.username.startsWith('qiling-') ? tr('微信用户') : user.username)
@@ -102,17 +108,22 @@ async function createTeam() {
   }
 }
 
-async function topUp(team: TeamItem) {
-  const amount = window.prompt(tr('为「{p0}」充值金额（元）：', { p0: team.name }))
-  const parsed = Number(amount)
-  if (!amount || Number.isNaN(parsed) || parsed <= 0) return
+async function archive(team: TeamItem) {
+  if (archiving.value) return
+  if (!await appConfirm({
+    title: tr('解散「{p0}」？', { p0: team.name }),
+    message: tr('团队将归档，保留作品、订单和流水，解除所有人和成员关系。'),
+    details: [tr('当前余额：¥{p0}', { p0: String(team.balance) })],
+    confirmLabel: tr('解散团队'), tone: 'danger',
+  })) return
+  archiving.value = true
   try {
-    await api.teamTopUp({ team_id: team.id, amount: parsed, get note() { return tr('管理端充值') } })
-    notice.success(tr('充值成功'))
+    await api.archiveTeam(team.id)
+    if (auth.activeTeamId === team.id) await auth.refreshMe()
+    notice.success(tr('团队已归档'))
     await loadTeams()
-  } catch (error) {
-    notice.error(error instanceof Error ? error.message : tr('充值失败'))
-  }
+  } catch (error) { notice.error((error as Error).message) }
+  finally { archiving.value = false }
 }
 
 async function toggleStatus(team: TeamItem) {
@@ -166,7 +177,8 @@ onMounted(loadTeams)
 
     <section class="panel">
       <p v-if="loading" class="dim">{{ tr('加载中…') }}</p>
-      <table v-else class="team-table">
+      <div v-else class="team-table-scroll" role="region" :aria-label="tr('团队管理')" tabindex="0">
+      <table class="team-table">
         <thead>
           <tr><th>{{ tr('团队') }}</th><th>{{ tr('所有人') }}</th><th>{{ tr('成员数') }}</th><th>{{ tr('人员上限') }}</th><th>{{ tr('余额（元）') }}</th><th>{{ tr('状态') }}</th><th class="actions">{{ tr('操作') }}</th></tr>
         </thead>
@@ -179,15 +191,20 @@ onMounted(loadTeams)
             <td :class="{ 'is-overdraft': Number(team.balance) < 0 }">{{ Number(team.balance).toFixed(2) }}</td>
             <td><span class="status-badge" :class="team.status === 1 ? 'is-active' : 'is-stopped'">{{ statusLabel(team.status) }}</span></td>
             <td class="actions">
-              <button type="button" class="ghost-button" @click="topUp(team)">{{ tr('充值') }}</button>
-              <RouterLink class="ghost-button link" :to="`/members?team_id=${team.id}`">{{ tr('成员') }}</RouterLink>
-              <button type="button" class="ghost-button" @click="setMemberLimit(team)">{{ tr('上限') }}</button>
-              <button type="button" class="ghost-button" @click="rename(team)">{{ tr('改名') }}</button>
-              <button type="button" class="danger-button" @click="toggleStatus(team)">{{ team.status === 1 ? tr('停用') : tr('启用') }}</button>
+              <template v-if="team.status !== 2">
+                <button type="button" class="ghost-button" @click="quotaTeam = team">{{ tr('调整额度') }}</button>
+                <RouterLink class="ghost-button link" :to="`/members?team_id=${team.id}`">{{ tr('成员') }}</RouterLink>
+                <button type="button" class="ghost-button" @click="setMemberLimit(team)">{{ tr('上限') }}</button>
+                <button type="button" class="ghost-button" @click="rename(team)">{{ tr('改名') }}</button>
+                <button type="button" class="danger-button" @click="toggleStatus(team)">{{ team.status === 1 ? tr('停用') : tr('启用') }}</button>
+                <button type="button" class="danger-button" :disabled="archiving" @click="archive(team)">{{ tr('解散团队') }}</button>
+              </template>
+              <span v-else>—</span>
             </td>
           </tr>
         </tbody>
       </table>
+      </div>
       <AppPagination
         :page="page"
         :page-size="pageSize"
@@ -197,6 +214,7 @@ onMounted(loadTeams)
       />
     </section>
 
+    <TeamQuotaDialog v-if="quotaTeam" :team="quotaTeam" initial-mode="credit" @close="quotaTeam = null" @saved="quotaTeam = null; loadTeams()" />
     <div v-if="showCreateDialog" class="dialog-mask" @click.self="showCreateDialog = false">
       <form class="dialog-card" @submit.prevent="createTeam">
         <h2>{{ tr('新建团队') }}</h2>
@@ -234,6 +252,7 @@ onMounted(loadTeams)
 .primary-button { height: 36px; padding: 0 16px; border: none; border-radius: 8px; background: var(--app-accent, #5b5cf6); color: #fff; font-weight: 600; cursor: pointer; }
 .primary-button:disabled { opacity: 0.6; }
 .panel { background: var(--app-surface, #fff); border: 1px solid var(--app-border, #e3e5ec); border-radius: 12px; padding: 18px; }
+.team-table-scroll { max-width: 100%; overflow-x: auto; }
 .team-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--app-text, #303442); }
 .team-table th, .team-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--app-border, #e3e5ec); }
 .team-table .actions { text-align: right; white-space: nowrap; }

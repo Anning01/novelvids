@@ -6,10 +6,12 @@ from services.media_processing import run_media
 
 import asyncio
 import os
+import stat
 import subprocess
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Literal
+from urllib.parse import urlsplit
 
 from config import settings
 from services.cover_derivatives import (
@@ -17,7 +19,7 @@ from services.cover_derivatives import (
     local_media_path,
     render_cover_derivatives,
 )
-from services.oss import normalize_media_url, oss
+from services.oss import normalize_media_url, oss, resolve_media_url
 from services.video.source import VideoSourceError, materialize_video_source
 
 
@@ -26,6 +28,26 @@ VideoPosterKind = Literal["thumbnail", "preview"]
 
 class VideoPosterError(RuntimeError):
     """视频海报无法提取或持久化。"""
+
+
+def video_media_url(reference: str | None) -> str | None:
+    url = resolve_media_url(reference)
+    if not url or not url.startswith("/media/videos/"):
+        return url
+    parts = urlsplit(url)
+    path = local_media_path(Path(settings.MEDIA_PATH), parts.path)
+    if path is None:
+        return url
+    try:
+        info = path.stat()
+    except OSError:
+        return url
+    if not stat.S_ISREG(info.st_mode):
+        return url
+    # Different Docker libraries can serve different files under the same numeric video ID.
+    query = [item for item in parts.query.split("&") if item and not item.startswith("media_v=")]
+    query.append(f"media_v={info.st_mtime_ns:x}-{info.st_size:x}")
+    return parts._replace(query="&".join(query)).geturl()
 
 
 def video_poster_reference(

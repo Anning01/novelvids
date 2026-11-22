@@ -113,6 +113,7 @@ watch(() => props.disabled, value => { if (value) close() })
       type="button"
       class="workbench-select__trigger nodrag nowheel"
       :aria-label="label"
+      :title="selectedOption?.label || label"
       aria-haspopup="listbox"
       :aria-expanded="open"
       :disabled="disabled"

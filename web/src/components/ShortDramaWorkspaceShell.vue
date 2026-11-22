@@ -140,7 +140,7 @@ defineExpose({ editWithAssistant })
 
       <div class="short-drama-header-end"><slot name="header-end" />
         <AppButton v-if="projectId > 0" ref="assistantButton" size="sm" :active="assistantOpen" :aria-expanded="assistantOpen" @click="assistantOpen = !assistantOpen"><Bot :size="16" />{{ tr('创作助手') }}</AppButton>
-        <AppThemeToggle v-if="!immersive" placement="inline" />
+        <AppThemeToggle placement="inline" />
       </div>
     </header>
 
@@ -210,12 +210,31 @@ defineExpose({ editWithAssistant })
 .is-immersive .short-drama-workspace-header { right: 0; min-height: 0; padding: 14px 18px; border: 0; pointer-events: none; background: transparent; box-shadow: none; backdrop-filter: none; }
 .is-immersive .short-drama-project-identity { pointer-events: none; }
 .is-immersive .short-drama-project-identity > *,.is-immersive .short-drama-header-end { pointer-events: auto; }
-.is-immersive :deep(.workbench-toolbar) { z-index: 40; }
+.is-immersive .short-drama-workspace-header { grid-template-columns: minmax(0, 1fr) auto; }
+.is-immersive .short-drama-header-end { grid-column: 2; }
+.is-immersive .short-drama-header-end > .app-button,
+.is-immersive .short-drama-back { color: var(--app-text); background: var(--app-surface); box-shadow: inset 0 0 0 1px var(--app-border-strong); }
+.is-immersive .short-drama-project-name :deep(.workbench-identity) {
+  position: relative;
+  inset: auto;
+  max-width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 3px;
+  border-color: var(--app-border-strong);
+  background: var(--app-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.is-immersive .short-drama-project-name :deep(.workbench-identity input) { color: var(--app-text); }
+.is-immersive .short-drama-project-name :deep(.workbench-identity small) { color: var(--app-text-secondary); }
+.is-immersive .short-drama-project-name :deep(.workbench-identity__trigger > span) { color: var(--app-accent); background: var(--app-accent-soft); }
+
 .is-immersive .short-drama-workspace-content { height: 100vh; padding-top: 0; }
 .is-immersive .short-drama-workspace-body { height: 100vh; min-height: 0; }
 .is-immersive.has-assistant .short-drama-workspace-header { right: var(--short-drama-assistant-width); }
 .is-immersive :deep(.creation-agent-panel) { top: 0; height: 100dvh; }
-.is-immersive .short-drama-back { color: #eee9e2; background: rgb(33 30 27 / 92%); box-shadow: inset 0 0 0 1px #3b3631,0 8px 24px rgb(0 0 0 / 24%); backdrop-filter: blur(12px); }
+
 
 @media (max-width: 900px) {
   .short-drama-workspace-shell { --short-drama-header-height: 124px; }

@@ -47,6 +47,7 @@ class RemakeProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=255)
+    shot_duration_max: int | None = Field(None, ge=1, le=30)
     source_mode: Literal["single_upload", "folder_upload", "history"]
     aspect_ratio: str = Field(..., min_length=1, max_length=16)
     resolution: str = Field(..., min_length=1, max_length=32)
@@ -55,3 +56,17 @@ class RemakeProjectCreate(BaseModel):
     model_config_id: int | None = Field(None, ge=1)
     idempotency_key: UUID
     sources: list[RemakeProjectSourceIn] = Field(..., min_length=1)
+
+
+class RemakeContinuityVerdict(BaseModel):
+    """A small decision about a draft; the original shot contract remains unchanged."""
+    model_config = ConfigDict(extra="forbid")
+    consistent: bool
+    reason: str = Field(min_length=1, max_length=250)
+
+
+class RemakeSpeechEvidence(BaseModel):
+    """Only the audible portion of one disputed line in one physical clip."""
+    model_config = ConfigDict(extra="forbid")
+    certain: bool
+    words: str = Field(max_length=600)

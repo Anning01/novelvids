@@ -15,7 +15,7 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const layoutChanged = ref(false);
 const content = computed(() => typeof props.data.content === 'string' ? props.data.content : '');
 const previewedColor = ref('');
-const color = computed(() => previewedColor.value || (typeof props.data.color === 'string' ? props.data.color : '#8d793d'));
+const color = computed(() => previewedColor.value || (typeof props.data.color === 'string' && props.data.color ? props.data.color : '#8d793d'));
 const noteStyle = computed(() => ({ '--workbench-note-color': color.value }));
 
 function resizeToContent() {

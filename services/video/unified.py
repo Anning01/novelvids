@@ -13,7 +13,7 @@ from services.platform.http_contract import check_upstream_response, public_task
 from pydantic import BaseModel, Field, ValidationError
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
-from services.video.capabilities import capabilities_for, validate_selection
+from services.video.capabilities import capabilities_for_config, validate_selection
 from services.video.content import PreparedVideoContent, prepare_video_content, reference_indexes, replace_display_mentions
 from services.video.provider_http import public_provider_error, request_id
 from services.video.public_media import PublicMediaResolver, public_media_url
@@ -101,16 +101,20 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         if self.config.api_protocol == "novelvids" and not submitting and response.status_code == 404 and (task_id or "").startswith("req-"):
             return {"id":task_id, "status":"failed", "error":localized_message("平台没有此视频请求的受理记录")}
         check_upstream_response(response)
+        platform = self.config.api_protocol == "novelvids"
+        trace = request_id(response)
+        if platform and not trace and isinstance(data, dict):
+            trace = data.get("id")
         if response.status_code >= 400:
             raise VideoProviderError(public_provider_error(data, status_code=response.status_code,
-                transport_request_id=request_id(response), secrets=(self.config.api_key,)),
+                transport_request_id=trace, secrets=(self.config.api_key,), trusted_details=platform),
                 submission_uncertain=submitting and (response.status_code >= 500 or response.status_code == 408),
                 status_code=response.status_code)
         if not isinstance(data, dict):
             raise VideoProviderError(localized_message('视频接口返回了无效响应'), submission_uncertain=submitting)
         if data.get("error"):
             data = {**data, "error": public_task_error(data, public_provider_error(data, status_code=response.status_code,
-                transport_request_id=request_id(response), secrets=(self.config.api_key,)))}
+                transport_request_id=trace, secrets=(self.config.api_key,), trusted_details=platform))}
         return data
 
     async def submit(self, prompt: str, negative_prompt: str = "", subjects: list[dict[str, Any]] | None = None,
@@ -118,11 +122,11 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         if self.config.api_protocol == "unified_video":
             raise VideoProviderError(localized_message("通用视频接口已停用，请使用火山方舟协议"))
         mode = kwargs.get("generation_mode", "reference")
-        selection = validate_selection(self.config.video_model_type, api_protocol=self.config.api_protocol,
+        caps = capabilities_for_config(self.config)
+        selection = validate_selection(caps,
             generation_mode=mode, resolution=kwargs.get("resolution"), aspect_ratio=aspect_ratio,
             duration=duration, output_format=kwargs.get("output_format"), generate_audio=kwargs.get("generate_audio"),
             return_last_frame=kwargs.get("return_last_frame"))
-        caps = capabilities_for(self.config.video_model_type, self.config.api_protocol)
         images = kwargs.get("reference_images") or []
         videos = kwargs.get("reference_videos") or []
         prepared = prepare_video_content(prompt=prompt, subjects=subjects, generation_mode=mode,

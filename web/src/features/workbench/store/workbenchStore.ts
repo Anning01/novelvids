@@ -1,3 +1,4 @@
+import { nodeMarkerColor } from '../graph/nodeAppearance'
 
 import { sheetReference, includeSheet } from '@/shared/storyboardSheetReference'
 import { tr } from '@/i18n'
@@ -43,15 +44,38 @@ const uploadedUrl = (uploaded: { filename: string; url?: string }): string => (
   uploaded.url || mediaUrl(`/media/${encodeURIComponent(uploaded.filename)}`)
 )
 
-function placeNewVariantNodes(nodes: WorkbenchNode[], existingKeys: Set<string>) {
-  const added = nodes.filter(item => item.kind === 'asset' && typeof item.data.variant_id === 'number' && !existingKeys.has(item.key))
+// New automatic cards need space before the browser measures them. A 384px
+// portrait card is 683px tall; the remaining space holds its floating toolbar.
+const MEDIA_ROW_STEP = 800
+const MEDIA_ROW_GAP = 104
+const ASSET_COLUMN_X = 552
+
+function placeNewMediaNodes(nodes: WorkbenchNode[], existingKeys: Set<string>) {
+  const isVariant = (item: WorkbenchNode) => item.kind === 'asset' && typeof item.data.variant_id === 'number'
+  const media = nodes.filter(item => item.kind === 'asset' || item.kind === 'shot')
+  const added = media.filter(item => !existingKeys.has(item.key) && (existingKeys.size || isVariant(item)))
   if (!added.length) return
   const addedKeys = new Set(added.map(item => item.key))
-  let bottom = Math.max(0, ...nodes.filter(item => item.kind === 'asset' && !addedKeys.has(item.key))
-    .map(item => item.position.y + (item.size?.height || 320)))
-  for (const item of added) {
-    item.position = { x: nodes.find(parent => parent.key === assetNodeKey(item.id))?.position.x ?? 480, y: bottom + 64 }
-    bottom = item.position.y + (item.size?.height || 320)
+  const columns = new Map<number, { right: number; bottom: number }>()
+  const parentX = new Map(media.filter(item => item.kind === 'asset' && !isVariant(item)).map(item => [item.id, item.position.x]))
+  let assetBottom = 0
+  const width = (item: WorkbenchNode) => item.size?.width ?? (item.kind === 'shot' ? 544 : 384)
+  const reserve = (item: WorkbenchNode) => {
+    const left = item.position.x
+    const previous = columns.get(left)
+    const bottom = item.position.y + (item.size?.height ?? MEDIA_ROW_STEP - MEDIA_ROW_GAP)
+    columns.set(left, { right: Math.max(previous?.right ?? left, left + width(item)), bottom: Math.max(previous?.bottom ?? bottom, bottom) })
+    if (item.kind === 'asset') assetBottom = Math.max(assetBottom, bottom)
+  }
+  media.filter(item => !addedKeys.has(item.key)).forEach(reserve)
+  for (const item of [...added.filter(node => !isVariant(node)), ...added.filter(isVariant)]) {
+    const x = isVariant(item) ? parentX.get(item.id) ?? item.position.x : item.position.x
+    let y = isVariant(item) ? assetBottom + MEDIA_ROW_GAP : item.position.y
+    for (const [left, column] of columns) {
+      if (left < x + width(item) && x < column.right) y = Math.max(y, column.bottom + MEDIA_ROW_GAP)
+    }
+    item.position = { x, y }
+    reserve(item)
   }
 }
 
@@ -92,17 +116,19 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     manualNodes: [] as WorkbenchNode[],
     mediaEdges: [] as WorkbenchEdge[],
     viewport: { x: 0, y: 0, zoom: 1 } as WorkbenchViewport,
+    loadedLayoutSize: null as NodeSize | null,
     loadEpoch: markRaw(new WorkbenchLoadEpoch()),
     pendingControllers: [] as AbortController[],
     pollingVideoIds: [] as number[],
     pollingRemakeTaskId: null as string | null,
   }),
   getters: {
+    nodesByKey: state => new Map(state.nodes.map(item => [item.key, item])),
     canUndo: state => state.history.length > 0,
     canRedo: state => state.future.length > 0,
   },
   actions: {
-    nodeByKey(key: string) { return this.nodes.find(item => item.key === key) },
+    nodeByKey(key: string) { return this.nodesByKey.get(key) },
     beginPendingWork() {
       const controller = markRaw(new AbortController())
       this.pendingControllers.push(controller)
@@ -189,6 +215,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const legacy = current ? null : localStorage.getItem(this.legacyLayoutKey())
         const saved = parseWorkbenchState(current || legacy || (imported ? JSON.stringify(imported) : ''))
         if (!saved) return
+        this.loadedLayoutSize = saved.canvasSize
         this.viewport = saved.viewport
         this.manualNodes = saved.manualNodes.filter(item => isManualNodeKind(item.kind))
         this.mediaEdges = saved.manualEdges
@@ -198,18 +225,19 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           const value = saved.nodes[item.key]
           if (value) { item.position = value.position; if (value.size !== undefined) item.size = value.size; item.zIndex = value.zIndex; item.data.ui = value.ui }
         })
-        placeNewVariantNodes(this.nodes, new Set(Object.keys(saved.nodes)))
+        placeNewMediaNodes(this.nodes, new Set(Object.keys(saved.nodes)))
         if (!current && legacy) localStorage.setItem(this.layoutKey(), serializeWorkbenchState(saved))
       } catch { /* ignore invalid local layout */ }
     },
-    async load(novelId: number, chapterId: number) {
+    async load(novelId: number, chapterId: number, bootstrap?: ReturnType<typeof api.workbenchBootstrap>) {
       const epoch = this.loadEpoch.begin()
+      this.loadedLayoutSize = null
       this.loading = true; this.novelId = novelId; this.chapterId = chapterId
       this.removedAgentDrafts = {}
       this.nodes = []; this.edges = []; this.manualNodes = []; this.mediaEdges = []; this.history = []; this.future = []; this.busyAssetIds = []; this.busySceneIds = []; this.busyComposerKeys = []; this.pollingVideoIds = []; this.pollingRemakeTaskId = null; this.projectConfig = defaultProjectConfig(); this.remakeSource = null; this.videoModelOptions = []; this.imageModelOptions = []; this.viewport = { x: 0, y: 0, zoom: 1 }; this.clearSelection()
       try {
         const [bootstrapResponse, videoConfigResponse, imageConfigResponse] = await Promise.all([
-          api.workbenchBootstrap(novelId, chapterId),
+          bootstrap ?? api.workbenchBootstrap(novelId, chapterId),
           api.videoGenerationModels(),
           api.imageGenerationModels(),
         ])
@@ -242,19 +270,21 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         aspectRatio: this.projectConfig.aspect_ratio || '9:16',
         resolution: this.projectConfig.resolution || '720p',
       }
+      let assetColumnX = ASSET_COLUMN_X
       if (this.remakeSource) {
         const sourceKey = `remake-source-${this.remakeSource.id}`
-        nodes.push(node(this.remakeSource.id, sourceKey, 'source_video', tr('来源视频 · 第 {p0} 集', { p0: this.remakeSource.episode_number }), { x: 80, y: 420 }, {
+        nodes.push(node(this.remakeSource.id, sourceKey, 'source_video', tr('来源视频 · 第 {p0} 集', { p0: this.remakeSource.episode_number }), { x: assetColumnX, y: 80 }, {
           source: this.remakeSource,
           url: mediaUrl(this.remakeSource.media_url),
           layout_family: 'source',
           layout_lane: 'source',
           ui: {},
         }))
+        assetColumnX += 560
         const task = this.remakeSource.analysis_task
         if (task && task.status !== TaskStatusEnum.COMPLETED) {
           const taskKey = `remake-analysis-${task.id}`
-          const taskNode = node(-this.remakeSource.id, taskKey, 'ai_decomposition', tr('AI 视频拆解'), { x: 500, y: 420 }, {
+          const taskNode = node(-this.remakeSource.id, taskKey, 'ai_decomposition', tr('AI 视频拆解'), { x: assetColumnX, y: 80 }, {
             sourceId: this.remakeSource.id,
             task,
             layout_family: 'operation',
@@ -265,6 +295,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
             ? 'failed'
             : 'running'
           nodes.push(taskNode)
+          assetColumnX += 432
           edges.push(edge(100000 + this.remakeSource.id, `${sourceKey}-${taskKey}`, sourceKey, taskKey, 'output_binding'))
         }
       }
@@ -276,7 +307,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           const index = assetIndex++
           const item = node(asset.id, assetNodeKey(asset.id, variant?.id), 'asset',
             variant ? `${asset.canonical_name}#${variant.name}` : asset.canonical_name,
-            { x: 480, y: baseIndex * 320 }, { asset, variant_id: variant?.id, imageModelOptions: this.imageModelOptions,
+            { x: assetColumnX, y: 80 + baseIndex * MEDIA_ROW_STEP }, { asset, variant_id: variant?.id, imageModelOptions: this.imageModelOptions,
               asset_type: assetTypeLabel(asset.asset_type), project_defaults: projectDefaults,
               project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt },
               layout_family: 'asset', ui: {}, index })
@@ -284,10 +315,11 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           nodes.push(item)
         })
       })
+      const shotColumnX = assetColumnX + (this.assets.length ? 496 : 0)
       this.scenes.forEach((scene, index) => {
         const sceneKey = `shot-${scene.id}`
         const sceneVideos = this.videos[scene.id] || []
-        const sceneNode = node(scene.id, sceneKey, 'shot', tr('镜头 {p0}', { p0: String(scene.sequence).padStart(2, '0') }), { x: 900, y: index * 520 }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
+        const sceneNode = node(scene.id, sceneKey, 'shot', tr('镜头 {p0}', { p0: String(scene.sequence).padStart(2, '0') }), { x: shotColumnX, y: 80 + index * MEDIA_ROW_STEP }, { scene, videos: sceneVideos, modelOptions: this.modelOptions, videoModelOptions: this.videoModelOptions, project_defaults: projectDefaults, project_style: { styleKey: this.projectConfig.style_key, customPrompt: this.projectConfig.custom_style_prompt }, shot_index: scene.sequence, layout_family: 'shot', ui: {} })
         sceneNode.status = sceneHasRunningVideo(sceneVideos) ? 'running' : 'ready'
         nodes.push(sceneNode)
         sceneAssetIds(scene).filter(assetId => validAssetIds.has(assetId)).forEach(assetId => {
@@ -303,13 +335,13 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
         const activeVideo = activeVideoForScene(scene, sceneVideos)
         if (activeVideo) {
           const resultKey = `video-${activeVideo.id}`
-          nodes.push(node(activeVideo.id, resultKey, 'video_result', tr('视频结果 · #{p0}', { p0: activeVideo.id }), { x: 1400, y: index * 520 }, { video: activeVideo, sceneId: scene.id, layout_family: 'result', ui: {} }))
+          nodes.push(node(activeVideo.id, resultKey, 'video_result', tr('视频结果 · #{p0}', { p0: activeVideo.id }), { x: shotColumnX + 656, y: 80 + index * MEDIA_ROW_STEP }, { video: activeVideo, sceneId: scene.id, layout_family: 'result', ui: {} }))
           edges.push(edge(300000 + activeVideo.id, `${sceneKey}-${resultKey}`, sceneKey, resultKey, 'output_binding'))
         }
       })
       const old = new Map(this.nodes.map(item => [item.key, item]))
       this.nodes = nodes.map(item => old.has(item.key) ? { ...item, position: old.get(item.key)!.position, size: old.get(item.key)!.size, zIndex: old.get(item.key)!.zIndex, data: { ...item.data, ui: old.get(item.key)!.data.ui } } : item)
-      placeNewVariantNodes(this.nodes, new Set(old.keys()))
+      placeNewMediaNodes(this.nodes, new Set(old.keys()))
       this.manualNodes = [...old.values()].filter(item => isManualNodeKind(item.kind))
       this.nodes.push(...this.manualNodes)
       this.edges = [...edges, ...this.mediaEdges.filter(item => this.nodes.some(nodeItem => nodeItem.key === item.source) && this.nodes.some(nodeItem => nodeItem.key === item.target))]
@@ -405,6 +437,25 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     },
     clearSelection() { this.selectedNodeKeys = []; this.selectedEdgeKeys = [] },
     updateNodeLayout(key: string, position: Point, size?: NodeSize | null, zIndex?: number) { const item = this.nodeByKey(key); if (!item) return; item.position = position; if (size !== undefined) item.size = size; if (zIndex !== undefined) item.zIndex = zIndex },
+    setNodeColors(keys: string[], color: string) {
+      const selected = new Set(keys)
+      const changed = this.nodes.filter(item => selected.has(item.key) && nodeMarkerColor(item) !== color)
+      if (!changed.length) return
+      this.checkpoint()
+      for (const item of changed) {
+        if (item.kind === 'section' || item.kind === 'note') item.data.color = color
+        else item.data.ui = { ...item.data.ui, color }
+      }
+      this.persistLayout()
+    },
+    renameSection(key: string, name: string) {
+      const item = this.nodeByKey(key)
+      const title = name.trim()
+      if (!title || item?.kind !== 'section' || item.title === title) return
+      this.checkpoint()
+      item.title = title
+      this.persistLayout()
+    },
     updateNodeUi(key: string, ui: Record<string, unknown>) { const item = this.nodeByKey(key); if (item) item.data.ui = ui; this.persistLayout() },
     updateManualNodeData(key: string, patch: Record<string, unknown>) {
       const item = this.nodeByKey(key)
@@ -584,14 +635,14 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       const kind = resource.kind === 'video' ? 'video_media' : ['bgm', 'sound'].includes(resource.kind) ? 'audio_media' : 'image_media'
       const item = this.addUploadedMedia(kind, { filename: resource.filename || resource.name, original_filename: resource.name, content_type: '' }, position)
       item.title = resource.name
-      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, library_resource_id: resource.catalog === 'media' ? resource.id : undefined, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, ...(kind === 'video_media' && resource.poster_url ? { poster_url: resource.poster_url } : {}), library_resource_id: resource.catalog === 'media' ? resource.id : undefined, width: resource.width, height: resource.height, durationSeconds: resource.duration }
       this.persistLayout()
       return item
     },
     addLibraryVideo(resource: VideoResource, position?: Point) {
       const item = this.addUploadedMedia('video_media', { filename: resource.filename, original_filename: resource.name, content_type: resource.content_type }, position)
       item.title = resource.name
-      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, library_resource_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+      item.data = { ...item.data, url: resource.url, storage_ref: resource.storage_ref, poster_url: resource.poster_url, library_resource_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
       this.persistLayout()
       return item
     },
@@ -615,14 +666,17 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       return [...unique.values()]
     },
     async uploadMedia(kind: 'image_media' | 'video_media' | 'audio_media', file: File, position?: Point) {
+      const epoch = this.loadEpoch.snapshot()
       if (kind === 'video_media' && /\.(mp4|mov)$/i.test(file.name)) {
         const resource = await libraryApi.upload(file, 0, undefined, true)
+        this.loadEpoch.assertCurrent(epoch)
         const item = this.addUploadedMedia(kind, { filename: resource.filename, original_filename: file.name, content_type: resource.content_type }, position)
-        item.data = { ...item.data, url: resource.url, upload_source_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
+        item.data = { ...item.data, url: resource.url, poster_url: resource.poster_url, upload_source_id: resource.id, width: resource.width, height: resource.height, durationSeconds: resource.duration }
         this.persistLayout()
         return item
       }
       const uploaded = await api.upload(file)
+      this.loadEpoch.assertCurrent(epoch)
       return this.addUploadedMedia(kind, {
         filename: uploaded.filename,
         original_filename: uploaded.original_filename || file.name,
@@ -630,7 +684,9 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       }, position)
     },
     async uploadImageAsset(file: File, position?: Point) {
+      const epoch = this.loadEpoch.snapshot()
       const uploaded = await api.upload(file)
+      this.loadEpoch.assertCurrent(epoch)
       const originalFilename = uploaded.original_filename || file.name
       const canonicalName = mediaTitle(originalFilename)
       const created = (await api.createAsset({
@@ -648,6 +704,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
           annotations: [],
         }),
       })).data
+      this.loadEpoch.assertCurrent(epoch)
       this.assets.push(created)
       this.rebuildGraph()
       const item = this.nodeByKey(`asset-${created.id}`) || null
@@ -667,6 +724,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
       item.data = {
         ...item.data,
         library_resource_id: undefined,
+        poster_url: source?.poster_url,
         upload_source_id: source?.id,
         url: uploadedUrl(uploaded),
         filename: uploaded.filename,
@@ -1330,7 +1388,7 @@ export const useWorkbenchStore = defineStore('novel-workbench', {
     async createAssetVariant(assetId: number, data: { name: string; description?: string; base_traits?: string; chapter_numbers?: number[]; metadata?: Record<string, unknown> }) {
       const parent = this.nodeByKey(assetNodeKey(assetId))
       const position = { x: parent?.position.x ?? 480,
-        y: Math.max(0, ...this.nodes.filter(item => item.kind === 'asset').map(item => item.position.y + (item.size?.height || 320))) + 64 }
+        y: Math.max(0, ...this.nodes.filter(item => item.kind === 'asset').map(item => item.position.y + (item.size?.height || MEDIA_ROW_STEP - MEDIA_ROW_GAP))) + 64 }
       const created = (await api.createAssetVariant(assetId, data)).data
       this.assets = this.assets.map(asset => asset.id === assetId
         ? { ...asset, variants: [...(asset.variants || []), created] }

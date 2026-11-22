@@ -432,7 +432,7 @@ def _format_primary_generation_instruction(
 
 
 def _format_prompt_segments(
-    segments: Sequence[StoryboardSegment], language: str = "zh"
+    segments: Sequence[StoryboardSegment], language: str = "zh", already_rendered: Sequence[str] = ()
 ) -> list[str]:
     """Render locally numbered segments; never inherit the chapter sequence."""
     parts: list[str] = []
@@ -445,7 +445,7 @@ def _format_prompt_segments(
                 f"{prompt_label('时间范围：', language)}{elapsed:g}s-{end:g}s",
                 f"{prompt_label('初始画面：', language)}{segment.visual_prose}",
                 f"{prompt_label('运镜：', language)}{segment.camera_movement}",
-                *segment.actions,
+                *(line for line in segment.actions if line not in already_rendered),
             )
         )
         elapsed = end
@@ -459,6 +459,8 @@ def format_storyboard_prompt(
     entities: Sequence[StoryboardEntity] = (),
     strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
     localize_strategy: bool = True,
+    generation_timeline: bool = False,
+    internal_cuts: Sequence[float] = (),
 ) -> str:
     """Render one structured shot as the stable professional video prompt."""
     language = normalize_prompt_language(prompt_language)
@@ -483,22 +485,21 @@ def format_storyboard_prompt(
     if segments:
         details = [
             _format_primary_generation_instruction(shot, language),
-            *_format_prompt_segments(segments, language),
-            *(
-                [prompt_label("【旁白 / 内心 OS】", language), narration]
-                if narration
-                else []
-            ),
-            *([prompt_label("【人物台词】", language), dialogue] if dialogue else []),
-            f"{prompt_label('环境音：', language)}{shot.sound_design}",
+            *_format_prompt_segments(segments, language, shot.actions if generation_timeline else ()),
         ]
+        if not generation_timeline:
+            if narration:
+                details.extend([prompt_label("【旁白 / 内心 OS】", language), narration])
+            if dialogue:
+                details.extend([prompt_label("【人物台词】", language), dialogue])
+            details.append(f"{prompt_label('环境音：', language)}{shot.sound_design}")
     else:
         details = [
             f"{prompt_label('【镜头1 · ', language)}{duration_token} · {shot.shot_size_and_camera} · {shot.description}{prompt_label('】', language)}",
             _format_primary_generation_instruction(shot, language),
-            prompt_label("【详细执行】", language),
-            *shot_body_parts,
         ]
+        if not generation_timeline:
+            details.extend([prompt_label("【详细执行】", language), *shot_body_parts])
     blocking = getattr(shot, "blocking_map", None)
     layout = []
     if blocking and blocking.layout:
@@ -531,6 +532,8 @@ def format_storyboard_prompt(
             *layout,
             "",
             prompt_label("【镜头描述】", language),
+            *([("镜内切点：" if language == "zh" else "Internal cuts: ") + ", ".join(f"{cut:g}s" for cut in internal_cuts)]
+              if internal_cuts else []),
             *details,
             "",
             prompt_label("【转场方式】", language),

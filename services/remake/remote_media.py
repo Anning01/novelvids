@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import shlex
 from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
@@ -36,11 +37,17 @@ class MediaWorkerConnection(BaseModel):
 class RemoteMediaSession:
     def __init__(self, connection: MediaWorkerConnection):
         self.connection = connection
+        self.timeline_available = False
+        self.production_ranges_available = False
+        self.natural_cuts_available = False
         self.job_id = uuid4()
         self.work = PurePosixPath(connection.root) / "jobs" / self.job_id.hex
 
     async def __aenter__(self):
-        await self._command("create")
+        handshake = json.loads(await self._command("create") or b"{}")
+        self.natural_cuts_available = "natural_cuts_v1" in handshake.get("features", [])
+        self.production_ranges_available = "production_ranges_v1" in handshake.get("features", [])
+        self.timeline_available = "source_timeline_v1" in handshake.get("features", [])
         return self
 
     async def __aexit__(self, *_error):
@@ -71,15 +78,16 @@ class RemoteMediaSession:
         return stdout
 
     async def _command(self, action: str, *, extension: str = ".mp4", max_bytes: int = 35_000_000,
-                       timeout: int | None = None) -> bytes:
+                       timeout: int | None = None, shot_limit: int | None = None, natural_cuts=None) -> bytes:
         cfg = self.connection
-        request = MediaWorkerRequest(action=action, job_id=self.job_id, extension=extension, max_bytes=max_bytes)
+        request = MediaWorkerRequest(action=action, job_id=self.job_id, extension=extension, max_bytes=max_bytes, shot_limit=shot_limit, natural_cuts=natural_cuts)
         command = [f"{cfg.root}/.venv/bin/python", "-m", "services.remake.media_worker",
-                   "--root", cfg.root, request.model_dump_json()]
-        if action in {"prepare", "split", "process"}:
+                   "--root", cfg.root, request.model_dump_json(exclude_none=True)]
+        if action in {"prepare", "split", "split_timeline", "process"}:
+            phase = "split" if action == "split_timeline" else action
             command = [
                 "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
-                f"--unit=novelvids-remake-{self.job_id.hex}-{action}",
+                f"--unit=novelvids-remake-{self.job_id.hex}-{phase}",
                 f"--working-directory={cfg.root}/current",
                 f"--property=MemoryMax={cfg.memory_mb}M", "--property=MemorySwapMax=0",
                 f"--property=CPUQuota={cfg.cpu_percent}%", "--property=TasksMax=32",
@@ -108,8 +116,14 @@ class RemoteMediaSession:
             raise RemoteMediaError(localized_message("远程处理的视频传输不完整"))
         return destination
 
-    async def split(self, destination: Path) -> tuple[list[Path], list[float]]:
-        result = MediaScenes.model_validate_json(await self._command("split"))
+    async def split(self, destination: Path, *, timeline=False, shot_limit=None, natural_cuts=False) -> tuple[list[Path], list[float]]:
+        if natural_cuts and not self.natural_cuts_available:
+            raise RemoteMediaError(localized_message("请更新媒体工作机以支持项目分镜时长"))
+        if shot_limit is not None and not self.production_ranges_available:
+            raise RemoteMediaError(localized_message("请更新媒体工作机以支持项目分镜时长"))
+        result = MediaScenes.model_validate_json(await self._command("split_timeline" if timeline and self.timeline_available else "split",
+            **({"shot_limit": shot_limit} if shot_limit is not None else {}),
+            **({"natural_cuts": True} if natural_cuts else {})))
         destination.mkdir(parents=True, exist_ok=True)
         # Copy the directory in one transfer; media bytes stay on disk rather than in JSON/stdout.
         await self._run("scp", "-q", "-r", *SSH_OPTIONS,

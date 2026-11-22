@@ -10,7 +10,7 @@ from models.chapter import Chapter
 from models.ai_task import AiTask
 from services.ai_task_executor import ai_task_executor
 from services.storyboard.strategies import storyboard_strategy_factory
-from services.video.capabilities import capabilities_for
+from services.video.capabilities import capabilities_for_config
 from services.oss import normalize_media_url
 from services.prompt_revision import apply_prompt_precondition
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
@@ -246,7 +246,7 @@ class SceneController(CRUDBase[Scene, SceneCreate, SceneUpdate]):
                 video_model = await ai_model_config_controller.find_active_default(AiTaskTypeEnum.video.value, team_id=team_id)
             request_params["shot_duration_range"] = [1, chapter.novel.shot_duration_max]
             if video_model is not None:
-                capabilities = capabilities_for(video_model.video_model_type, video_model.api_protocol)
+                capabilities = capabilities_for_config(video_model)
                 request_params["shot_duration_range"] = [capabilities.duration_min, min(capabilities.duration_max, chapter.novel.shot_duration_max)]
                 if request_params["shot_duration_range"][0] > request_params["shot_duration_range"][1]:
                     raise HTTPException(422, localized_message("单分镜最长时长低于所选模型支持的最短时长"))

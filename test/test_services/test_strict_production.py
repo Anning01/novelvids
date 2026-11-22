@@ -49,7 +49,7 @@ def shot_payload():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('missing', ['variant', 'design', 'visual_fields'])
+@pytest.mark.parametrize('missing', ['design', 'visual_fields'])
 async def test_asset_conversion_failure_explains_missing_field_without_retry(project, monkeypatch, missing):
     novel, chapter, _ = project
     payload = asset_payload()
@@ -62,6 +62,60 @@ async def test_asset_conversion_failure_explains_missing_field_without_retry(pro
     assert task.error_message == f'资产结果转换失败：persons[0] 缺少字段 {missing}，尚未保存本次提取结果。'
     assert len(requests) == 1
     assert not await Asset.filter(novel=novel).exists()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_variant_is_not_silently_saved_as_base(project, monkeypatch):
+    novel, chapter, _ = project
+    payload = asset_payload()
+    payload['persons'][0]['variant'] = {'name': '雨衣'}
+    requests = mock_model(monkeypatch, payload)
+    task = await chapter_controller.extract(chapter.id)
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 4 and 'variant.' in task.error_message
+    assert len(requests) == 1 and not await Asset.filter(novel=novel).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('retry', 'switch_model'), [('提取资产', False), ('再提取一次', False), ('重新提取本章资产', True)])
+async def test_chat_retries_failed_chapter_extraction_as_one_batch(project, monkeypatch, retry, switch_model):
+    from uuid import uuid4
+    from auth.deps import AuthContext
+    from models.asset_variant import AssetVariant
+    from schemas.creation_agent import AgentRunRequest
+    from services.creation_agent.sessions import agent_sessions
+
+    novel, chapter, model = project
+    conversation = await agent_sessions.create(novel.id, AuthContext())
+    payload = asset_payload()
+    del payload['persons'][0]['design']
+    requests = mock_model(monkeypatch, payload)
+    first = await chapter_controller.extract(chapter.id, conversation_id=conversation.id, assistant_model_config_id=model.id)
+    await ai_task_executor.run(first)
+    await first.refresh_from_db()
+    assert first.status == 4 and len(requests) == 1
+
+    payload = asset_payload()
+    item_fields = first.request_params['output_contract']['rendering']['asset_specifications']['item']['fields']
+    payload['items'] = [{'name': name, 'description': '渡口道具', 'aliases': [], 'design': '木制',
+                         'visual_fields': {key: '木纹' for key in item_fields}} for name in ('木箱', '船桨')]
+    requests = mock_model(monkeypatch, payload)
+    other = await AiModelConfig.create(name='chat-default', model='another-model', task_type=7,
+        base_url='https://model.invalid/v1', api_key='test', is_active=True,
+        supports_tool_calls=True, supports_strict_output=True)
+    request = AgentRunRequest(request_id=uuid4(), message=retry, chapter_id=chapter.id, write_scope='chapter',
+        model_config_id=other.id if switch_model else None)
+    second = await agent_sessions.submit(conversation, request, AuthContext())
+    assert second.task_type == first.task_type and second.id != first.id
+    assert second.request_params['assistant_model_config_id'] == (other.id if switch_model else model.id)
+    assert (await agent_sessions.submit(conversation, request, AuthContext())).id == second.id
+    await ai_task_executor.run(second)
+    await second.refresh_from_db()
+    assert second.status == 3, second.error_message
+    assert len(requests) == 1 and len(second.response_data['asset_ids']) == 3
+    assert await Asset.filter(novel=novel).count() == 3
+    assert not await AssetVariant.all().exists()
 
 
 @pytest.mark.asyncio
@@ -435,7 +489,7 @@ def test_asset_wire_schema_has_no_empty_objects(language):
             for child in value:
                 check(child)
     check(schema)
-    scene = schema['properties']['scenes']['items']['properties']
+    scene = schema['properties']['scenes']['items']['anyOf'][1]['properties']
     assert scene['visual_fields'] == {'type': 'null'}
     assert scene['variant']['anyOf'][0]['properties']['visual_fields'] == {'type': 'null'}
 
@@ -459,7 +513,8 @@ async def test_scene_and_variant_with_no_visual_columns_save_via_responses(proje
     assert len(requests) == 1
     schema = requests[0]['text']['format']['schema']
     assert requests[0]['text']['format']['strict'] is True
-    assert schema['properties']['scenes']['items']['properties']['visual_fields'] == {'type': 'null'}
+    assert all(branch['properties']['visual_fields'] == {'type': 'null'}
+               for branch in schema['properties']['scenes']['items']['anyOf'])
     scene = await Asset.get(novel=novel, canonical_name='渡口')
     assert '河岸木制渡口。' in scene.base_traits
     assert '雨后被淹的渡口。' in (await AssetVariant.get(asset=scene)).base_traits

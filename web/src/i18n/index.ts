@@ -67,8 +67,8 @@ export function beginLocaleChange(value: AppLocale): void {
   ++revision
   setLocale(value)
 }
-export async function initializeLocale(): Promise<void> {
+export function initializeLocale(): void {
   setLocale(cachedLocale())
-  await refreshLocale()
+  void refreshLocale()
   window.addEventListener('focus', () => { void refreshLocale() })
 }

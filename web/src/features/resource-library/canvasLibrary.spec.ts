@@ -4,13 +4,13 @@ import { useWorkbenchStore } from '@/features/workbench/store/workbenchStore'
 import type { VideoResource } from './types'
 
 beforeEach(() => { setActivePinia(createPinia()); localStorage.clear() })
-const resource = { id: 7, filename: 'motion.mp4', name: '动作参考', url: 'https://cdn.invalid/motion.mp4', storage_ref: 'uploads/1/motion.mp4', content_type: 'video/mp4', width: 1280, height: 720, duration: 4 } as VideoResource
+const resource = { id: 7, poster_url: '/media/motion.webp', filename: 'motion.mp4', name: '动作参考', url: 'https://cdn.invalid/motion.mp4', storage_ref: 'uploads/1/motion.mp4', content_type: 'video/mp4', width: 1280, height: 720, duration: 4 } as VideoResource
 it('persists resource identity separately from its display URL and emits a video reference only for linked nodes', () => {
   const store = useWorkbenchStore()
   store.novelId = 1; store.chapterId = 2
   const item = store.addLibraryVideo(resource)
   expect(item.kind).toBe('video_media')
-  expect(item.data).toMatchObject({ library_resource_id: 7, url: resource.url, storage_ref: resource.storage_ref })
+  expect(item.data).toMatchObject({ library_resource_id: 7, url: resource.url, storage_ref: resource.storage_ref, poster_url: resource.poster_url })
   expect(store.libraryVideoReferences(3)).toEqual([])
   store.edges.push({ key: 'ref', id: 1, type: 'asset_reference', source: item.key, target: 'shot-3', orderIndex: 0, config: null } as typeof store.edges[number])
   expect(store.libraryVideoReferences(3)).toEqual([{ type: 'video', url: resource.storage_ref, library_resource_id: 7, mention_name: '动作参考', name: '动作参考', duration: 4 }])

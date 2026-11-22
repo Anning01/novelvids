@@ -21,7 +21,7 @@ from services.platform.images import media_url
 from services.platform.http_contract import UpstreamResponseError, public_upstream
 from services.video import get_generator
 from services.video.base import VideoProviderError
-from services.video.capabilities import capabilities_for, validate_selection
+from services.video.capabilities import capabilities_for_config, validate_selection
 from utils.enums import TaskStatusEnum
 
 logger = logging.getLogger(__name__)
@@ -86,10 +86,10 @@ def video_options(config, body):
         raise HTTPException(422, "所选配置不是上游视频模型")
     refs = body["references"]
     mode = "keyframes" if any(r["role"]=="first_frame" for r in refs) else "reference"
-    selected = validate_selection(config.video_model_type, api_protocol=config.api_protocol, generation_mode=mode,
+    caps = capabilities_for_config(config)
+    selected = validate_selection(caps, generation_mode=mode,
         resolution=body["resolution"],aspect_ratio=body["aspect_ratio"],duration=body["duration"],output_format="mp4",
         generate_audio=body.get("generate_audio"),return_last_frame=body["return_last_frame"])
-    caps = capabilities_for(config.video_model_type,config.api_protocol)
     counts = Counter(r["type"] for r in refs)
     if mode=="reference" and (counts["image"] > caps.max_reference_images or counts["video"] > caps.max_reference_videos
                               or counts["audio"] > caps.max_reference_audios):
@@ -129,7 +129,7 @@ async def submit_video(ctx, request, key):
     refs = request.references
     frames = {r.role:r.url for r in refs if r.role!="reference"}
     types = {kind:[r.url for r in refs if r.type==kind and r.role=="reference"] for kind in ("image","video","audio")}
-    resolution = next(r for r in capabilities_for(config.video_model_type,config.api_protocol).resolutions
+    resolution = next(r for r in capabilities_for_config(config).resolutions
                       if r.lower()==request.resolution.lower())
     job = await PlatformVideoJob.create(receipt=receipt,route_hash=route_hash(config),inputs={
         "duration":request.duration, "resolution":resolution, "input_image_count":len(frames) + len(types["image"]),

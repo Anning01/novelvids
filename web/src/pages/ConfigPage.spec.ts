@@ -1081,3 +1081,38 @@ it.each(['light', 'dark'])('selects the Flash preset with only its supported res
   wrapper.unmount()
   delete document.documentElement.dataset.appTheme
 })
+
+it.each(['dark', 'light'])('edits the synced H3 channel’s exact resolution tiers and zero input rates (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).$patch({ deploymentRole: 'studio' })
+  useAuthStore(pinia).user!.is_super_admin = true
+  const pricing = { type: 'video', currency: 'CNY', billing_unit: 'second', discount: 0.6,
+    prices: { '480p': 0.08, '768p': 0.1 }, video_reference_prices: { '480p': 0, '768p': 0 },
+    input_image: { first_free: 9, price_per_image: 0 } }
+  const current = { id: 14, scope: 'studio_platform', task_type: 4, task_types: [4], name: 'MiniMax H3',
+    model: 'nv-14', video_model_type: 'minimax_h3', api_protocol: 'novelvids', pricing, concurrency: 1, is_active: true }
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [current] } } as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: true } } as never)
+  vi.spyOn(api, 'generationCapabilities').mockResolvedValue({ data: { image: {}, video: { minimax_h3: ['768P', '2K'] } } } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: current } as never)
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-video').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '编辑本地价格')!.trigger('click')
+    const modal = wrapper.get('form.model-modal')
+    expect(modal.text()).not.toContain('2K')
+    expect(modal.findAll('.pricing-editor label').slice(0, 4).map(label =>
+      [label.text(), label.get('input').element.value])).toEqual([
+      ['分辨率 480p', '0.08'], ['分辨率 768p', '0.1'], ['分辨率 480p', '0'], ['分辨率 768p', '0'],
+    ])
+    await modal.trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(14, { pricing: expect.objectContaining(pricing) })
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})

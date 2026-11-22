@@ -16,6 +16,10 @@ class PlatformCapacityTransport(httpx.AsyncHTTPTransport):
             delay = _capacity_retry_delay(response)
             if delay is None:
                 return response
+            from services.remake.analysis_capacity import current_window
+            window = current_window.get()
+            if window:
+                await window.slow_down(delay)
             await response.aclose()
             from services.billing.platform import active_model_call
             active = active_model_call.get()

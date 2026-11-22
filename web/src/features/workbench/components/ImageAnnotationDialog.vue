@@ -49,11 +49,12 @@ const transformStyle = computed(() => ({
   transform: `translate(${pan.value.x}px, ${pan.value.y}px) scale(${zoom.value})`,
 }))
 
-watch([() => props.open, () => props.modelValue], ([open]) => {
+watch([() => props.open, () => props.imageUrl, () => props.modelValue], ([open]) => {
   if (!open) return
   state.value = annotationReducer(state.value, { type: 'load', shapes: props.modelValue })
   initialShapes.value = JSON.stringify(state.value.shapes)
   activeTool.value = 'move'
+  drawingPointerId.value = null
   draft.value = null
   resetView()
 }, { immediate: true, deep: true })
@@ -116,6 +117,7 @@ function adjustZoom(delta: number) {
   zoom.value = Math.min(4, Math.max(0.5, Number((zoom.value + delta).toFixed(2))))
 }
 function resetView() {
+  panStart.value = null
   zoom.value = 1
   pan.value = { x: 0, y: 0 }
 }

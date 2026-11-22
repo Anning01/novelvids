@@ -80,6 +80,8 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
         )
         if source is None:
             raise RemakeDecompositionError()
+        if request_params.get("remake_context_version") and request_params.get("source_checksum") != source.checksum:
+            raise RemakeDecompositionError(message=localized_message('来源视频已变化，请重新创建拆解任务'))
         if source.team_id != request_params.get("team_id"):
             raise RemakeDecompositionError()
 
@@ -128,6 +130,7 @@ class RemakeDecompositionTaskHandler(BaseTaskHandler):
                     storyboard_strategy=project.storyboard_strategy,
                     aspect_ratio=project.aspect_ratio or '16:9',
                     **({"scene_cache": cache} if execution else {}),
+                    **({"source": source} if request_params.get("remake_context_version") in (1, 2, 3, 5) else {}),
                 )
                 async def persist():
                     summary = await self.persistence.persist(
