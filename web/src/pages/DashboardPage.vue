@@ -34,6 +34,7 @@ const typeFilter = ref('all')
 const mediaFilter = ref('all')
 const stateFilter = ref('all')
 const sort = ref('updated')
+const sortingByCost = computed(() => sort.value === 'cost_desc' || sort.value === 'cost_asc')
 const page = ref(1)
 const pageSize = ref(12)
 const deletingIds = ref<Set<number>>(new Set())
@@ -49,6 +50,14 @@ const filtered = computed(() => {
     && (sourceFilter.value === 'clip' || sourceFilter.value === 'remake' || typeFilter.value === 'all' || projectKind(project) === typeFilter.value)
     && (stateFilter.value === 'all' || project.production.state === stateFilter.value)
   )).sort((left, right) => {
+    if (sortingByCost.value && auth.canAccessBilling && costState.value === 'ready') {
+      const pendingOrder = Number(pendingCosts.value.has(left.id)) - Number(pendingCosts.value.has(right.id))
+      if (pendingOrder) return pendingOrder
+      if (!pendingCosts.value.has(left.id)) {
+        const difference = (costs.value.get(left.id) ?? 0) - (costs.value.get(right.id) ?? 0)
+        if (difference) return sort.value === 'cost_asc' ? difference : -difference
+      }
+    }
     if (sort.value === 'name') return left.name.localeCompare(right.name)
     const leftDate = sort.value === 'created' ? left.created_at : left.production.latest_activity_at
     const rightDate = sort.value === 'created' ? right.created_at : right.production.latest_activity_at
@@ -115,6 +124,10 @@ const stateOptions = computed(() => [
 ])
 const sortOptions = computed(() => [
   { value: 'updated', label: tr('最近更新') }, { value: 'created', label: tr('最近创建') }, { value: 'name', label: tr('按项目名称') },
+  ...(auth.canAccessBilling ? [
+    { value: 'cost_desc', label: tr('高消费优先') },
+    { value: 'cost_asc', label: tr('低消费优先') },
+  ] : []),
 ])
 
 async function load() {
@@ -134,6 +147,7 @@ async function load() {
 
 async function loadCosts(revision: number) {
   costs.value = new Map()
+  pendingCosts.value = new Set()
   costState.value = 'loading'
   costError.value = ''
   if (!auth.canAccessBilling) return
@@ -250,6 +264,9 @@ async function remove(project: ProjectOverviewItem) {
   }
 }
 
+watch(() => auth.canAccessBilling, allowed => {
+  if (!allowed && sortingByCost.value) sort.value = 'updated'
+})
 watch(sourceFilter, value => { sessionStorage.setItem(sourceStorageKey, value) })
 watch([search, sourceFilter, typeFilter, mediaFilter, stateFilter, sort, pageSize], () => { page.value = 1 })
 watch(() => filtered.value.length, total => { page.value = Math.max(1, Math.min(page.value, Math.ceil(total / pageSize.value))) })

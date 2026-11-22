@@ -103,6 +103,35 @@ it('sorts by recent production activity by default and supports name sorting', a
   wrapper.unmount()
 })
 
+it('orders the full filtered list by posted cost after billing loads, keeping pending amounts last', async () => {
+  const items = Array.from({ length: 14 }, (_, i) => project(i + 1, `项目 ${i + 1}`))
+  vi.mocked(api.projectOverview).mockResolvedValue(response(items))
+  let finish!: (v: Awaited<ReturnType<typeof api.billingProjects>>) => void
+  vi.mocked(api.billingProjects).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const wrapper = render()
+  await flushPromises()
+  const select = wrapper.get('select[aria-label="项目排序"]')
+  const titles = () => wrapper.findAll('.project-overview-card h2').map(node => node.text())
+  await select.setValue('cost_desc')
+  finish({ code: 0, message: 'ok', data: {
+    items: [
+      { novel_id: 1, novel_name: '项目 1', total_cost: 90, record_count: 1 },
+      { novel_id: 2, novel_name: '项目 2', total_cost: 8, record_count: 1 },
+      { novel_id: 14, novel_name: '项目 14', total_cost: 120, record_count: 1, pending_records: 1 },
+    ],
+    pagination: { total: 3, page: 1, page_size: 100, pages: 1 },
+  } })
+  await flushPromises()
+  expect(titles().slice(0, 2)).toEqual(['项目 1', '项目 2'])
+  expect(titles()).toHaveLength(12)
+  await wrapper.get('input[type="search"]').setValue('项目 1')
+  expect(titles().at(-1)).toBe('项目 14')
+  await select.setValue('cost_asc')
+  expect(titles()).toEqual(['项目 13', '项目 12', '项目 11', '项目 10', '项目 1', '项目 14'])
+  expect(api.billingProjects).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+})
+
 it('isolates delete from navigation, requires confirmation and refreshes totals after success', async () => {
   vi.mocked(appConfirm).mockResolvedValue(true)
   vi.mocked(api.deleteNovel).mockResolvedValue({ code: 0, message: 'ok', data: null })
@@ -177,6 +206,8 @@ it('does not expose create or delete controls to a viewer', async () => {
   expect(api.billingProjects).not.toHaveBeenCalled()
   expect(wrapper.find('.projects-summary__item.is-cost').exists()).toBe(false)
   expect(wrapper.find('.project-overview-card__cost').exists()).toBe(false)
+  expect(wrapper.find('option[value="cost_desc"]').exists()).toBe(false)
+  expect(wrapper.find('option[value="cost_asc"]').exists()).toBe(false)
   wrapper.unmount()
 })
 
