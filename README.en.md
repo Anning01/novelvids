@@ -54,11 +54,11 @@ For an existing standard SQLite Compose installation, run `sh scripts/update/ins
 Join the **NovelVids · 猫影短剧 WeChat group** to discuss AI animation, short dramas, model workflows and open-source deployment.
 
 <p align="center">
-  <a href="docs/images/wechat-group-qr.jpg"><img src="docs/images/wechat-group-qr.jpg" width="320" alt="NovelVids WeChat group QR code, valid before November 15, 2026"></a>
+  <a href="docs/images/wechat-group-qr.jpg"><img src="docs/images/wechat-group-qr.jpg" width="320" alt="NovelVids WeChat group QR code, valid before November 29, 2026"></a>
 </p>
 
 <p align="center">
-  Scan with WeChat · <strong>Updated November 8, 2026; valid before November 15.</strong><br>
+  Scan with WeChat · <strong>Updated November 22, 2026; valid before November 29.</strong><br>
   Group QR codes expire after 7 days. If this one has expired, check the latest version of the repository home page.
 </p>
 
