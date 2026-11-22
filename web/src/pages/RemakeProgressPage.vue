@@ -64,7 +64,13 @@ const knownShots = computed(() => {
   return { total: sources.reduce((n,s) => n + s.task!.total_clips!, 0),
            saved: sources.reduce((n,s) => n + (s.task?.completed_clips ?? 0), 0) }
 })
+const assetFailure = computed(() => snapshot.value?.terminal && snapshot.value.sources.length > 0
+  && snapshot.value.sources.every(source => source.task?.failed_stage === 'extracting_assets'))
+const savedScenes = computed(() => snapshot.value?.sources.reduce((n, s) => n + (s.saved_scene_count ?? 0), 0) ?? 0)
+const stopped = computed(() => snapshot.value?.terminal && hasFailures.value)
+
 const statusTitle = computed(() => {
+  if (assetFailure.value) return tr('资产识别未完成')
   if (isCompleted.value) return tr('视频拆解完成')
   if (snapshot.value?.aggregate_status === 'failed') return tr('视频拆解失败')
   if (snapshot.value?.aggregate_status === 'partial_failed') return tr('部分剧集拆解失败')
@@ -72,6 +78,8 @@ const statusTitle = computed(() => {
   return tr('正在拆解视频')
 })
 const statusDescription = computed(() => {
+  if (assetFailure.value && savedScenes.value) return tr('故事板已保存 {p0} 个分镜，可以直接查看。', {p0:savedScenes.value})
+  if (assetFailure.value) return tr('重试可继续识别角色、场景和道具。')
   if (isCompleted.value) return tr('设定和分镜已经生成，正在为你打开创作页面。')
   if (snapshot.value?.sources.some(source => source.task?.awaiting_platform_result)) return tr('已完成分镜会保留，点击重试可继续未完成部分。')
   if (hasFailures.value) return tr('已完成的剧集会保留，可单独重试失败剧集。')
@@ -84,6 +92,7 @@ function isTerminalTask(source: RemakeProgressSource) {
 
 function sourceStatusLabel(source: RemakeProgressSource) {
   if (!source.task && source.media_status === 'completed') return tr('已完成')
+  if (source.task?.failed_stage === 'extracting_assets') return tr('资产识别失败')
   const status = source.task?.status
   if (status === TaskStatusEnum.COMPLETED) return tr('已完成')
   if (status === TaskStatusEnum.FAILED || status === TaskStatusEnum.CANCELLED) return tr('拆解失败')
@@ -115,13 +124,25 @@ function stageState(key: string, threshold: number) {
   const sources = snapshot.value?.sources ?? []
   if (isCompleted.value) return 'completed'
   const next = stages[stages.findIndex(stage => stage.key === key) + 1]
-  if (sources.some(s => s.task?.status === TaskStatusEnum.PROCESSING && (
-    s.task.stage === key || (s.task.stage === 'reviewing_continuity' && key === 'generating_storyboards') || (s.task.stage === 'assets_and_scenes' && ['extracting_assets', 'detecting_scenes'].includes(key))
-  ))) return 'active'
-  if (sources.some(s => isTerminalTask(s) && s.task?.status !== TaskStatusEnum.COMPLETED
-    && (s.task?.progress ?? 0) >= threshold && (!next || (s.task?.progress ?? 0) < next.threshold))) return 'failed'
-  if (next && sources.length && sources.every(s => s.media_status === 'completed' || (s.task?.progress ?? 0) >= next.threshold)) return 'completed'
-  return 'pending'
+  const states = sources.map(source => {
+    const task = source.task
+    if (task?.status === TaskStatusEnum.PROCESSING && (task.stage === key
+      || (task.stage === 'reviewing_continuity' && key === 'generating_storyboards')
+      || (task.stage === 'assets_and_scenes' && ['extracting_assets', 'detecting_scenes'].includes(key)))) return 'active'
+    if (task?.failed_stage === 'extracting_assets') {
+      if (key === 'extracting_assets') return 'failed'
+      if (key === 'detecting_scenes') return task.total_clips || task.completed_clips ? 'completed' : 'pending'
+      if (key === 'generating_storyboards') return task.total_clips && task.completed_clips === task.total_clips ? 'completed' : 'pending'
+      return threshold < 20 ? 'completed' : 'pending'
+    }
+    if (isTerminalTask(source) && task?.status !== TaskStatusEnum.COMPLETED && (task?.progress ?? 0) >= threshold
+      && (!next || (task?.progress ?? 0) < next.threshold)) return 'failed'
+    if (source.media_status === 'completed' || (next && (task?.progress ?? 0) >= next.threshold)) return 'completed'
+    return 'pending'
+  })
+  if (states.includes('failed')) return 'failed'
+  if (states.includes('active')) return 'active'
+  return states.length && states.every(state => state === 'completed') ? 'completed' : 'pending'
 }
 
 function applySnapshot(next: RemakeProgressSnapshot) {
@@ -218,7 +239,7 @@ onBeforeUnmount(() => {
         <small>{{ tr('重制工坊') }}</small>
         <strong>{{ snapshot?.name || tr('重制拆解') }}</strong>
       </div>
-      <span class="background-badge"><span />{{ tr('后台持续运行') }}</span>
+      <span v-if="!snapshot?.terminal" class="background-badge"><span />{{ tr('后台持续运行') }}</span>
     </header>
 
     <section v-if="loading" class="progress-loading" role="status" aria-live="polite">
@@ -245,13 +266,13 @@ onBeforeUnmount(() => {
           <small v-if="connectionState === 'reconnecting'">{{ tr('正在重新连接实时进度') }}</small>
           <h1>{{ statusTitle }}</h1>
           <p>{{ statusDescription }}</p>
-          <p v-if="knownShots">{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:knownShots.saved,p1:knownShots.total}) }}</p>
+          <p v-if="knownShots && !assetFailure">{{ tr('已生成 {p0}/{p1} 个分镜', {p0:knownShots.saved,p1:knownShots.total}) }}</p>
         </div>
-        <div class="overall-progress" :aria-label="tr('总体进度 {p0}%', { p0: snapshot.overall_progress })">
+        <div v-if="!stopped" class="overall-progress" :aria-label="tr('总体进度 {p0}%', { p0: snapshot.overall_progress })">
           <strong>{{ snapshot.overall_progress }}<small>%</small></strong>
           <span>{{ tr('总体进度') }}</span>
         </div>
-        <progress class="progress-track" :value="snapshot.overall_progress" max="100" :aria-label="tr('总体进度')" />
+        <progress v-if="!stopped" class="progress-track" :value="snapshot.overall_progress" max="100" :aria-label="tr('总体进度')" />
         <p v-if="connectionState === 'reconnecting'" class="connection-message"><RefreshCw :size="13" />{{ tr('实时连接中断，正在自动重连；后台任务不受影响。') }}</p>
       </section>
 
@@ -267,26 +288,24 @@ onBeforeUnmount(() => {
                 <strong>{{ tr('第') }} {{ source.episode_number }} {{ tr('集') }}</strong>
                 <p>{{ source.original_filename }}</p>
                 <div v-if="source.task?.total_clips" class="shot-summary">
-                  <small>{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:source.task.completed_clips || 0,p1:source.task.total_clips}) }}</small>
+                  <small>{{ tr('已生成 {p0}/{p1} 个分镜', {p0:source.task.completed_clips || 0,p1:source.task.total_clips}) }}</small>
                   <AppButton variant="ghost" size="xs" class="details-trigger" aria-haspopup="dialog"
                     @click="openDetails(source)"><List :size="14" aria-hidden="true" />{{ tr('镜头明细') }}</AppButton>
                 </div>
-                <progress :value="source.task?.progress ?? (source.media_status === 'completed' ? 100 : 0)" max="100" :aria-label="tr('拆解进度')" />
+                <progress v-if="!isTerminalTask(source)" :value="source.task?.progress ?? (source.media_status === 'completed' ? 100 : 0)" max="100" :aria-label="tr('拆解进度')" />
               </div>
               <div class="episode-state">
-                <strong>{{ source.task?.progress ?? (source.media_status === 'completed' ? 100 : 0) }}%</strong>
+                <strong v-if="!isTerminalTask(source)">{{ source.task?.progress ?? (source.media_status === 'completed' ? 100 : 0) }}%</strong>
                 <span>{{ sourceStatusLabel(source) }}</span>
               </div>
-              <AppButton
-                v-if="isTerminalTask(source) && source.task?.status !== TaskStatusEnum.COMPLETED"
-                type="button"
-                variant="soft"
-                size="xs"
-                :loading="retryingSourceIds.has(source.source_id)"
-                @click="retrySource(source)"
-              ><RotateCcw v-if="!retryingSourceIds.has(source.source_id)" :size="13" />{{ source.task?.retryable_clips ? tr('重试未完成片段（{p0}）', {p0:source.task.retryable_clips}) : tr('重试') }}</AppButton>
-              <AppButton v-if="source.media_status === 'completed'" variant="ghost" size="sm"
-                @click="router.push({ name: 'short-drama-storyboard', params: { projectId }, query: { chapter: source.chapter_id } })">{{ tr('查看分镜') }}</AppButton>
+              <div v-if="source.media_status === 'completed' || isTerminalTask(source)" class="episode-actions">
+                <RouterLink v-if="source.media_status === 'completed' || source.saved_scene_count"
+                  class="storyboard-link" :to="{ name: 'short-drama-storyboard', params: { projectId }, query: { chapter: source.chapter_id } }">{{ tr('查看分镜') }}</RouterLink>
+                <AppButton v-if="isTerminalTask(source) && source.task?.status !== TaskStatusEnum.COMPLETED"
+                  type="button" variant="soft" size="xs" :loading="retryingSourceIds.has(source.source_id)"
+                  @click="retrySource(source)"><RotateCcw :size="13" />{{ source.task?.failed_stage === 'extracting_assets' && source.task.total_clips && source.task.completed_clips === source.task.total_clips
+                    ? tr('重试资产识别') : source.task?.retryable_clips ? tr('重试未完成片段（{p0}）', {p0:source.task.retryable_clips}) : tr('重试') }}</AppButton>
+              </div>
               <p v-if="source.task?.error_message" class="episode-error">{{ source.task.error_message }}</p>
             </section>
           </div>
@@ -319,7 +338,7 @@ onBeforeUnmount(() => {
         <header>
           <div>
             <h2 id="shot-dialog-title">{{ tr('第') }} {{ detailsSource.episode_number }} {{ tr('集') }} · {{ tr('镜头明细') }}</h2>
-            <p>{{ tr('已保存 {p0}/{p1} 个片段的分镜', {p0:detailsSource.task.completed_clips ?? 0,p1:detailsSource.task.total_clips}) }}</p>
+            <p>{{ tr('已生成 {p0}/{p1} 个分镜', {p0:detailsSource.task.completed_clips ?? 0,p1:detailsSource.task.total_clips}) }}</p>
           </div>
           <AppButton variant="ghost" size="sm" icon-only autofocus :aria-label="tr('关闭')" @click="detailsDialog?.close()"><X :size="18" /></AppButton>
         </header>
@@ -336,6 +355,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.episode-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.storyboard-link { color: var(--app-accent); font-size: 13px; font-weight: 600; text-underline-offset: 3px; }
+.storyboard-link:hover { text-decoration: underline; }
+.storyboard-link:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 3px; }
+
 progress.progress-track,.episode-copy progress { display: block; width: 100%; accent-color: var(--app-accent); border: 0; }
 .episode-copy progress { height: 5px; margin-top: 5px; }
 .episode-counts { color: var(--app-text-secondary); font-size: 12px; }
@@ -375,7 +399,7 @@ progress.progress-track,.episode-copy progress { display: block; width: 100%; ac
 .connection-message { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 6px; margin: 0; color: var(--creation-warning); font-size: 9px; }.connection-message svg { animation: spin 1s linear infinite; }
 .progress-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(360px,.85fr); gap: 18px; }.pipeline-card, .episodes-card { padding: 22px; border: 1px solid var(--app-border); border-radius: 17px; background: var(--app-surface); box-shadow: var(--app-shadow); }.pipeline-card > header, .episodes-card > header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }.pipeline-card h2, .episodes-card h2 { margin: 3px 0 0; font-size: 15px; }.pipeline-card header > span { color: var(--app-text-secondary); font-size: 9px; }
 .pipeline-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.pipeline-list li { position: relative; display: grid; min-height: 61px; grid-template-columns: 28px minmax(0,1fr); gap: 10px; color: var(--app-text-secondary); }.pipeline-list li:not(:last-child)::after { position: absolute; top: 28px; bottom: 0; left: 13px; width: 1px; background: var(--app-border); content: ''; }.stage-marker { z-index: 1; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--app-text-secondary); background: var(--app-surface-muted); }.pipeline-list strong { display: block; padding-top: 2px; font-size: 11px; }.pipeline-list p { margin: 4px 0 0; font-size: 9px; line-height: 1.45; }.pipeline-list li.is-completed { color: var(--app-text-secondary); }.pipeline-list li.is-completed .stage-marker { color: var(--app-surface); background: var(--creation-success); }.pipeline-list li.is-completed:not(:last-child)::after { background: color-mix(in srgb, var(--creation-success) 50%, var(--app-surface)); }.pipeline-list li.is-active { color: var(--app-accent); }.pipeline-list li.is-active .stage-marker { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: 0 0 0 5px var(--app-accent-soft); }.pipeline-list li.is-active .stage-marker svg { animation: spin 1s linear infinite; }
-.episode-list { display: grid; max-height: 410px; gap: 9px; overflow: auto; }.episode-item { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface-muted); }.episode-item.is-failed { border-color: color-mix(in srgb, var(--creation-danger) 30%, var(--app-surface)); background: color-mix(in srgb, var(--creation-danger) 8%, var(--app-surface)); }.episode-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: var(--app-accent); background: var(--app-accent-soft); }.episode-copy { min-width: 0; }.episode-copy > strong { font-size: 10px; }.episode-copy > p { overflow: hidden; margin: 3px 0 7px; color: var(--app-text-secondary); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.episode-state { display: grid; justify-items: end; gap: 3px; }.episode-state strong { color: var(--app-accent); font-size: 11px; }.episode-state span { color: var(--app-text-secondary); font-size: 8px; white-space: nowrap; }.episode-item > button { grid-column: 2 / -1; justify-self: end; }.episode-error { grid-column: 2 / -1; margin: 0; color: var(--creation-danger); font-size: 8px; line-height: 1.45; }
+.episode-list { display: grid; max-height: 410px; gap: 9px; overflow: auto; }.episode-item { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--app-border); border-radius: 11px; background: var(--app-surface-muted); }.episode-item.is-failed { border-color: color-mix(in srgb, var(--creation-danger) 30%, var(--app-surface)); background: color-mix(in srgb, var(--creation-danger) 8%, var(--app-surface)); }.episode-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: var(--app-accent); background: var(--app-accent-soft); }.episode-copy { min-width: 0; }.episode-copy > strong { font-size: 10px; }.episode-copy > p { overflow: hidden; margin: 3px 0 7px; color: var(--app-text-secondary); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.episode-state { display: grid; justify-items: end; gap: 3px; }.episode-state strong { color: var(--app-accent); font-size: 11px; }.episode-state span { color: var(--app-text-secondary); font-size: 8px; white-space: nowrap; }.episode-item > button { grid-column: 2 / -1; justify-self: end; }.episode-error { grid-column: 1 / -1; margin: 0; color: var(--creation-danger); font-size: 12px; line-height: 1.45; }
 .progress-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 20px; border: 1px solid var(--app-border); border-radius: 15px; background: var(--app-surface-raised); }.progress-footer p { display: grid; gap: 4px; margin: 0; }.progress-footer strong { font-size: 10px; }.progress-footer span { color: var(--app-text-secondary); font-size: 9px; }
 @keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 50% { transform: scale(1.08); opacity: .72; } }
 @media (max-width: 800px) { .progress-grid { grid-template-columns: 1fr; }.progress-content { padding-top: 26px; }.progress-header { padding: 0 16px; } }

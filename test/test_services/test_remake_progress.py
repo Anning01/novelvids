@@ -273,3 +273,23 @@ async def test_retry_reconciles_terminal_provider_limit_but_not_ambiguous_networ
             await reconcile_retry(task)
         await receipt.refresh_from_db()
         assert receipt.state == 'uncertain'
+
+
+@pytest.mark.asyncio
+async def test_asset_failure_and_confirmed_shots_do_not_imply_persisted_scenes():
+    from models.agent_operation import AgentOperation
+    from models.scene import Scene
+    novel = await Novel.create(name='Partial result', workflow_kind='remake')
+    source = await create_source(novel, 1, status=4, stage='failed', progress=87)
+    task = await source.analysis_task
+    for key, state in [('RemakeTimedAssets:1','failed'),('RemakeShot:1','completed'),('RemakeShot:2','completed')]:
+        await AgentOperation.create(task=task, key='model:remake:'+key, state=state)
+    service = RemakeProgressService()
+    before = (await service.snapshot(novel))['sources'][0]
+    assert before['task']['failed_stage'] == 'extracting_assets'
+    assert before['task']['completed_clips'] == 2 and before['saved_scene_count'] == 0
+    await Scene.create(chapter_id=source.chapter_id, sequence=1, prompt='A beach', metadata={'remake_source_id':source.id})
+    await Scene.create(chapter_id=source.chapter_id, sequence=2, prompt='Manual scene')
+    after = (await service.snapshot(novel))['sources'][0]
+    assert after['saved_scene_count'] == 1
+    assert '道具' in after['task']['error_message']

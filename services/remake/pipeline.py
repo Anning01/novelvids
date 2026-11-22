@@ -18,7 +18,7 @@ from prompts.skill_pack import SkillSnapshot, snapshot_skills
 from schemas.agent_workflow import RemakeShot
 from services.language import task_language
 from services.remake.checkpoints import clip_evidence, completed_outputs, read_scene_manifest, write_scene_manifest
-from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisGateway
+from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisError, RemakeVideoAnalysisGateway
 from services.remake.media_capacity import finish_thread, media_capacity
 from services.remake.media_prepare import prepare_video_for_model_input, probe_media_duration
 from services.remake.remote_media import RemoteMediaSession, media_session
@@ -258,6 +258,15 @@ class RemakeDecompositionPipeline:
                 artifacts = await asyncio.gather(*branches, return_exceptions=True)
             finally:
                 await asyncio.gather(*branches, return_exceptions=True)
+            asset_result, shot_result = artifacts
+            if single_wave and shot_limit and isinstance(asset_result, RemakeVideoAnalysisError) and not isinstance(shot_result, BaseException):
+                from services.remake.handoff import finalize_generation_shots
+                prompts = []
+                for shot in finalize_generation_shots(shot_result[2], language):
+                    refs = [{"id": ref["asset_id"], "name": ref["asset_name"], "type": ref["asset_type"], "description": ""}
+                            for ref in shot["asset_refs"]]
+                    prompts.append(prepare_remake_prompt(shot, refs, snapshot, language, strategy_key=strategy))
+                await remake_result_persistence.save_available_shots(source, prompts, execution.params["task_id"])
             for artifact in artifacts:
                 if isinstance(artifact, BaseException):
                     raise artifact

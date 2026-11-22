@@ -384,3 +384,26 @@ def test_identity_evidence_uses_typed_source_facts_and_stays_out_of_visual_promp
     assert 'cross_episode_identity' not in rendered['characters'][0]['description']
     for language in ('zh','en'):
         assert 'cross_episode_identity' in parallel_identity_instruction(language)
+
+
+@pytest.mark.asyncio
+async def test_partial_prompts_survive_asset_failure_and_edits_survive_retry():
+    from models.ai_task import AiTask
+    source = await _source()
+    task = await AiTask.create(task_type=6, status=2)
+    source.analysis_task = task
+    await source.save(update_fields=['analysis_task_id'])
+    service = RemakeResultPersistence()
+    prompts = [_legacy_prompt(1), _legacy_prompt(2)]
+    await service.save_available_shots(source, prompts, task.id)
+    scenes = await Scene.filter(chapter_id=source.chapter_id).order_by('sequence')
+    assert [s.prompt for s in scenes] == [p['prompt'] for p in prompts]
+    await Scene.filter(id=scenes[0].id).update(prompt='Edited in workspace')
+    await service.save_available_shots(source, [prompts[0]], task.id)
+    assert await Scene.filter(chapter_id=source.chapter_id).count() == 2
+    await service.persist(source=source,assets=_assets(),prompt_document={'prompts':[_prompt(1),_prompt(2)]},pipeline_metadata={})
+    await scenes[0].refresh_from_db()
+    await scenes[1].refresh_from_db()
+    assert scenes[0].prompt == 'Edited in workspace'
+    assert 'partial_prompt_hash' not in scenes[1].metadata
+    assert await scenes[1].assets.all().count() > 0

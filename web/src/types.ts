@@ -357,6 +357,7 @@ export interface RemakeProjectCreateResult {
 }
 export type RemakeAggregateStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'partial_failed'
 export interface RemakeProgressTask {
+  failed_stage?: string | null
   shot_states?: Record<number, string>
   completed_clips?: number
   total_clips?: number | null
@@ -370,6 +371,7 @@ export interface RemakeProgressTask {
   updated_at: string
 }
 export interface RemakeProgressSource {
+  saved_scene_count?: number | null
   source_id: number
   chapter_id: number
   episode_number: number

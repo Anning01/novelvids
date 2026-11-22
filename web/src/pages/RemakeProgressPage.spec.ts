@@ -166,7 +166,7 @@ it('shows the saved clip count from the progress snapshot after reopening the pa
   vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snapshot})
   const wrapper = mount(RemakeProgressPage)
   await flushPromises()
-  expect(wrapper.text()).toContain('已保存 14/103 个片段的分镜')
+  expect(wrapper.text()).toContain('已生成 14/103 个分镜')
   expect(api.retryRemakeSource).not.toHaveBeenCalled()
   wrapper.unmount()
 })
@@ -215,5 +215,25 @@ it('shows simultaneous stages and real shot states without marking a pending sho
   await dialog.get('button').trigger('click')
   expect(dialog.element.open).toBe(false)
   expect(dialog.findAll('li')).toHaveLength(0)
+  wrapper.unmount()
+})
+
+it.each([0, 2])('shows the failed asset step and links only to written shots (%i)', async count => {
+  const snap = progressSnapshot({aggregate_status:'failed',terminal:true,overall_progress:87,
+    source_summary:{total:1,queued:0,processing:0,completed:0,failed:1}})
+  const source = snap.sources[0]!
+  Object.assign(source,{media_status:'failed',saved_scene_count:count})
+  Object.assign(source.task!,{status:TaskStatusEnum.FAILED,stage:'failed',failed_stage:'extracting_assets',
+    progress:87,completed_clips:2,total_clips:2})
+  vi.mocked(api.remakeProjectProgress).mockResolvedValue({code:0,message:'ok',data:snap})
+  const wrapper = mount(RemakeProgressPage, {global:{stubs:{RouterLink:{props:['to'],template:'<a><slot /></a>'}}}})
+  await flushPromises()
+  expect(wrapper.get('h1').text()).toBe('资产识别未完成')
+  expect(wrapper.get('.pipeline-list .is-failed').text()).toContain('识别全局设定')
+  expect(wrapper.findAll('.pipeline-list .is-completed').map(s=>s.text()).join(' ')).toContain('生成专业分镜')
+  expect(wrapper.find('.storyboard-link').exists()).toBe(Boolean(count))
+  expect(wrapper.text()).not.toContain('87%')
+  expect(wrapper.text()).toContain('重试资产识别')
+  expect(replace).not.toHaveBeenCalled()
   wrapper.unmount()
 })

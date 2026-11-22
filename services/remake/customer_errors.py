@@ -28,7 +28,7 @@ _STAGES = {
 }
 
 
-async def failure_message(task):
+async def failure_message(task, *, failed_stage=None):
     if task.status == TaskStatusEnum.cancelled:
         return localized_message('本集拆解已取消。')
     if task.status != TaskStatusEnum.failed:
@@ -43,7 +43,7 @@ async def failure_message(task):
         return localized_message('视频分析账户的可用额度不足，请检查余额和限额后重试。')
 
     match = _SEGMENT.search(diagnostic)
-    if match and task.stage == 'generating_storyboards':
+    if match and (failed_stage or task.stage) == 'generating_storyboards':
         index = int(match[1] or match[2])
         reason = await _shot_reason(task.id, index)
         keys = await AgentOperation.filter(task=task, state='completed', key__startswith='model:remake:').values_list('key', flat=True)
@@ -56,7 +56,7 @@ async def failure_message(task):
             parts.append(localized_message('已保留 {p0} 个片段的分镜结果。', p0=len(done)))
         parts.append(localized_message('点击「重试」继续处理未完成的片段。'))
         return ' '.join(parts)
-    return localized_message(_STAGES.get(task.stage, '本集拆解未完成，请重试。'))
+    return localized_message(_STAGES.get(failed_stage or task.stage, '本集拆解未完成，请重试。'))
 
 
 async def _shot_reason(task_id, index):

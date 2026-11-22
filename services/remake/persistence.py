@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from typing import Any
 
@@ -310,6 +311,15 @@ class RemakeResultPersistence:
                 result[reference_id] = existing
         return result
 
+    async def save_available_shots(self, source, prompts, task_id):
+        """Make completed prompts available without marking the failed asset branch complete."""
+        async with in_transaction() as connection:
+            await Novel.filter(id=source.novel_id).using_db(connection).select_for_update().get()
+            if not await RemakeSource.filter(id=source.id, analysis_task_id=task_id).using_db(connection).exists():
+                return
+            await self._persist_scenes(connection, source=source, prompts=prompts, asset_index={}, forms={},
+                pipeline_metadata={"asset_inventory": "failed"}, insert_only=True)
+
     async def _persist_scenes(
         self,
         connection: BaseDBAsyncClient,
@@ -319,6 +329,7 @@ class RemakeResultPersistence:
         asset_index: dict[str, Asset],
         forms: dict,
         pipeline_metadata: dict[str, Any],
+        insert_only: bool = False,
     ) -> int:
         sequences: set[int] = set()
         for position, item in enumerate(prompts, start=1):
@@ -328,6 +339,8 @@ class RemakeResultPersistence:
                 chapter_id=source.chapter_id,
                 sequence=sequence,
             ).using_db(connection)
+            if insert_only and scene is not None:
+                continue
             metadata = scene.metadata if scene and isinstance(scene.metadata, dict) else {}
             if scene is not None and metadata.get("remake_source_id") != source.id:
                 raise RemakePersistenceError(
@@ -341,6 +354,11 @@ class RemakeResultPersistence:
                 "confidence": item.get("confidence"),
                 "pipeline": dict(pipeline_metadata),
             }
+            if insert_only:
+                scene_metadata["partial_prompt_hash"] = hashlib.sha256(item["prompt"].encode()).hexdigest()
+            elif saved_hash := scene_metadata.pop("partial_prompt_hash", None):
+                if hashlib.sha256((scene.prompt or "").encode()).hexdigest() != saved_hash:
+                    continue  # An editor has already changed this recovered prompt.
             if forms:
                 bindings = {}
                 for ref in item.get("asset_refs", []):
@@ -389,6 +407,9 @@ class RemakeResultPersistence:
                     referenced.append(asset)
             if referenced:
                 await scene.assets.add(*referenced, using_db=connection)
+
+        if insert_only:
+            return len(sequences)
 
         owned_scenes = await Scene.filter(chapter_id=source.chapter_id).using_db(connection)
         for scene in owned_scenes:
