@@ -102,6 +102,11 @@ class RemakeDecompositionPipeline:
         language = execution.language if execution else task_language.get() or 'zh'
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
         saved = await completed_outputs({**execution.params, 'retry_of_task_id': execution.params.get('task_id') or execution.params.get('retry_of_task_id'), 'model_config_id':model_config.id}) if execution else {}
+        shot_limit = execution.params.get("remake_shot_limit") if execution else None
+        if shot_limit is not None and remote is not None and not remote.production_ranges_available:
+            from services.remake.remote_media import RemoteMediaError
+            raise RemoteMediaError(localized_message("请更新媒体工作机以支持项目分镜时长"))
+        detector = SceneDetector(shot_limit) if shot_limit is not None else self.scene_detector
         raw_assets = saved.get('model:remake:RemakeAssets:1')
         short_storyboard = bool(execution and execution.params.get("remake_short_storyboard"))
         needs_short_video = short_storyboard and "model:remake:RemakeShortStoryboard:1" not in saved and (
@@ -193,9 +198,10 @@ class RemakeDecompositionPipeline:
                 return cached
             async with media_capacity():
                 if remote:
-                    paths, lengths = await remote.split(directory, **({"timeline": True} if continuous else {}))
+                    paths, lengths = await remote.split(directory, **({"timeline": True} if continuous else {}),
+                                                        **({"shot_limit": shot_limit} if shot_limit is not None else {}))
                 else:
-                    splitter = self.scene_detector.split_timeline if continuous else self.scene_detector.split
+                    splitter = detector.split_timeline if continuous else detector.split
                     paths = await finish_thread(splitter, model_source_path, directory)
                     if not paths:
                         raise RemakePipelineError(localized_message('来源视频没有可分析的镜头'))
@@ -232,10 +238,10 @@ class RemakeDecompositionPipeline:
                 results = await timed("shot_analysis_ms", lambda: analyze_short_storyboard(
                     model_source_path, paths, evidence, gateway, strategy, saved, checkpoint, report_scene_progress, initial_catalog, execution.params))
                 return paths, lengths, results
-            if not cached and remote is None and hasattr(self.scene_detector, "ready_clips"):
+            if not cached and remote is None and hasattr(detector, "ready_clips"):
                 from services.remake.single_wave import stream_source_analysis
                 return await stream_source_analysis(
-                    self.scene_detector, model_source_path, directory, gateway, strategy, initial_catalog,
+                    detector, model_source_path, directory, gateway, strategy, initial_catalog,
                     saved, checkpoint, report_scene_progress, phase_times, cache=scene_cache is not None)
             paths, lengths = await timed("media_ms", split)
             evidence = await timeline(paths, lengths)
@@ -310,6 +316,9 @@ class RemakeDecompositionPipeline:
                 await _report(progress, 87, "reviewing_continuity")
                 raw_prompts, speech_reviews = await timed("speech_review_ms", lambda: review_speech(
                     raw_prompts, scene_paths, gateway, saved, language))
+        if single_wave and shot_limit:
+            from services.remake.handoff import finalize_generation_shots
+            raw_prompts = finalize_generation_shots(raw_prompts, language)
         prompts = [prepare_remake_prompt(raw, catalog, snapshot, language,
             strategy_key=strategy, duration_seconds=durations[index]) for index, raw in enumerate(raw_prompts)]
 

@@ -101,8 +101,21 @@ const hoverPreviewSource = computed(() => hoverPreviewOption.value?.previewUrl |
 const hoverPreviewStyle = computed(() => ({ left: `${hoverPreviewPosition.value.left}px`, top: `${hoverPreviewPosition.value.top}px` }))
 const menuStyle = computed(() => ({ left: `${menuPosition.value.left}px`, top: `${menuPosition.value.top}px` }))
 const durationStyle = computed(() => ({ left: `${durationPosition.value.left}px`, top: `${durationPosition.value.top}px` }))
+const durationField = computed(() => {
+  const prefix = durationAnchor.value?.previousSibling?.textContent ?? ''
+  if (/(?:总时长|total duration)\s*[:：]\s*$/i.test(prefix)) return 'total'
+  if (/(?:【镜头|\[shot)\s*\d+\s*·\s*$/i.test(prefix)) {
+    return /(?:时间范围|time range)\s*[:：]/i.test(props.modelValue) ? 'internal' : 'total'
+  }
+  return 'other'
+})
 const durationNumber = computed(() => Number(durationValue.value))
-const durationIsValid = computed(() => String(durationValue.value).trim() !== '' && Number.isFinite(durationNumber.value) && durationNumber.value >= 1 && durationNumber.value <= 30)
+const durationIsValid = computed(() => {
+  const value = durationNumber.value
+  if (!Number.isFinite(value) || value <= 0 || value > 30) return false
+  if (durationField.value === 'total') return Number.isInteger(value)
+  return durationField.value === 'internal' || value >= 1
+})
 
 function iconFor(kind: ScenePromptMentionKind) {
   if (kind === 'person') return UserRound
@@ -488,7 +501,7 @@ function closeDurationEditor() {
 function confirmDuration() {
   if (!durationIsValid.value || !durationAnchor.value) return
   const anchor = durationAnchor.value
-  const normalized = Number(durationNumber.value.toFixed(1))
+  const normalized = durationNumber.value
   anchor.dataset.syntax = tr('@{镜头时长:{p0}s}', { p0: normalized })
   anchor.dataset.mentionId = `duration-${normalized}`
   anchor.setAttribute('aria-label', tr('{p0}s，点击更改时间', { p0: normalized }))
@@ -789,7 +802,7 @@ onBeforeUnmount(() => {
         <form v-if="durationEditorOpen" class="scene-duration-editor" :style="durationStyle" @submit.prevent="confirmDuration" @pointerdown.stop>
           <strong>{{ tr('更改时间') }}</strong>
           <label>
-            <input ref="durationInput" v-model="durationValue" type="number" min="1" max="30" step="0.5" inputmode="decimal" :placeholder="tr('请输入时长（1-30）')" :aria-label="tr('镜头时长，1 到 30 秒')" />
+            <input ref="durationInput" v-model="durationValue" type="number" :min="durationField === 'internal' ? 0 : 1" max="30" :step="durationField === 'total' ? 1 : 'any'" :inputmode="durationField === 'total' ? 'numeric' : 'decimal'" :placeholder="durationField === 'internal' ? tr('时长（秒）') : tr('请输入时长（1-30）')" :aria-label="durationField === 'internal' ? tr('时长（秒）') : tr('镜头时长，1 到 30 秒')" />
             <span>s</span>
           </label>
           <div>

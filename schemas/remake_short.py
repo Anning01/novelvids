@@ -53,7 +53,7 @@ class RemakeShortStoryboard(BaseModel):
             span = expected[shot.sequence]
             value = RemakeShot.model_validate({
                 **self.looks[shot.look - 1].model_dump(), **shot.model_dump(exclude={"look"}),
-                "duration": f"{span['end_seconds'] - span['start_seconds']:.6f}s",
+                "duration": f"{span['output_seconds']}s" if "output_seconds" in span else f"{span['end_seconds'] - span['start_seconds']:.6f}s",
             })
             if len({ref.asset_id for ref in value.asset_refs}) != len(value.asset_refs):
                 raise ValueError("Shot-local asset IDs must be unique")

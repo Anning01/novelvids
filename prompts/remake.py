@@ -323,3 +323,19 @@ def visual_asset_instruction(language, *, inventory):
             if language == 'zh' else
             "Include each actually visible setting and prop in each shot's asset_refs with type scene or object. "
             "Identify changes of setting inside the shot, product close-ups and end cards.")
+
+
+def source_handoff_instruction(language):
+    if language == "zh":
+        return ("每个给定区间是一条完整生成分镜，internal_cuts 是镜内切换，output_seconds 是成品整数秒数。"
+                "动作、旁白和对白每行以原片绝对起止秒数开头，仅写该区间实际发生的部分；其余文字不写时间码。"
+                "visual_prose 只写开场静态画面；transition 只写最后实际可见的状态、持物者及动作是否完成，不预演下一镜。"
+                "换机位或场景时按本镜取景。先确定上一镜的结束状态再写本镜；有 confirmed_handoff 时以其中已完成动作为历史，不能再从头演。抛出已完成则下一镜从飞行或接住开始；若抛掷跨切点，只写剩余阶段。"
+                "原片确有第二次抛掷才写第二次。内部切镜可为小数秒，总时长按 output_seconds。")
+    return ("Each supplied interval is one generation shot. internal_cuts are edits within it; output_seconds "
+            "is the whole-second target. Prefix each action, dialogue and narration line with its absolute source "
+            "start and end seconds. Describe only its part in this interval. Use no timecodes elsewhere. "
+            "visual_prose is the static opening frame. transition is the actual closing state, including possession "
+            "and completed actions; do not preview the next shot. In a batch establish each ending before writing the next opening. Treat confirmed_handoff as history when supplied. A completed throw is history: continue with the "
+            "object in flight or caught, without throwing it again. Keep genuine repetitions and only the remaining "
+            "phase of a movement crossing a cut. Internal cuts can have fractional durations.")

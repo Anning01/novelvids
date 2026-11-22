@@ -68,6 +68,8 @@ def _upload_data(upload) -> dict:
 
 @router.get("/capabilities", summary="获取重制工坊能力配置")
 async def get_capabilities(ctx: AuthContext = Depends(get_auth_context)):
+    from schemas.novel import NovelProperties
+    duration = NovelProperties.model_json_schema()["properties"]["shot_duration_max"]
     return ResponseSchema(
         data={
             "media": {
@@ -79,6 +81,7 @@ async def get_capabilities(ctx: AuthContext = Depends(get_auth_context)):
                 "max_bytes": MAX_REMAKE_BYTES,
                 "max_duration_seconds": int(MAX_REMAKE_DURATION_SECONDS),
             },
+            "shot_duration": {key: duration[key] for key in ("default", "minimum", "maximum")},
             "analysis_models": [{"id": m.id, "name": m.name or m.model} for m in await available_analysis_models(ctx.team_id)],
             "aspect_ratios": list(project_aspect_ratios()),
             "resolutions": list(project_resolutions()),

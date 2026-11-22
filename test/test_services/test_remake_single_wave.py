@@ -91,19 +91,23 @@ async def test_deadline_cancels_work_and_does_not_report_success():
 
 
 @pytest.mark.asyncio
-async def test_independent_request_sends_previous_footage_then_current_in_one_call(tmp_path):
+@pytest.mark.parametrize("limit,language", [(None, "zh"), (15, "zh"), (12, "en")])
+async def test_independent_request_sends_previous_footage_then_current_in_one_call(tmp_path, limit, language):
     from schemas.agent_workflow import RemakeShot
     from services.creation_agent.skill_execution import current_execution
     from services.remake.gateway import RemakeVideoAnalysisGateway
     from test.test_services.test_remake_gateway import _config, _Client
     from test.remake_fixtures import remake_shot
-    from prompts.remake import independent_shot_instruction
+    from prompts.remake import independent_shot_instruction, source_handoff_instruction
     prev,target=(tmp_path/name for name in ['a.mp4','b.mp4'])
     prev.write_bytes(b'PREVIOUS');target.write_bytes(b'CURRENT')
     sample=remake_shot(2)
     answer=RemakeShot.model_validate({k:v for k,v in sample.items() if k in RemakeShot.model_fields})
     generate=AsyncMock(return_value=answer)
-    token=current_execution.set(SimpleNamespace(params={'remake_context_version':5},language='zh',generate=generate))
+    params = {'remake_context_version': 5}
+    if limit is not None:
+        params['remake_shot_limit'] = limit
+    token=current_execution.set(SimpleNamespace(params=params,language=language,generate=generate))
     try:
         gateway=RemakeVideoAnalysisGateway(_config(),client=_Client([]))
         await gateway.analyze_one(index=2,path=target,previous_path=prev,prompt='',context={},
@@ -112,7 +116,13 @@ async def test_independent_request_sends_previous_footage_then_current_in_one_ca
         current_execution.reset(token)
     call=generate.await_args
     assert generate.await_count==1 and [m.data for m in call.kwargs['media']]==[b'PREVIOUS',b'CURRENT']
-    assert call.kwargs['additional_instructions']==independent_shot_instruction('zh')
+    instructions = independent_shot_instruction(language)
+    if limit is not None:
+        handoff = source_handoff_instruction(language)
+        assert 'output_seconds' in handoff and 'confirmed_handoff' in handoff
+        assert ('已完成' if language == 'zh' else 'completed') in handoff
+        instructions += '\n' + handoff
+    assert call.kwargs['additional_instructions'] == instructions
     assert 'last video' in independent_shot_instruction('en')
 
 

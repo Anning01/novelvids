@@ -47,6 +47,7 @@ class RemakeProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=255)
+    shot_duration_max: int | None = Field(None, ge=1, le=30)
     source_mode: Literal["single_upload", "folder_upload", "history"]
     aspect_ratio: str = Field(..., min_length=1, max_length=16)
     resolution: str = Field(..., min_length=1, max_length=32)

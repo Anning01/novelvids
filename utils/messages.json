@@ -1,4 +1,5 @@
 {
+  "请更新媒体工作机以支持项目分镜时长": "Update the media worker to support the project shot duration limit.",
   "五分钟内未完成，已停止后续请求并保留已返回的分镜": "The five-minute limit was reached. Further requests stopped and returned shots were retained.",
   "五分钟内未完成，已停止后续请求并保留已返回的分镜。": "The five-minute limit was reached. Further requests stopped and returned shots were retained.",
   "切片内容或边界已变化，不能复用旧分镜": "The source clips or their boundaries have changed. The saved shots cannot be reused.",

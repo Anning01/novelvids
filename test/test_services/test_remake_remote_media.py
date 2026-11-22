@@ -32,7 +32,7 @@ def test_worker_reuses_media_algorithms_and_cleans_only_its_job(monkeypatch, tmp
     sibling = tmp_path / "jobs" / uuid4().hex
     sibling.mkdir(parents=True)
     work = tmp_path / "jobs" / job_id.hex
-    assert execute(MediaWorkerRequest(action="create", job_id=job_id), tmp_path) == {"ok": True, "features": ["source_timeline_v1"]}
+    assert execute(MediaWorkerRequest(action="create", job_id=job_id), tmp_path) == {"ok": True, "features": ["source_timeline_v1", "production_ranges_v1"]}
     (work / "source.mov").write_bytes(b"original video")
     preparation = []
 

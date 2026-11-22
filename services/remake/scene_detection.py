@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from utils.messages import localized_message
+from services.remake.production_timing import production_ranges, whole_second
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -29,6 +30,19 @@ class RemakeSceneDetectionError(RuntimeError):
 class SceneDetector:
     """与参考复刻流水线一致的 ContentDetector 镜头检测和切分。"""
 
+    def __init__(self, shot_limit=None):
+        self.shot_limit = shot_limit
+        self.source_cuts = []
+        self.source_start = 0.0
+
+    def interval(self, a, b):
+        start, end = a.get_seconds(), b.get_seconds()
+        interval = {"start_seconds": start, "end_seconds": end}
+        if self.shot_limit is not None:
+            interval["output_seconds"] = max(1, whole_second(end - self.source_start) - whole_second(start - self.source_start))
+            interval["internal_cuts"] = [t for t in self.source_cuts if start < t < end]
+        return interval
+
     def detect(self, video_path: Path) -> list[tuple[Any, Any]]:
         capture = cv2.VideoCapture(
             str(video_path), cv2.CAP_FFMPEG, [cv2.CAP_PROP_N_THREADS, 1]
@@ -39,12 +53,17 @@ class SceneDetector:
             manager.add_detector(
                 ContentDetector(
                     threshold=27.0,
-                    min_scene_len=max(1, round(video.frame_rate * MIN_SCENE_SECONDS)),
+                    min_scene_len=max(1, round(video.frame_rate * min(MIN_SCENE_SECONDS, self.shot_limit or MIN_SCENE_SECONDS))),
                     filter_mode=FlashFilter.Mode.SUPPRESS,
                 )
             )
             manager.detect_scenes(video)
-            return limit_scene_lengths(manager.get_scene_list(start_in_scene=True))
+            detected = manager.get_scene_list(start_in_scene=True)
+            if self.shot_limit is None:
+                return limit_scene_lengths(detected)
+            self.source_start = detected[0][0].get_seconds() if detected else 0.0
+            self.source_cuts = [s.get_seconds() for s, _ in detected[1:]]
+            return production_ranges(detected, self.shot_limit)
         finally:
             capture.release()
 
@@ -97,7 +116,7 @@ class SceneDetector:
             raise RemakeSceneDetectionError(localized_message('来源视频没有可分析的镜头'))
         output_dir.mkdir(parents=True, exist_ok=True)
         total = len(scenes)
-        bounds = [{"start_seconds": a.get_seconds(), "end_seconds": b.get_seconds()} for a, b in scenes]
+        bounds = [self.interval(a,b) for a, b in scenes]
         contiguous = scenes[0][0].get_seconds() == 0 and all(
             end == start for (_, end), (start, _) in zip(scenes, scenes[1:]))
         if total > 1 and contiguous:
@@ -156,10 +175,9 @@ class SceneDetector:
         self._write_boundaries(output_dir, paths, scenes)
         return paths
 
-    @staticmethod
-    def _write_boundaries(output_dir, paths, scenes):
+    def _write_boundaries(self, output_dir, paths, scenes):
         (output_dir / "boundaries.json").write_text(json.dumps({
-            path.name: {"start_seconds": start.get_seconds(), "end_seconds": end.get_seconds()}
+            path.name: self.interval(start, end)
             for path, (start, end) in zip(paths, scenes, strict=True)
         }))
 

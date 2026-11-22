@@ -19,14 +19,20 @@ async def analyze_ready_shots(ready, gateway, strategy, saved, report, catalog):
     completed = sum(key.startswith("model:remake:RemakeShot:") and key.rsplit(":", 1)[1].isdigit() for key in saved)
     schema = RemakeShot.model_json_schema()
     tasks = []
+    returned = {}
 
     async def shot(i, path, previous, facts, total):
         nonlocal completed
         key = f'model:remake:RemakeShot:{i}'
         if key in saved:
             return {**saved[key], 'shot_index': i, 'file': path.name, 'source_interval': facts['source_interval']}
+        prior = returned.get(i - 1) or saved.get(f'model:remake:RemakeShot:{i-1}')
+        if facts['source_interval'] and 'output_seconds' in facts['source_interval'] and prior:
+            from services.remake.handoff import end_state_memory
+            facts['confirmed_handoff'] = end_state_memory(prior, i - 1)
         result = await gateway.analyze_one(index=i, path=path, prompt='', context=facts,
             schema_name='professional_video_prompt_material', response_schema=schema, previous_path=previous)
+        returned[i] = result
         completed += 1
         if report:
             await report(completed, total)
@@ -38,7 +44,7 @@ async def analyze_ready_shots(ready, gateway, strategy, saved, report, catalog):
             async for path, duration, interval, total in ready:
                 if not tasks and report:
                     await report(completed, total)
-                facts = {'assets': catalog, 'duration_seconds': duration, 'storyboard_strategy': strategy,
+                facts = {'assets': catalog, 'duration_seconds': interval.get('output_seconds', duration) if interval else duration, 'storyboard_strategy': strategy,
                          'source_interval': interval}
                 if previous:
                     facts['preceding_source_interval'] = previous_interval
@@ -151,7 +157,12 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
         if stored is not None:
             results[i] = stored
         else:
-            intervals.append({"sequence": i, **evidence[path.name]["interval"]})
+            span = {"sequence": i, **evidence[path.name]["interval"]}
+            prior = saved.get(f'model:remake:RemakeShot:{i-1}')
+            if "output_seconds" in span and prior:
+                from services.remake.handoff import end_state_memory
+                span["confirmed_handoff"] = end_state_memory(prior, i-1)
+            intervals.append(span)
     await report(len(results), len(paths))
     async def save(i, material):
         async def value():

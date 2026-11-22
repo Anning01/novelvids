@@ -290,6 +290,7 @@ export interface PaginationResponse<T> {
 export interface SingleResponse<T> { code: number; message: string; data: T }
 
 export interface RemakeCapabilities {
+  shot_duration?: { default: number; minimum: number; maximum: number }
   analysis_models: Array<{ id: number; name: string }>
   media: { extensions: string[]; max_bytes: number; max_duration_seconds: number }
   aspect_ratios: string[]
@@ -314,6 +315,7 @@ export interface RemakeUpload {
   expires_at: string
 }
 export interface RemakeProjectCreate {
+  shot_duration_max?: number
   model_config_id?: number
   name: string
   source_mode: 'single_upload' | 'folder_upload' | 'history'

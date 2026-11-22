@@ -15,7 +15,7 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
     work = root / "jobs" / request.job_id.hex
     if request.action == "create":
         work.mkdir(parents=True, mode=0o700, exist_ok=False)
-        return {"ok": True, "features": ["source_timeline_v1"]}
+        return {"ok": True, "features": ["source_timeline_v1", "production_ranges_v1"]}
     if request.action == "cleanup":
         for phase in ("prepare", "split", "process"):
             subprocess.run(
@@ -40,12 +40,13 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
         (work / "prepared.json").write_text(result.model_dump_json())
         return result.model_dump()
 
-    from services.remake.scene_detection import scene_detector
+    from services.remake.scene_detection import SceneDetector, scene_detector
     from services.remake.media_prepare import probe_media_duration
 
     prepared = PreparedMedia.model_validate_json((work / "prepared.json").read_text())
     if request.action == "split_timeline":
-        paths = scene_detector.split_timeline(work / prepared.filename, work / "scenes")
+        detector = SceneDetector(request.shot_limit) if request.shot_limit is not None else scene_detector
+        paths = detector.split_timeline(work / prepared.filename, work / "scenes")
         bounds = json.loads((work / "scenes" / "boundaries.json").read_text())
         return MediaScenes(scenes=[
             MediaScene(filename=p.name, duration_seconds=bounds[p.name]["end_seconds"] - bounds[p.name]["start_seconds"])

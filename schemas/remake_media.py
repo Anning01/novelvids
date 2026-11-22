@@ -11,6 +11,7 @@ class MediaWorkerRequest(BaseModel):
     action: Literal["create", "prepare", "split", "split_timeline", "process", "cleanup"]
     job_id: UUID
     extension: Literal[".mp4", ".mov"] = ".mp4"
+    shot_limit: int | None = Field(None, ge=1, le=30)
     max_bytes: int = Field(default=35_000_000, gt=1024 * 1024, le=500 * 1024 * 1024)
 
 

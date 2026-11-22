@@ -9,7 +9,7 @@ from pathlib import Path
 
 WORKER_FILES = (
     "services/remake/__init__.py", "services/remake/media_worker.py",
-    "services/remake/media_prepare.py", "services/remake/scene_detection.py",
+    "services/remake/media_prepare.py", "services/remake/scene_detection.py", "services/remake/production_timing.py",
     "schemas/__init__.py", "schemas/remake_media.py",
     "utils/messages.py", "utils/messages.json", "utils/prompt_language.py",
     "services/media_worker.py", "services/media_images.py", "schemas/media_processing.py",

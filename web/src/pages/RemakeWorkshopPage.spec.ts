@@ -24,6 +24,7 @@ vi.mock('@/api', () => ({
 }))
 
 const capabilities = {
+  shot_duration: { default: 15, minimum: 1, maximum: 30 },
   analysis_models: [{id: 11, name: '视频分析 A'}, {id: 22, name: '视频分析 B'}],
   media: { extensions: ['mp4', 'mov'], max_bytes: 500 * 1024 * 1024, max_duration_seconds: 1200 },
   aspect_ratios: ['9:16', '16:9'],
@@ -132,6 +133,9 @@ describe('RemakeWorkshopPage', () => {
     const file = new File(['video'], 'demo.mp4', { type: 'video/mp4' })
     Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
 
+    const limit = wrapper.get<HTMLInputElement>('input[name="shotDurationMax"]')
+    expect(limit.element.value).toBe('15')
+    await limit.setValue('12')
     await input.trigger('change')
     await flushPromises()
     await wrapper.get('[aria-label="视频拆解模型"]').trigger('click')
@@ -144,6 +148,7 @@ describe('RemakeWorkshopPage', () => {
 
     expect(api.uploadRemakeVideo).toHaveBeenCalledWith(file)
     expect(api.createRemakeProject).toHaveBeenCalledWith(expect.objectContaining({
+      shot_duration_max: 12,
       name: '新重制项目',
       model_config_id: 22,
       source_mode: 'single_upload',

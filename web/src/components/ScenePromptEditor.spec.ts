@@ -292,6 +292,27 @@ describe('ScenePromptEditor', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['@{艾伦} 出场。'])
   })
 
+  it('allows fractional internal cuts but only whole seconds for the shot total', async () => {
+    const wrapper = mount(ScenePromptEditor, {
+      props: { modelValue: '【镜头1 · @{镜头时长:0.75s}】\n时间范围：0s-0.75s\n总时长：@{镜头时长:13s}', options },
+      attachTo: document.body,
+      global: { components: { AppButton }, stubs: { Teleport: true } },
+    })
+    const tokens = wrapper.findAll('[data-mention-kind="duration"]')
+    await tokens[1]!.trigger('click')
+    await wrapper.get('.scene-duration-editor input').setValue('12.5')
+    await wrapper.get('.scene-duration-editor').trigger('submit')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.get('.scene-duration-editor input').setValue('12')
+    await wrapper.get('.scene-duration-editor').trigger('submit')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toContain('总时长：@{镜头时长:12s}')
+    await tokens[0]!.trigger('click')
+    await wrapper.get('.scene-duration-editor input').setValue('0.375')
+    await wrapper.get('.scene-duration-editor').trigger('submit')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toContain('@{镜头时长:0.375s}')
+    wrapper.unmount()
+  })
+
   it('opens a compact duration editor and persists the selected seconds in syntax', async () => {
     const wrapper = mount(ScenePromptEditor, {
       props: { modelValue: '镜头持续 @{镜头时长}', options },

@@ -313,6 +313,9 @@ class RemakeVideoAnalysisGateway:
             if getattr(execution, "params", {}).get("remake_asset_appearances"):
                 from prompts.remake import visual_asset_instruction
                 extra += "\n" + visual_asset_instruction(execution.language, inventory=issubclass(schema, RemakeAssets))
+            if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_shot_limit"):
+                from prompts.remake import source_handoff_instruction
+                extra += "\n" + source_handoff_instruction(execution.language)
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
             async def recover():
                 if schema is not RemakeShot:

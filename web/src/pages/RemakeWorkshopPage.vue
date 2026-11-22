@@ -33,6 +33,7 @@ const capabilities = ref<RemakeCapabilities | null>(null)
 const loadingCapabilities = ref(true)
 const capabilityError = ref('')
 const projectName = ref('')
+const shotLimit = ref<number | ''>('')
 const aspectRatio = ref('')
 const resolution = ref('')
 const styleKey = ref('auto')
@@ -84,6 +85,8 @@ const sourceReady = computed(() => {
 const canSubmit = computed(() => (
   Boolean(capabilities.value)
   && analysisModelId.value !== null
+  && (!capabilities.value?.shot_duration || (typeof shotLimit.value === 'number' && Number.isInteger(shotLimit.value)
+    && shotLimit.value >= capabilities.value.shot_duration.minimum && shotLimit.value <= capabilities.value.shot_duration.maximum))
   && sourceReady.value
   && Boolean(projectName.value.trim())
   && Boolean(aspectRatio.value)
@@ -142,6 +145,7 @@ async function loadCapabilities() {
   try {
     const response = await api.remakeCapabilities()
     capabilities.value = response.data
+    shotLimit.value = response.data.shot_duration?.default ?? ''
     analysisModelId.value = response.data.analysis_models[0]?.id ?? null
     setDefaults(response.data)
   } catch (error) {
@@ -357,6 +361,7 @@ async function createProject() {
       name: projectName.value.trim(),
       source_mode: sourceMode.value,
       model_config_id: analysisModelId.value ?? undefined,
+      ...(typeof shotLimit.value === 'number' ? { shot_duration_max: shotLimit.value } : {}),
       aspect_ratio: aspectRatio.value,
       resolution: resolution.value,
       style_key: ['auto', 'custom'].includes(styleKey.value) ? null : styleKey.value,
@@ -517,10 +522,18 @@ onBeforeUnmount(() => {
         </AppSelect>
       </CreationConfigBar>
 
-      <label class="project-name-field">
-        <span>{{ tr('项目名称') }}</span>
-        <input v-model="projectName" name="projectName" required maxlength="255" :placeholder="tr('例如：都市短剧重制版')" />
-      </label>
+      <div class="project-fields">
+        <label class="project-name-field">
+          <span>{{ tr('项目名称') }}</span>
+          <input v-model="projectName" name="projectName" required maxlength="255" :placeholder="tr('例如：都市短剧重制版')" />
+        </label>
+        <label v-if="capabilities?.shot_duration" class="project-name-field shot-limit-field">
+          <span>{{ tr('单分镜最长时长') }}</span>
+          <input v-model.number="shotLimit" type="number" name="shotDurationMax" :aria-label="tr('单分镜最长时长')"
+            :min="capabilities.shot_duration.minimum" :max="capabilities.shot_duration.maximum" step="1" required />
+          <span>{{ tr('秒') }}</span>
+        </label>
+      </div>
 
       <div v-if="customStyleSelected" class="custom-prompt-panel">
         <label for="remake-custom-style">{{ tr('自定义风格 Prompt') }}</label>
@@ -569,6 +582,11 @@ onBeforeUnmount(() => {
 .analysis-model-select { width: 210px; max-width: 100%; }
 .format-select { width: 110px; }.style-select { width: 136px; }
 .select-thumbnail { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; }.custom-style-icon { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border-radius: 6px; color: var(--app-accent); background: var(--app-accent-soft); }
+.project-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; }
+.project-name-field.shot-limit-field { flex-direction: row; align-items: center; }
+.project-name-field.shot-limit-field input { flex: 0 0 5ch; width: 5ch; margin-inline-start: auto; }
+.project-name-field:focus-within { outline: 2px solid var(--app-accent); outline-offset: 1px; }
+@media (max-width: 560px) { .project-fields { grid-template-columns: 1fr; } }
 .project-name-field { display: flex; min-height: 44px; align-items: center; gap: 12px; margin-top: 10px; padding: 0 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); box-shadow: var(--app-shadow); }.project-name-field span { flex: 0 0 auto; color: var(--app-text-secondary); font-size: 11px; font-weight: 650; }.project-name-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--app-text); background: transparent; font: inherit; font-size: 12px; }.project-name-field input::placeholder { color: var(--app-text-muted); }
 .custom-prompt-panel { position: relative; display: grid; gap: 8px; margin-top: 12px; padding: 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface); }.custom-prompt-panel label { color: var(--app-text-secondary); font-size: 12px; font-weight: 600; }.custom-prompt-panel textarea { width: 100%; border: 0; outline: 0; color: var(--app-text); background: transparent; font: inherit; font-size: 13px; line-height: 1.7; resize: vertical; }.custom-prompt-panel small { justify-self: end; color: var(--app-text-muted); font-size: 10px; }
 .create-remake { position: relative; display: inline-flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; margin-top: 14px; padding: 0 52px; border: 1px solid #5354ed; border-radius: 13px; color: #fff; background: #5b5cf6; box-shadow: 0 14px 30px rgb(91 92 246 / 22%); font-size: 14px; font-weight: 700; transition: transform .15s ease, background-color .15s ease, box-shadow .15s ease; }.create-remake > span { display: inline-flex; align-items: center; gap: 9px; }.create-remake .create-arrow { position: absolute; right: 20px; }.create-remake:hover:not(:disabled) { background: #4c4de8; box-shadow: 0 16px 34px rgb(91 92 246 / 28%); transform: translateY(-1px); }
