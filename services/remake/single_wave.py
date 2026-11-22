@@ -135,12 +135,15 @@ def missing_visual_groups(shots, assets):
     return {group: list(entries.values()) for group, entries in missing.items()}
 
 
-def bind_shot_references(shots, assets):
-    """A provisional ID is local to its shot. Bind only an unambiguous typed name."""
+def bind_shot_references(shots, assets, *, registered_ids=False):
+    """IDs are shot-local unless the request received the bound episode catalog."""
+    by_id = {}
     by_name = defaultdict(list)
     timed = []
     for group, kind in (('characters', 'character'), ('scenes', 'scene'), ('objects', 'object')):
         for asset in assets.get(group, []):
+            if registered_ids:
+                by_id[kind, asset['id']] = asset
             if asset.get('appearances'):
                 timed.append((kind, asset))
             names = {asset['name'], *(asset.get('aliases') or []), *(asset.get('source_names') or [])}
@@ -153,6 +156,9 @@ def bind_shot_references(shots, assets):
         resolved, missing = [], []
         for ref in shot['asset_refs']:
             matches = by_name[ref['asset_type'], ref['asset_name'].strip().casefold()]
+            supplied = by_id.get((ref['asset_type'], ref['asset_id']))
+            if supplied is not None and (not matches or supplied in matches):
+                matches = [supplied]
             if len(matches) == 1:
                 item = matches[0]
                 resolved.append({**ref, 'asset_id': item['id'], 'asset_name': item['name']})

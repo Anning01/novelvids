@@ -191,7 +191,6 @@ class Settings:
     # 配置工作机地址时，重制工坊通过 SSH 处理媒体。
     REMAKE_MEDIA_SSH_HOST = os.getenv("REMAKE_MEDIA_SSH_HOST", "").strip()
     REMAKE_MEDIA_WORKER_PATH = os.getenv("REMAKE_MEDIA_WORKER_PATH", "/opt/novelvids-media-worker").strip()
-    REMAKE_SHORT_STORYBOARD_SECONDS = max(0.0, float(os.getenv("REMAKE_SHORT_STORYBOARD_SECONDS", "30")))
     REMAKE_MEDIA_TIMEOUT_SECONDS = int(os.getenv("REMAKE_MEDIA_TIMEOUT_SECONDS", "3600"))
     # Leave cores for the application; a small server can explicitly reserve more via the override.
     _default_media_slots = min(4, max(1, (os.cpu_count() or 2) // 2))

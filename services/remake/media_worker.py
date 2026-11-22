@@ -15,7 +15,7 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
     work = root / "jobs" / request.job_id.hex
     if request.action == "create":
         work.mkdir(parents=True, mode=0o700, exist_ok=False)
-        return {"ok": True, "features": ["source_timeline_v1", "production_ranges_v1"]}
+        return {"ok": True, "features": ["source_timeline_v1", "production_ranges_v1", "natural_cuts_v1"]}
     if request.action == "cleanup":
         for phase in ("prepare", "split", "process"):
             subprocess.run(
@@ -45,7 +45,7 @@ def execute(request: MediaWorkerRequest, root: Path) -> dict:
 
     prepared = PreparedMedia.model_validate_json((work / "prepared.json").read_text())
     if request.action == "split_timeline":
-        detector = SceneDetector(request.shot_limit) if request.shot_limit is not None else scene_detector
+        detector = SceneDetector(request.shot_limit, natural_cuts=bool(request.natural_cuts)) if request.shot_limit is not None else scene_detector
         paths = detector.split_timeline(work / prepared.filename, work / "scenes")
         bounds = json.loads((work / "scenes" / "boundaries.json").read_text())
         return MediaScenes(scenes=[

@@ -21,7 +21,7 @@ from services.remake.checkpoints import clip_evidence, completed_outputs, read_s
 from services.remake.gateway import MAX_MODEL_VIDEO_BYTES, RemakeVideoAnalysisError, RemakeVideoAnalysisGateway
 from services.remake.media_capacity import finish_thread, media_capacity
 from services.remake.media_prepare import prepare_video_for_model_input, probe_media_duration
-from services.remake.remote_media import RemoteMediaSession, media_session
+from services.remake.remote_media import RemoteMediaError, RemoteMediaSession, media_session
 from services.remake.prompt_render import (
     compact_catalog,
     normalize_global_assets,
@@ -103,10 +103,12 @@ class RemakeDecompositionPipeline:
         strategy = storyboard_strategy_factory.resolve(storyboard_strategy).key
         saved = await completed_outputs({**execution.params, 'retry_of_task_id': execution.params.get('task_id') or execution.params.get('retry_of_task_id'), 'model_config_id':model_config.id}) if execution else {}
         shot_limit = execution.params.get("remake_shot_limit") if execution else None
-        if shot_limit is not None and remote is not None and not remote.production_ranges_available:
-            from services.remake.remote_media import RemoteMediaError
+        assets_first = bool(execution and execution.params.get("remake_assets_first"))
+        if assets_first and remote is not None and not remote.natural_cuts_available:
             raise RemoteMediaError(localized_message("请更新媒体工作机以支持项目分镜时长"))
-        detector = SceneDetector(shot_limit) if shot_limit is not None else self.scene_detector
+        if shot_limit is not None and remote is not None and not remote.production_ranges_available:
+            raise RemoteMediaError(localized_message("请更新媒体工作机以支持项目分镜时长"))
+        detector = SceneDetector(shot_limit, natural_cuts=assets_first) if shot_limit is not None else self.scene_detector
         raw_assets = saved.get('model:remake:RemakeAssets:1')
         short_storyboard = bool(execution and execution.params.get("remake_short_storyboard"))
         needs_short_video = short_storyboard and "model:remake:RemakeShortStoryboard:1" not in saved and (
@@ -123,7 +125,7 @@ class RemakeDecompositionPipeline:
                     )
 
         continuous = source is not None
-        await _report(progress, 20, "assets_and_scenes" if continuous else "extracting_assets")
+        await _report(progress, 20, "assets_and_scenes" if continuous and not assets_first else "extracting_assets")
         from services.creation_agent.operation_receipts import execute_step
         from services.remake.persistence import remake_result_persistence
         from prompts.remake import project_asset_context
@@ -165,7 +167,7 @@ class RemakeDecompositionPipeline:
                         schema_name="global_key_assets", response_schema=ASSET_SCHEMA,
                         include_segment_metadata=False, **context,
                         **({"readmission_segment": segment} if segment else {}))
-                if short_storyboard:
+                if short_storyboard or assets_first:
                     from services.remake.short_admission import run_admitted
                     from schemas.agent_workflow import remake_asset_schema
                     receipt_name = remake_asset_schema(execution.params).__name__
@@ -199,7 +201,8 @@ class RemakeDecompositionPipeline:
             async with media_capacity():
                 if remote:
                     paths, lengths = await remote.split(directory, **({"timeline": True} if continuous else {}),
-                                                        **({"shot_limit": shot_limit} if shot_limit is not None else {}))
+                                                        **({"shot_limit": shot_limit} if shot_limit is not None else {}),
+                                                        **({"natural_cuts": True} if assets_first else {}))
                 else:
                     splitter = detector.split_timeline if continuous else detector.split
                     paths = await finish_thread(splitter, model_source_path, directory)
@@ -229,30 +232,38 @@ class RemakeDecompositionPipeline:
         async def report_scene_progress(completed: int, total: int) -> None:
             await _report(progress, min(87, 55 + round(completed * 32 / max(1, total))), "generating_storyboards")
 
-        async def split_and_analyze():
+        async def split_and_analyze(shot_catalog):
             from services.remake.single_wave import analyze_source_shots
             if short_storyboard:
                 from services.remake.single_wave import analyze_short_storyboard
                 paths, lengths = await timed("media_ms", split)
                 evidence = await timeline(paths, lengths)
                 results = await timed("shot_analysis_ms", lambda: analyze_short_storyboard(
-                    model_source_path, paths, evidence, gateway, strategy, saved, checkpoint, report_scene_progress, initial_catalog, execution.params))
+                    model_source_path, paths, evidence, gateway, strategy, saved, checkpoint, report_scene_progress, shot_catalog, execution.params))
                 return paths, lengths, results
-            if not cached and remote is None and hasattr(detector, "ready_clips"):
+            if not assets_first and not cached and remote is None and hasattr(detector, "ready_clips"):
                 from services.remake.single_wave import stream_source_analysis
                 return await stream_source_analysis(
-                    detector, model_source_path, directory, gateway, strategy, initial_catalog,
+                    detector, model_source_path, directory, gateway, strategy, shot_catalog,
                     saved, checkpoint, report_scene_progress, phase_times, cache=scene_cache is not None)
             paths, lengths = await timed("media_ms", split)
             evidence = await timeline(paths, lengths)
+            if assets_first:
+                await _report(progress, 55, "generating_storyboards")
             results = await timed("shot_analysis_ms", lambda: analyze_source_shots(
-                paths, lengths, evidence, gateway, strategy, saved, report_scene_progress, initial_catalog))
+                paths, lengths, evidence, gateway, strategy, saved, report_scene_progress, shot_catalog))
             return paths, lengths, results
 
         shots_started = time.monotonic()
-        if continuous:
+        if assets_first:
+            assets = await timed("assets_ms", extract)
+            shot_catalog = compact_catalog(assets, snapshot=snapshot, language=language)
+            await _report(progress, 42, "detecting_scenes")
+            media_results = await timed("shot_branch_ms", lambda: split_and_analyze(shot_catalog))
+            scene_paths, durations = media_results[:2]
+        elif continuous:
             # Drain both branches before removing local or remote media on an error.
-            media_branch = timed("shot_branch_ms", split_and_analyze) if single_wave else timed("media_ms", split)
+            media_branch = timed("shot_branch_ms", lambda: split_and_analyze(initial_catalog)) if single_wave else timed("media_ms", split)
             branches = [asyncio.create_task(timed("assets_ms", extract)), asyncio.create_task(media_branch)]
             try:
                 artifacts = await asyncio.gather(*branches, return_exceptions=True)
@@ -302,7 +313,7 @@ class RemakeDecompositionPipeline:
         block_size = None if params.get("remake_context_version", 0) >= 3 else params.get("remake_block_size", 0)
         if single_wave:
             from services.remake.single_wave import bind_shot_references
-            raw_prompts = bind_shot_references(media_results[2], assets)
+            raw_prompts = bind_shot_references(media_results[2], assets, registered_ids=assets_first)
         else:
             shots_started = time.monotonic()
             raw_prompts = await gateway.analyze_many(
@@ -364,7 +375,7 @@ class RemakeDecompositionPipeline:
             ),
         }
         if single_wave:
-            metadata["pipeline"] = "parallel_source_shots"
+            metadata["pipeline"] = "assets_first_parallel_shots" if assets_first else "parallel_source_shots"
             metadata["unresolved_reference_count"] = sum(len(shot.get("unresolved_asset_refs", [])) for shot in raw_prompts)
         if continuous:
             phase_times["shot_batch_ms"] = round((time.monotonic() - shots_started) * 1000)

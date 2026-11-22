@@ -389,3 +389,11 @@ def timeline_instruction(language, *, batch):
             'last_visible_state is the final frame. Put background audio in sound_design.ambience and timed audio in cues '
             'using absolute source seconds. Transcribe actual speech. asset_refs, dialogue, narration and last_visible_state '
             'belong to the shot alongside sound_design.')
+
+def registered_catalog_instruction(language):
+    return ("assets 是本集已经提取的资产。对本镜实际出现的已登记主体，使用目录中的 id、name 和 type。"
+            "目标视频第 0 秒对应 source_interval.start_seconds，动作和声音的原片时间按此起点换算。"
+            if language == "zh" else
+            "The assets catalog contains the registered subjects for this episode. Use the supplied id, name and type "
+            "for each registered subject present in the target clip. Clip time zero corresponds to source_interval.start_seconds; "
+            "use that offset for absolute action and sound times.")

@@ -315,3 +315,16 @@ async def test_generated_previous_content_is_given_only_to_its_immediate_success
     assert context['generated_content']['dialogue'] == previous['dialogue']
     assert context['end_state'] == previous['transition']
     assert old['description'] not in str(context)
+
+
+def test_only_a_registered_catalog_request_can_use_its_supplied_id():
+    from services.remake.single_wave import bind_shot_references
+    from prompts.remake import registered_catalog_instruction
+
+    shot = {'asset_refs':[{'asset_id':'object-001','asset_type':'object','asset_name':'桌上的灯'}]}
+    assets = {'objects':[{'id':'object-001','name':'纸灯'}]}
+    assert not bind_shot_references([shot], assets)[0]['asset_refs']
+    bound, = bind_shot_references([shot], assets, registered_ids=True)
+    assert bound['asset_refs'][0]['asset_name'] == '纸灯'
+    for language in ('zh','en'):
+        assert 'source_interval.start_seconds' in registered_catalog_instruction(language)

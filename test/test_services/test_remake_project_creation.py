@@ -391,7 +391,8 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
         assert params["remake_context_version"] == 5
         assert params["remake_action_memory"] == "timeline"
         assert params["remake_shot_limit"] == (await Novel.get(id=result["novel_id"])).shot_duration_max
-        assert params["remake_short_storyboard"] is True
+        assert params["remake_short_storyboard"] is False
+        assert params["remake_assets_first"] is True
         assert params["remake_cast_appearances"] is True
         assert params["remake_asset_appearances"] is True
         assert "catalog_seed_task_id" not in params and "remake_deadline_at" not in params
@@ -607,6 +608,7 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     assert task.request_params["attempt"] == 2
     assert task.request_params["ai_task_id"] == str(task.id)
     assert task.request_params["retry_of_task_id"] == str(old_task.id)
+    assert task.request_params.get("remake_assets_first") == old_task.request_params.get("remake_assets_first")
     assert source.analysis_task_id == task.id
     assert source.media_status == "ready"
 

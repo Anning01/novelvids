@@ -86,3 +86,47 @@ def test_old_shot_with_saved_memory_renders_only_current_content(language):
     result = prepare_remake_prompt(raw, [], synthetic_snapshot(), language)
     assert raw["visual_prose"] in result["prompt"]
     assert "PREVIOUS_SHOT_CONTENT" not in result["prompt"]
+
+
+@pytest.mark.parametrize('seconds', [24, 30])
+def test_natural_plan_returns_one_shot_for_a_source_within_the_limit(seconds):
+    from services.remake.production_timing import natural_production_ranges
+    points = [FrameTimecode(s * 25, 25) for s in (0, 4, 8, 12, seconds)]
+    assert natural_production_ranges(list(zip(points, points[1:])), 30) == [(points[0], points[-1])]
+
+
+def test_ten_minutes_uses_real_edit_points_near_thirty_instead_of_a_thirty_second_grid():
+    from services.remake.production_timing import natural_production_ranges
+    edits = list(range(0, 600, 7)) + [600]
+    points = [FrameTimecode(s * 25, 25) for s in edits]
+    ranges = natural_production_ranges(list(zip(points, points[1:])), 30)
+    lengths = [(b-a).get_seconds() for a,b in ranges]
+    assert all(a.get_seconds() in edits for a,_ in ranges)
+    assert sum(lengths) == 600 and max(lengths) <= 30
+    assert len(ranges) == 22
+    assert min(lengths) >= 19
+    assert all(prev[1] == nxt[0] for prev,nxt in zip(ranges,ranges[1:]))
+
+
+def test_long_unbroken_take_splits_at_frames_without_a_tiny_last_shot():
+    from services.remake.production_timing import natural_production_ranges
+    points = [FrameTimecode(s * 25, 25) for s in (0, 61)]
+    ranges = natural_production_ranges([tuple(points)], 30)
+    assert sorted((b-a).get_seconds() for a,b in ranges) == [20,20,21]
+
+
+@pytest.mark.asyncio
+async def test_remote_worker_carries_natural_cut_policy(tmp_path):
+    from unittest.mock import AsyncMock
+    from pydantic import ValidationError
+    from services.remake.remote_media import RemoteMediaSession, MediaWorkerConnection, RemoteMediaError
+    remote = RemoteMediaSession(MediaWorkerConnection(host='host',root='/worker'))
+    remote.timeline_available = remote.production_ranges_available = True
+    remote._command = AsyncMock(return_value='{"scenes":[]}')
+    with pytest.raises(RemoteMediaError):
+        await remote.split(tmp_path,timeline=True,shot_limit=30,natural_cuts=True)
+    remote._command.assert_not_called()
+    remote.natural_cuts_available = True
+    with pytest.raises(ValidationError):
+        await remote.split(tmp_path,timeline=True,shot_limit=30,natural_cuts=True)
+    remote._command.assert_awaited_once_with('split_timeline',shot_limit=30,natural_cuts=True)

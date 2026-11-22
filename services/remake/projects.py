@@ -22,7 +22,6 @@ from schemas.remake import RemakeProjectCreate
 from services.balance import ensure_solvent
 from services.project_config import validate_project_config
 from services.remake.episodes import validate_episode_batch
-from config import settings
 from services.remake.uploads import RemakeUploadService, remake_upload_service
 from services.remake.history_snapshot import (
     RemakeHistorySnapshotService,
@@ -237,7 +236,8 @@ class RemakeProjectService:
                             "remake_identity_evidence": True,
                             "remake_cast_appearances": True,
                             "remake_asset_appearances": True,
-                            "remake_short_storyboard": 0 < media.duration_seconds <= settings.REMAKE_SHORT_STORYBOARD_SECONDS,
+                            "remake_assets_first": True,
+                            "remake_short_storyboard": False,
                             "source_checksum": source.checksum,
                             **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
@@ -465,7 +465,7 @@ class RemakeProjectService:
                 stage=stage,
                 progress=progress,
                 request_params={
-                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_visible_references", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
+                    **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_visible_references", "remake_assets_first", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,
                     "remake_source_id": source.id,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from utils.messages import localized_message
-from services.remake.production_timing import production_ranges, whole_second
+from services.remake.production_timing import natural_production_ranges, production_ranges, whole_second
 
 from collections.abc import Iterable
 from pathlib import Path
@@ -30,7 +30,8 @@ class RemakeSceneDetectionError(RuntimeError):
 class SceneDetector:
     """与参考复刻流水线一致的 ContentDetector 镜头检测和切分。"""
 
-    def __init__(self, shot_limit=None):
+    def __init__(self, shot_limit=None, *, natural_cuts=False):
+        self.natural_cuts = natural_cuts
         self.shot_limit = shot_limit
         self.source_cuts = []
         self.source_start = 0.0
@@ -63,7 +64,8 @@ class SceneDetector:
                 return limit_scene_lengths(detected)
             self.source_start = detected[0][0].get_seconds() if detected else 0.0
             self.source_cuts = [s.get_seconds() for s, _ in detected[1:]]
-            return production_ranges(detected, self.shot_limit)
+            planner = natural_production_ranges if self.natural_cuts else production_ranges
+            return planner(detected, self.shot_limit)
         finally:
             capture.release()
 

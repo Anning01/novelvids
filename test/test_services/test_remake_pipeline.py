@@ -482,3 +482,71 @@ async def test_timeline_registers_visible_props_when_global_objects_are_missing(
     saved = await Scene.get(chapter_id=source.chapter_id,sequence=1)
     assert await saved.assets.all().values_list('id',flat=True) == [asset.id]
     gateway.analyze_one.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_assets_first_sends_registered_catalog_and_one_clip_to_each_concurrent_shot(tmp_path, monkeypatch):
+    import asyncio
+    import json
+    from contextlib import nullcontext
+    from models.ai_task import AiTask
+    from services.creation_agent.skill_execution import current_execution
+    from services.remake.scene_detection import SceneDetector
+    from test.test_services.test_remake_persistence import _source
+
+    source = await _source()
+    task = await AiTask.create(task_type=6, status=2)
+    video = tmp_path/'input.mp4'
+    video.write_bytes(b'full source')
+    events = []
+    both_shots_started = asyncio.Event()
+
+    def split(detector, path, directory):
+        assert events == ['asset response'] and detector.natural_cuts
+        assert path == video
+        events.append('split')
+        directory.mkdir(parents=True)
+        clips = [directory/f'scene-{i:03d}.mp4' for i in (1,2)]
+        bounds = {}
+        for i, clip in enumerate(clips):
+            clip.write_bytes(bytes([i]))
+            bounds[clip.name] = {'start_seconds':i*4, 'end_seconds':(i+1)*4, 'output_seconds':4}
+        (directory/'boundaries.json').write_text(json.dumps(bounds))
+        return clips
+
+    class Gateway(_Gateway):
+        config = SimpleNamespace(id=1)
+
+        async def analyze_one(self, **request):
+            if request['schema_name'] == 'global_key_assets':
+                assert request['path'] == video and not events
+                events.append('asset response')
+                return {'characters':[{'name':'旅客','description':'红色外套'}],
+                        'scenes':[{'name':'阁楼','description':'斜顶'}],
+                        'objects':[{'name':'纸灯','description':'白色灯罩'}]}
+            assert request['schema_name'] == 'professional_video_prompt_material'
+            i = request['index']
+            assert events[:2] == ['asset response','split']
+            assert request['path'].name == f'scene-{i:03d}.mp4'
+            catalog = request['context']['assets']
+            assert [(a['id'],a['name']) for a in catalog] == [
+                ('character-001','旅客'),('scene-001','阁楼'),('object-001','纸灯')]
+            events.append(i)
+            if len(events) == 4:
+                both_shots_started.set()
+            await asyncio.wait_for(both_shots_started.wait(), 1)
+            return remake_shot(i,4,refs=[{'asset_id':'object-001','asset_name':'纸灯','asset_type':'object'}])
+
+    monkeypatch.setattr(SceneDetector,'split_timeline',split)
+    monkeypatch.setattr('services.remake.pipeline.media_session',lambda:nullcontext(None))
+    context = SimpleNamespace(params={'task_id':str(task.id),'remake_context_version':5,'remake_shot_limit':30,
+                                       'remake_action_memory':'timeline','remake_assets_first':True},
+                              snapshot=synthetic_snapshot(),language='zh')
+    token = current_execution.set(context)
+    try:
+        result = await RemakeDecompositionPipeline(gateway_factory=lambda _:Gateway(),prepare_video=lambda p,*a,**kw:p).run(
+            source=source, source_path=video,work_dir=tmp_path/'work',model_config=SimpleNamespace(id=1,model='mock'))
+    finally:
+        current_execution.reset(token)
+    assert {1,2} == set(events[2:])
+    assert [r['file'] for r in result.prompt_document['prompts']] == ['scene-001.mp4','scene-002.mp4']
