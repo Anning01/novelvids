@@ -5,13 +5,15 @@ _RANGE = re.compile(r"^\s*\[?\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*[-–—~至]\s*(
 
 
 def end_state_memory(shot, index):
+    content = {field: shot[field] for field in (
+        'source_prompt_text', 'description', 'visual_prose', 'actions', 'dialogue', 'narration',
+        'spatial_relationships', 'transition',
+    ) if field in shot}
     last = (shot.get('actions') or [''])[-1]
+    memory = {'previous_sequence': index, 'end_state': shot.get('transition', ''), 'generated_content': content}
     if isinstance(last, dict) and 'text' not in last:
-        return {'previous_sequence': index, 'end_state': shot['transition'],
-                'last_action': last['continuation'], 'action_key': last['key'], 'onset': last['onset']}
-    if isinstance(last, dict):
-        last = last['text']
-    return {'previous_sequence': index, 'end_state': shot['transition'], 'last_action': last}
+        return {**memory, 'last_action': last['continuation'], 'action_key': last['key'], 'onset': last['onset']}
+    return {**memory, 'last_action': last['text'] if isinstance(last, dict) else last}
 
 
 def _local_tracks(lines, span, language, previous, observed, opening):

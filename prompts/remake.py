@@ -370,7 +370,7 @@ def motion_memory_instruction(language, *, batch):
 
 def timeline_instruction(language, *, batch):
     if language == 'zh':
-        source = ('整片只附一次。按给定区间和镜号写齐。' if batch else
+        source = ('整片只附一次。按给定区间和镜号依次写：写本镜时参考刚写完的上一镜内容，已经演完的动作从其结果接起。' if batch else
                   '最后一段是本镜原片；前一段及 confirmed_handoff 仅供你辨认本镜开场状态。')
         return (source + '每条提示词都要能单独使用。所有可见字段直接写本镜的人物、画面、动作和声音；前情仅供分析，正文不复述上一镜，也不假设有尾帧参考图。'
                 '在 actions 中按发生顺序写最终画面，每条只填原片绝对秒数 start、end 和要保存的 text。'
@@ -379,7 +379,7 @@ def timeline_instruction(language, *, batch):
                 '原片确有第二次起手就照实写。visual_prose 只写本镜开场，last_visible_state 只写末帧。'
                 '声音底色写在 sound_design.ambience，音效和原片绝对起止秒写在 cues。旁白和对白按原声记录。'
                 'asset_refs、dialogue、narration、last_visible_state 都是分镜字段，与 sound_design 同级。')
-    source = ('Use the full source once. Cover every numbered interval. '
+    source = ('Use the full source once. Write each numbered interval in order, using the immediately preceding generated shot as context. Start from the result of any completed action. '
               if batch else 'The last clip is the target. Use the preceding clip and any confirmed_handoff for its opening state. ')
     return (source + 'Each prompt must stand alone. Write only what is visible and audible in this shot. Prior context is for analysis; never recap the preceding shot or assume a tail-frame reference image. '
             'Write each final action in order as absolute source seconds start, end and the text to save. '

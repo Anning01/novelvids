@@ -294,3 +294,24 @@ def test_missing_visual_groups_are_rebuilt_from_shot_local_names_and_bound_per_s
     rows = bind_shot_references(shots, registered)
     assert [[r['asset_name'] for r in row['asset_refs']] for row in rows] == [['旅客','工作间','蓝杯'],['旅客','店员','阳台','蓝杯','桌子']]
     assert not missing_visual_groups(shots, registered)
+
+
+@pytest.mark.asyncio
+async def test_generated_previous_content_is_given_only_to_its_immediate_successor(tmp_path):
+    from services.remake.single_wave import analyze_source_shots
+    paths = [tmp_path / f'{i}.mp4' for i in range(3)]
+    evidence = {p.name:{'interval':{'start_seconds':i*4,'end_seconds':(i+1)*4,'output_seconds':4}}
+                for i,p in enumerate(paths)}
+    old = {'description':'Earlier independent shot', 'actions':[], 'dialogue':[], 'transition':'Earlier ending'}
+    previous = {'description':'She picks up the cup, walks to the desk and hands it over.',
+                'actions':[{'text':'Picks up the cup'},{'text':'Walks to the desk'},{'text':'Hands it over'}],
+                'dialogue':['Here you go.'], 'transition':'The cup is in his hand.'}
+    gateway = SimpleNamespace(analyze_one=AsyncMock(return_value={'description':'He takes a sip.'}))
+    await analyze_source_shots(paths,[4]*3,evidence,gateway,'default',{
+        'model:remake:RemakeShot:1':old, 'model:remake:RemakeShot:2':previous},None,[])
+    context = gateway.analyze_one.await_args.kwargs['context']['confirmed_handoff']
+    assert context['previous_sequence'] == 2
+    assert context['generated_content']['actions'] == previous['actions']
+    assert context['generated_content']['dialogue'] == previous['dialogue']
+    assert context['end_state'] == previous['transition']
+    assert old['description'] not in str(context)
