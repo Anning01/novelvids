@@ -21,8 +21,37 @@ def decoded(value):
     return value
 
 
-def delivered_assets(reply, snapshot, language, aspect_ratio):
+def _inventory_sections(reply):
     data = decoded(reply)
+    if not isinstance(data, str):
+        return data
+    # Preserve fully delivered top-level fields before a broken or interrupted one.
+    text = re.sub(r"^\s*```(?:json)?\s*", "", data, flags=re.I).lstrip()
+    if not text.startswith("{"):
+        return {}
+    remaining = text[1:].lstrip()
+    sections = {}
+    decoder = json.JSONDecoder()
+    while remaining:
+        try:
+            key, end = decoder.raw_decode(remaining)
+            tail = remaining[end:].lstrip()
+            if not isinstance(key, str) or not tail.startswith(":"):
+                break
+            tail = tail[1:].lstrip()
+            value, end = decoder.raw_decode(tail)
+        except ValueError:
+            break
+        sections[key] = value
+        remaining = tail[end:].lstrip()
+        if not remaining.startswith(","):
+            break
+        remaining = remaining[1:].lstrip()
+    return sections
+
+
+def delivered_assets(reply, snapshot, language, aspect_ratio):
+    data = _inventory_sections(reply)
     inventory = {}
     name_limit = Asset._meta.fields_map["canonical_name"].max_length
     for group in ('characters', 'scenes', 'objects'):

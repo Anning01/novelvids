@@ -285,12 +285,12 @@ def test_missing_visual_groups_are_rebuilt_from_shot_local_names_and_bound_per_s
     def shot(index, *refs):
         return {'shot_index': index, 'asset_refs': [
             {'asset_id': str(i), 'asset_type': kind, 'asset_name': name} for i,(kind,name) in enumerate(refs)]}
-    shots = [shot(1, ('scene','工作间'),('object','蓝杯')),
-             shot(2, ('scene','阳台'),('object','蓝杯'),('object','桌子'))]
+    shots = [shot(1, ('character','旅客'),('scene','工作间'),('object','蓝杯')),
+             shot(2, ('character','旅客'),('character','店员'),('scene','阳台'),('object','蓝杯'),('object','桌子'))]
     assets = {'characters': [], 'scenes': [], 'objects': []}
     extra = missing_visual_groups(shots, assets)
     registered = normalize_global_assets(extra)
     assert [item['name'] for item in registered['objects']] == ['蓝杯','桌子']
     rows = bind_shot_references(shots, registered)
-    assert [[r['asset_name'] for r in row['asset_refs']] for row in rows] == [['工作间','蓝杯'],['阳台','蓝杯','桌子']]
+    assert [[r['asset_name'] for r in row['asset_refs']] for row in rows] == [['旅客','工作间','蓝杯'],['旅客','店员','阳台','蓝杯','桌子']]
     assert not missing_visual_groups(shots, registered)

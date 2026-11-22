@@ -85,3 +85,12 @@ def test_optional_reference_design_survives_structured_and_free_text_shots():
     span = {'sequence':1,'start_seconds':0,'end_seconds':4,'output_seconds':4}
     assert delivered_batch(wire,[span])[1]['asset_refs'] == [ref]
     assert raw_shot({'prompt':'阳光照进阁楼。', 'asset_refs':[ref]})['asset_refs'] == [ref]
+
+
+def test_truncated_inventory_does_not_discard_a_closed_cast_array():
+    from services.remake.delivered_output import delivered_assets
+    raw = '{"characters":[{"name":"旅客","label":"人物","description":"短发","appearances":[{"start_seconds":2,"end_seconds":3}]}],"scenes":[{"name":"未写完'
+    assets = delivered_assets(raw, synthetic_snapshot(), 'zh', '9:16')
+    assert [v['name'] for v in assets['characters']] == ['旅客']
+    assert assets['characters'][0]['appearances'] == [{'start_seconds':2,'end_seconds':3}]
+    assert not assets['scenes'] and not assets['objects']

@@ -113,7 +113,7 @@ async def stream_source_analysis(detector, source_path, directory, gateway, stra
 
 def missing_visual_groups(shots, assets):
     """Recover empty inventory categories from subjects explicitly observed in this episode."""
-    groups = {kind: group for kind, group in (('scene', 'scenes'), ('object', 'objects')) if not assets.get(group)}
+    groups = {kind: group for kind, group in (('character', 'characters'), ('scene', 'scenes'), ('object', 'objects')) if not assets.get(group)}
     missing = {}
     for shot in shots:
         for ref in shot['asset_refs']:
