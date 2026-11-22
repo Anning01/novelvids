@@ -142,6 +142,7 @@ async def test_handler_runs_controlled_pipeline_updates_progress_and_returns_bil
             "team_id": None,
             "attempt": 1,
             **({"remake_context_version": version, "source_checksum": source.checksum} if version else {}),
+            **({"remake_deadline_at": 1} if version == 5 else {}),
         }
     )
 
@@ -332,3 +333,34 @@ async def test_unfinished_results_have_retry_copy_and_preserve_source_status(tmp
     await task.refresh_from_db()
     assert task.stage == "needs_review"
     assert "可以重试" in task.error_message and "核对" not in task.error_message
+
+
+@pytest.mark.asyncio
+async def test_user_can_cancel_running_decomposition_with_a_legacy_deadline(tmp_path):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    novel, chapter, source, task = await _records(tmp_path)
+    started = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    async def wait_for_media(*_args):
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cleaned.set()
+
+    handler = RemakeDecompositionTaskHandler(
+        model_resolver=AsyncMock(return_value=SimpleNamespace(id=1, model="vision")),
+        materializer=SimpleNamespace(materialize=wait_for_media),
+    )
+    work = asyncio.create_task(handler.execute({
+        "novel_id": novel.id, "chapter_id": chapter.id, "remake_source_id": source.id,
+        "ai_task_id": str(task.id), "remake_deadline_at": 1,
+    }))
+    await asyncio.wait_for(started.wait(), 1)
+    work.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await work
+    assert cleaned.is_set()

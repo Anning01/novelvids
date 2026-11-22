@@ -1,19 +1,10 @@
 import asyncio
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from services.remake.deadline import batch_deadline
 from services.remake.single_wave import analyze_source_shots, bind_shot_references
-
-
-def test_deadline_counts_upload_time_across_the_entire_batch(monkeypatch):
-    monkeypatch.setattr('services.remake.deadline.time', lambda: 180.0)
-    sources = [{'upload': SimpleNamespace(created_at=datetime.fromtimestamp(t, timezone.utc))} for t in (130, 100, 115)]
-    assert batch_deadline(sources) == 400
-    assert batch_deadline([{'upload': None}]) == 480
 
 
 def test_reference_ids_are_local_and_ambiguous_names_require_review():
@@ -70,27 +61,6 @@ async def test_single_wave_fills_the_selected_model_limit_and_never_rewrites(tmp
 
 
 @pytest.mark.asyncio
-async def test_deadline_cancels_work_and_does_not_report_success():
-    import time
-    from services.remake.handler import RemakeDecompositionError, RemakeDecompositionTaskHandler
-    h=RemakeDecompositionTaskHandler()
-    finished=asyncio.Event()
-    release_cleanup=asyncio.Event()
-    async def work(_):
-        try:
-            await asyncio.Event().wait()
-        finally:
-            finished.set()
-            await release_cleanup.wait()
-    h._execute=work
-    with pytest.raises(RemakeDecompositionError) as err:
-        await asyncio.wait_for(h.execute({'remake_deadline_at':time.time()+.02,'remake_source_id':9999,'novel_id':9999}), .5)
-    assert err.value.error_code=='REMAKE_DEADLINE_EXCEEDED' and finished.is_set()
-    release_cleanup.set()
-    await asyncio.gather(*h._cleanup_tasks, return_exceptions=True)
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("limit,language", [(None, "zh"), (15, "zh"), (12, "en")])
 async def test_independent_request_sends_previous_footage_then_current_in_one_call(tmp_path, limit, language):
     from schemas.agent_workflow import RemakeShot
@@ -127,19 +97,17 @@ async def test_independent_request_sends_previous_footage_then_current_in_one_ca
 
 
 @pytest.mark.asyncio
-async def test_expired_queued_shot_never_contacts_the_model(tmp_path, monkeypatch):
+async def test_queued_shot_is_admitted_even_with_an_expired_legacy_deadline(tmp_path, monkeypatch):
     from services.creation_agent.skill_execution import current_execution
-    from services.remake.gateway import RemakeVideoAnalysisError, RemakeVideoAnalysisGateway
+    from services.remake.gateway import RemakeVideoAnalysisGateway
     from test.test_services.test_remake_gateway import _config, _Client
     g=RemakeVideoAnalysisGateway(_config(),client=_Client([]))
     call=AsyncMock()
     monkeypatch.setattr(g,'_request_one',call)
     token=current_execution.set(SimpleNamespace(params={'remake_context_version':5, 'remake_deadline_at':1}))
     try:
-        with pytest.raises(RemakeVideoAnalysisError) as err:
-            await g.analyze_one(index=1,path=tmp_path/'1.mp4',prompt='',schema_name='global_key_assets',response_schema={})
-        assert err.value.error_code=='REMAKE_DEADLINE_EXCEEDED'
-        call.assert_not_awaited()
+        await g.analyze_one(index=1,path=tmp_path/'1.mp4',prompt='',schema_name='global_key_assets',response_schema={})
+        call.assert_awaited_once()
     finally:
         current_execution.reset(token)
 

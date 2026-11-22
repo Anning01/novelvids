@@ -1,5 +1,4 @@
 import json
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -66,7 +65,7 @@ async def test_429_is_retried_only_on_verified_uncharged_rejection(monkeypatch,c
     probe=AsyncMock(return_value=confirmed);monkeypatch.setattr('services.remake.short_admission.confirmed_rejection',probe)
     error=RemakeVideoAnalysisError('429',error_code='REMAKE_ANALYSIS_RATE_LIMITED')
     invoke=AsyncMock(side_effect=[error,'returned'])
-    params={'task_id':'test','remake_deadline_at':time.time()+5}
+    params={'task_id':'test','remake_deadline_at':1}
     if confirmed:
         assert await run_admitted(invoke,object(),params,'RemakeShortStoryboard')=='returned'
         assert invoke.await_args.args==('1-readmit',)
@@ -115,7 +114,7 @@ async def test_receipt_verification_rejects_wrong_identity_pending_and_charge(mo
         return httpx.Response(200,json=data)
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:real(**kw,transport=httpx.MockTransport(http_reply)))
     async def verified():
-        return await confirmed_rejection(cfg,parent,'model:remake:RemakeShortStoryboard:1',time.time()+10)
+        return await confirmed_rejection(cfg,parent,'model:remake:RemakeShortStoryboard:1')
     assert await verified()
     for field, val in [('model','nv-other'),('id',str(uuid4())),('status','review'),('settlement',{'status':'pending'})]:
         old=data[field];data[field]=val
@@ -173,7 +172,7 @@ async def test_retry_is_bounded_and_never_replays_an_unknown_stream(monkeypatch)
     denied=RemakeVideoAnalysisError('429',error_code='REMAKE_ANALYSIS_RATE_LIMITED')
     probe=AsyncMock(return_value=True)
     monkeypatch.setattr('services.remake.short_admission.confirmed_rejection',probe)
-    params={'task_id':'test','remake_deadline_at':time.time()+10}
+    params={'task_id':'test'}
     call=AsyncMock(side_effect=denied)
     with pytest.raises(RemakeVideoAnalysisError):
         await run_admitted(call,object(),params,'RemakeAssets')

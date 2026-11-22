@@ -8,7 +8,6 @@ import asyncio
 import hashlib
 import json
 import logging
-from time import time
 from datetime import datetime, timezone
 
 from tortoise.exceptions import IntegrityError
@@ -24,7 +23,6 @@ from services.balance import ensure_solvent
 from services.project_config import validate_project_config
 from services.remake.episodes import validate_episode_batch
 from config import settings
-from services.remake.deadline import batch_deadline
 from services.remake.uploads import RemakeUploadService, remake_upload_service
 from services.remake.history_snapshot import (
     RemakeHistorySnapshotService,
@@ -106,7 +104,6 @@ class RemakeProjectService:
         user_id: int | None,
         allow_all_history: bool,
     ) -> dict:
-        submitted_at = time()
         payload_hash = self._payload_hash(payload)
         existing = await Novel.get_or_none(creation_idempotency_key=str(payload.idempotency_key))
         if existing is not None:
@@ -153,8 +150,6 @@ class RemakeProjectService:
             user_id=user_id,
             allow_all_history=allow_all_history,
         )
-        # Count upload time for a fresh batch; historical inputs begin at submission.
-        deadline_at = batch_deadline(prepared, submitted_at)
         descriptions = {
             "single_upload": "重制工坊 · 单视频",
             "folder_upload": "重制工坊 · 文件夹多集",
@@ -243,7 +238,6 @@ class RemakeProjectService:
                             "remake_cast_appearances": True,
                             "remake_asset_appearances": True,
                             "remake_short_storyboard": 0 < media.duration_seconds <= settings.REMAKE_SHORT_STORYBOARD_SECONDS,
-                            "remake_deadline_at": deadline_at,
                             "source_checksum": source.checksum,
                             **({"catalog_previous_task_id": str(created[-1][1].id)} if created else {}),
                             **({"model_config_id": payload.model_config_id} if payload.model_config_id is not None else {}),
@@ -471,7 +465,6 @@ class RemakeProjectService:
                 stage=stage,
                 progress=progress,
                 request_params={
-                    **({"remake_deadline_at": batch_deadline([])} if previous_params.get("remake_context_version") == 5 else {}),
                     **{key: previous_params[key] for key in ("workflow_version", "assistant_model_config_id", "model_config_id", "agent_configuration", "skill_snapshot", "remake_context_version", "remake_shot_limit", "remake_action_memory", "remake_visible_references", "remake_identity_evidence", "remake_cast_appearances", "remake_asset_appearances", "remake_short_storyboard", "source_checksum", "catalog_seed_task_id", "catalog_previous_task_id", "remake_block_size", "remake_episode_count") if key in previous_params},
                     "novel_id": source.novel_id,
                     "chapter_id": source.chapter_id,

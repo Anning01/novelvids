@@ -1,5 +1,4 @@
 """One new admission is safe only after a recorded upstream 429 was definitively rejected."""
-import time
 from uuid import UUID, uuid5
 
 import httpx
@@ -9,8 +8,8 @@ from models.usage_record import ModelUsageRecord
 from schemas.platform_billing import PlatformReceiptOut
 
 
-async def confirmed_rejection(config, parent_id, key, deadline):
-    if getattr(config, "api_protocol", None) != "novelvids" or time.time() >= deadline:
+async def confirmed_rejection(config, parent_id, key):
+    if getattr(config, "api_protocol", None) != "novelvids":
         return False
     child = uuid5(UUID(str(parent_id)), key)
     usage_ids = await ModelUsageRecord.filter(ai_task_id=child, model_config_id=config.id).values_list('id', flat=True)
@@ -34,18 +33,13 @@ async def confirmed_rejection(config, parent_id, key, deadline):
 
 
 async def run_admitted(call, config, params, receipt_name):
-    started = time.monotonic()
     try:
         return await call(None)
     except Exception as exc:
         if getattr(exc, "error_code", None) != "REMAKE_ANALYSIS_RATE_LIMITED":
             raise
-        deadline = params["remake_deadline_at"]
         key = f"model:remake:{receipt_name}:1"
-        if not await confirmed_rejection(config, params["task_id"], key, deadline):
-            raise
-        # Avoid buying a second admission in the last seconds of the batch.
-        if deadline - time.time() <= time.monotonic() - started:
+        if not await confirmed_rejection(config, params["task_id"], key):
             raise
     # Separate at-most-once operation and platform request key; the old receipt remains rejected.
     return await call("1-readmit")

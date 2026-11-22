@@ -394,7 +394,7 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
         assert params["remake_short_storyboard"] is True
         assert params["remake_cast_appearances"] is True
         assert params["remake_asset_appearances"] is True
-        assert "catalog_seed_task_id" not in params and params["remake_deadline_at"] > 0
+        assert "catalog_seed_task_id" not in params and "remake_deadline_at" not in params
         assert "remake_block_size" not in params
     for upload in (first, second, third):
         await upload.refresh_from_db()
@@ -567,9 +567,10 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
     created = await service.create(payload(upload.id), team_id=3, user_id=5)
     source = await RemakeSource.get(id=created["sources"][0]["source_id"])
     old_task = await AiTask.get(id=source.analysis_task_id)
+    old_task.request_params["remake_deadline_at"] = 1
     if not continuity_version:
         old_task.request_params.pop("remake_context_version")
-        await old_task.save(update_fields=["request_params"])
+    await old_task.save(update_fields=["request_params"])
     old_task.status = TaskStatusEnum.failed.value
     await old_task.save(update_fields=["status", "updated_at"])
     source.media_status = media_status
@@ -598,6 +599,7 @@ async def test_failed_decomposition_can_retry_once_with_incremented_attempt(tmp_
 
     await source.refresh_from_db()
     task = await AiTask.get(id=result["task_id"])
+    assert 'remake_deadline_at' not in task.request_params
     assert task.request_params.get('held_shots', []) == []
     assert task.id != old_task.id
     assert (task.stage,task.progress) == ('generating_storyboards', 71)

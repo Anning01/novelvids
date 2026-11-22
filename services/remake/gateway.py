@@ -226,10 +226,6 @@ class RemakeVideoAnalysisGateway:
             gate = window.admit(max(1, int(self.config.concurrency or 1)), draft=draft,
                                 notify=announce if schema_name == "professional_video_prompt_material" else None)
         async with gate:
-            deadline = getattr(execution, "params", {}).get("remake_deadline_at")
-            if deadline is not None and time.time() >= deadline:
-                raise RemakeVideoAnalysisError(localized_message("五分钟内未完成，已停止后续请求并保留已返回的分镜"),
-                                              error_code="REMAKE_DEADLINE_EXCEEDED")
             try:
                 return await self._request_one(index=index, path=path, prompt=prompt, schema_name=schema_name,
                     response_schema=response_schema, context=context, include_segment_metadata=include_segment_metadata, draft=draft,

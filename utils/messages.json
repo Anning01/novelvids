@@ -1,7 +1,7 @@
 {
   "请更新媒体工作机以支持项目分镜时长": "Update the media worker to support the project shot duration limit.",
   "五分钟内未完成，已停止后续请求并保留已返回的分镜": "The five-minute limit was reached. Further requests stopped and returned shots were retained.",
-  "五分钟内未完成，已停止后续请求并保留已返回的分镜。": "The five-minute limit was reached. Further requests stopped and returned shots were retained.",
+  "上次任务因旧版五分钟限制停止，可重试未完成部分。": "The previous run stopped at the old five-minute limit. You can retry the unfinished work.",
   "切片内容或边界已变化，不能复用旧分镜": "The source clips or their boundaries have changed. The saved shots cannot be reused.",
   "来源视频已变化，请重新创建拆解任务": "The source video has changed. Start a new analysis task.",
   "上次请求的结果尚未确认，请稍后核对": "The previous request has no confirmed outcome yet. Check its receipt again later.",
