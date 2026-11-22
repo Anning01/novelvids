@@ -5,8 +5,11 @@ _RANGE = re.compile(r"^\s*\[?\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*[-–—~至]\s*(
 
 
 def end_state_memory(shot, index):
-    return {'previous_sequence': index, 'end_state': shot['transition'],
-            'last_action': (shot.get('actions') or [''])[-1]}
+    last = (shot.get('actions') or [''])[-1]
+    if isinstance(last, dict):
+        return {'previous_sequence': index, 'end_state': shot['transition'],
+                'last_action': last['continuation'], 'action_key': last['key'], 'onset': last['onset']}
+    return {'previous_sequence': index, 'end_state': shot['transition'], 'last_action': last}
 
 
 def _local_tracks(lines, span, language, previous, observed, opening):
@@ -36,16 +39,67 @@ def _local_tracks(lines, span, language, previous, observed, opening):
     return local
 
 
+def _local_second(source_second, span):
+    start, end = span["start_seconds"], span["end_seconds"]
+    bounded = min(end, max(start, source_second))
+    return round((bounded - start) * span["output_seconds"] / (end - start), 3)
+
+
+def _action_views(views, span, previous):
+    """Only the view owning the physical onset can direct an actor to start the action."""
+    lines = []
+    current = {}
+    unconfirmed_restarts = []
+    for view in sorted(views, key=lambda item: item["start"]):
+        left = max(view["start"], span["start_seconds"])
+        right = min(view["end"], span["end_seconds"])
+        if left >= right:
+            continue
+        key = " ".join(view["key"].casefold().split())
+        onset = view["onset"]
+        prior = current.get(key, previous.get(key))
+        starts_here = left <= onset < right
+        restart = view.get("restart")
+        new_performance = prior is None or (restart is not None and prior < restart["at"] <= onset)
+        if starts_here and prior is not None and onset > prior and not new_performance:
+            unconfirmed_restarts.append({"key": view["key"], "source_seconds": onset})
+        body = view["movement"] if starts_here and new_performance else view["continuation"]
+        current[key] = onset if new_performance else prior
+        lines.append(f"{_local_second(left, span):g}s-{_local_second(right, span):g}s: {body}")
+    if not lines:
+        raise ValueError("No observed action view overlaps its assigned source interval")
+    return lines, current, unconfirmed_restarts
+
+
+def _local_sound(track, span):
+    parts = [track["ambience"]]
+    for cue in sorted(track["cues"], key=lambda item: item["start"]):
+        left = _local_second(cue["start"], span)
+        right = _local_second(cue["end"], span)
+        if left < right:
+            parts.append(f"{left:g}s-{right:g}s: {cue['sound']}")
+    return " ".join(parts)
+
+
 def finalize_generation_shots(shots, language):
     result = []
     previous = {}
+    previous_views = {}
     for raw in shots:
         observed = {}
         span = raw['source_interval']
         duration = span['output_seconds']
         shot = {**raw, 'duration': f'{duration}s', 'duration_seconds': duration,
                 'generation_timeline': True, 'description': _RANGE.sub('',raw['description'],count=1)}
-        for field in ('actions', 'dialogue', 'narration'):
+        tracks = ('actions', 'dialogue', 'narration')
+        structured = bool(raw['actions'] and isinstance(raw['actions'][0], dict))
+        if structured:
+            shot['actions'], previous_views, suspects = _action_views(raw['actions'], span, previous_views)
+            if suspects:
+                shot['unconfirmed_restarts'] = suspects
+            shot['sound_design'] = _local_sound(raw['sound_design'], span)
+            tracks = ('dialogue', 'narration')
+        for field in tracks:
             observed[field] = set()
             shot[field] = _local_tracks(raw.get(field, []), span, language if field == 'actions' else None,
                                         previous.get(field, set()), observed[field], shot['visual_prose'])
@@ -56,8 +110,12 @@ def finalize_generation_shots(shots, language):
             rescaled = []
             for j, segment in enumerate(segments):
                 length = duration - elapsed if j == len(segments)-1 else duration * segment['duration'] / total
-                actions = _local_tracks(segment['actions'], span, language, previous.get('actions', set()),
-                                        observed['actions'], segment['visual_prose'])
+                if structured:
+                    actions = [line for line in shot['actions']
+                               if elapsed <= float(_RANGE.match(line)[1]) < elapsed + length]
+                else:
+                    actions = _local_tracks(segment['actions'], span, language, previous.get('actions', set()),
+                                            observed['actions'], segment['visual_prose'])
                 rescaled.append({**segment, 'duration': length, 'actions': actions or [segment['visual_prose']]})
                 elapsed += length
             shot['segments'] = rescaled

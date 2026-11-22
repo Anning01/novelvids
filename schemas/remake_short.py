@@ -1,6 +1,6 @@
 """Compact wire format for shots of one short source. The saved format is RemakeShot."""
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from schemas.agent_workflow import RemakeReference, RemakeShot
 
@@ -37,6 +37,7 @@ class ShortShot(BaseModel):
 
 
 class RemakeShortStoryboard(BaseModel):
+    shot_type: ClassVar[type[RemakeShot]] = RemakeShot
     model_config = ConfigDict(extra="forbid")
     looks: list[ShotLook] = Field(min_length=1)
     shots: list[ShortShot] = Field(min_length=1)
@@ -51,7 +52,7 @@ class RemakeShortStoryboard(BaseModel):
             if shot.look > len(self.looks):
                 raise ValueError("Unknown shot look")
             span = expected[shot.sequence]
-            value = RemakeShot.model_validate({
+            value = self.shot_type.model_validate({
                 **self.looks[shot.look - 1].model_dump(), **shot.model_dump(exclude={"look"}),
                 "duration": f"{span['output_seconds']}s" if "output_seconds" in span else f"{span['end_seconds'] - span['start_seconds']:.6f}s",
             })

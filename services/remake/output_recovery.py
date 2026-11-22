@@ -10,9 +10,9 @@ from models.agent_operation import AgentOperation
 from schemas.agent_workflow import RemakeShot
 
 
-async def recover_shot_output(task_id, index):
+async def recover_shot_output(task_id, index, schema=RemakeShot):
     text = await latest_response_text(task_id, f"model:remake:RemakeShot:{index}")
-    return recover_shot_text(text) if text else None
+    return recover_shot_text(text, schema) if text else None
 
 
 async def latest_response_text(task_id, key):
@@ -31,7 +31,7 @@ async def latest_response_text(task_id, key):
     return texts[-1]
 
 
-def _complete_body_before_segments(text):
+def _complete_body_before_segments(text, schema):
     # Decode whole top-level values. A partial parser can otherwise promote a cut-off
     # string or nested object to an apparently valid creative field.
     decoder = json.JSONDecoder()
@@ -57,7 +57,7 @@ def _complete_body_before_segments(text):
                 # Reject malformed JSON in the middle, rather than treating it as an interrupted stream.
                 from_json(text, allow_partial=True)
                 if {"dialogue", "narration"}.issubset(body):
-                    return RemakeShot.model_validate(body)
+                    return schema.model_validate(body)
             return None
         body[key], pos = decoder.raw_decode(text, pos)
         pos += len(text[pos:]) - len(text[pos:].lstrip())
@@ -67,13 +67,13 @@ def _complete_body_before_segments(text):
     return None
 
 
-def recover_shot_text(text):
+def recover_shot_text(text, schema=RemakeShot):
     try:
-        return RemakeShot.model_validate_json(text)
+        return schema.model_validate_json(text)
     except ValidationError:
         pass
     try:
-        recovered = _complete_body_before_segments(text)
+        recovered = _complete_body_before_segments(text, schema)
         if recovered is not None:
             return recovered
     except (ValueError, ValidationError):
@@ -82,7 +82,8 @@ def recover_shot_text(text):
         data = from_json(text, allow_partial=True)
         if not isinstance(data, dict):
             return None
-        if not set(RemakeShot.model_fields).difference({"confidence"}).issubset(data):
+        present = {name for name, field in schema.model_fields.items() if name in data or field.alias in data}
+        if not set(schema.model_fields).difference({"confidence"}).issubset(present):
             return None
         if next(reversed(data), None) not in {"asset_refs", "confidence"}:
             return None
@@ -90,14 +91,15 @@ def recover_shot_text(text):
         if isinstance(references, list) and references and references[-1] == {}:
             data["asset_refs"] = references[:-1]
         # A confidence score is optional metadata. All creative fields must still parse.
-        return RemakeShot.model_validate(data)
+        return schema.model_validate(data)
     except (ValueError, ValidationError):
         return None
 
 
-def recover_short_rows(text, intervals):
+def recover_short_rows(text, intervals, schema=None):
     """Keep only fully delimited shot objects already delivered by the provider."""
     from schemas.remake_short import RemakeShortStoryboard
+    schema = schema or RemakeShortStoryboard
     if not text:
         return {}
     spans = {span["sequence"]: span for span in intervals}
@@ -124,7 +126,7 @@ def recover_short_rows(text, intervals):
                     if text[pos:pos+1] == "]":
                         break
                     row, pos = decoder.raw_decode(text, pos)
-                    one = RemakeShortStoryboard.model_validate({"looks": looks, "shots": [row]})
+                    one = schema.model_validate({"looks": looks, "shots": [row]})
                     index = one.shots[0].sequence
                     if index not in spans or index in result:
                         return {}

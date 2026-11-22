@@ -339,3 +339,30 @@ def source_handoff_instruction(language):
             "and completed actions; do not preview the next shot. In a batch establish each ending before writing the next opening. Treat confirmed_handoff as history when supplied. A completed throw is history: continue with the "
             "object in flight or caught, without throwing it again. Keep genuine repetitions and only the remaining "
             "phase of a movement crossing a cut. Internal cuts can have fractional durations.")
+
+
+def motion_memory_instruction(language, *, batch):
+    if language == "zh":
+        media = ("所附整片与全部区间共用一条原片时间轴。按镜号写齐，摄影风格可共用 looks。"
+                 if batch else "最后一段是目标原片，前一段只供衔接。以 source_interval 起点换算原片绝对时间。")
+        return (media + "每个 actions 条目是一次观察。start/end 是这个画面的原片绝对秒数，onset 是动作第一次实际起手的原片秒数。"
+                "逐个核对相邻画面（含镜内换机位）：同一主体、动作、物体沿用同一 key；换机位、字幕变化和短暂遮挡均沿用原 onset。"
+                "movement 写首次执行；continuation 只写新机位下已经保持的姿态、仍在进行的部分和新可见细节，包括字幕变化。"
+                "同一动作只在原片看见收回、复位、第二次起手或明确回放时才换 onset，在 restart 写该证据的原片秒数 at 和可见事实 seen，否则填 null。"
+                "独立动作拆成不同条目，即便它们同时发生。人物或物体不要互换。先观察前一画面末态，confirmed_handoff 仅作历史。"
+                "visual_prose 写本镜第一帧，last_visible_state 只写本镜最后可见的物理状态，不预告下一画面。"
+                "对白、旁白以原片绝对起止秒开头；sound_design.ambience 写底噪或音乐，cues 填原片绝对起止秒及音效，文字中不嵌入时间码。"
+                "internal_cuts 是参考切点，保留其他实际换机位。output_seconds 是成品整数时长。"
+                "照录原声，使用资产名称与本镜唯一的引用标识，小镜头如需 segments，沿用同一动作时间轴。")
+    media = ("Use the attached full source and all numbered intervals on one absolute clock. Share looks across shots. "
+             if batch else "The last clip is the target; preceding footage is continuity evidence. Add the source_interval origin to clip times. ")
+    return (media + "For each observed action view, start/end are absolute source seconds and onset is the original physical start. "
+            "Check every consecutive view including edits within a shot. Reuse the same actor/action/object key and onset when "
+            "the camera angle or caption changes or the object briefly leaves view. movement describes initial execution; "
+            "continuation describes only the remaining motion or held pose, new framing and newly visible detail, including captions. "
+            "Only assign a new onset to the same motion when an observable reset, second start or intentional replay occurs; provide its absolute second (at) and visible evidence (seen) in restart, otherwise use null. "
+            "Split independent actions even when simultaneous. Use the preceding end state and any confirmed_handoff as history. "
+            "visual_prose is the first frame; last_visible_state is only the last visible physical state without previewing the next image. "
+            "Prefix actual narration and dialogue with absolute source times. Use sound_design.ambience for background audio and cues for timed sounds with absolute start/end fields. No embedded timecodes in prose. "
+            "internal_cuts are guide edits, preserve other actual changes of angle. output_seconds is the whole-second target. "
+            "Transcribe actual speech, use shot-local unique asset references and use the same action timeline for optional segments.")

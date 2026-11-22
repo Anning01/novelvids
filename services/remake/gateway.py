@@ -251,10 +251,12 @@ class RemakeVideoAnalysisGateway:
         execution = current_execution.get()
         if execution:
             from pydantic_ai import BinaryContent, VideoUrl
-            from schemas.agent_workflow import RemakeAssets, RemakeShot
+            from schemas.agent_workflow import RemakeAssets
             from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
             audit = schema_name in {'shot_continuity_check', 'shot_speech_evidence'}
-            from schemas.remake_short import RemakeShortStoryboard
+            from schemas.remake_motion import shot_contracts
+            params = getattr(execution, "params", {})
+            RemakeShot, RemakeShortStoryboard = shot_contracts(params)
             schema = {"short_video_storyboard": RemakeShortStoryboard, "shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
             if schema is RemakeAssets:
@@ -284,7 +286,11 @@ class RemakeVideoAnalysisGateway:
                                for ref in output.asset_refs]
                     if len({item["id"] for item in catalog}) != len(catalog):
                         raise ValueError("Shot-local asset IDs must be unique")
-                prepare_remake_prompt(output.model_dump(), catalog, execution.snapshot, execution.language,
+                material = output.model_dump()
+                if params.get("remake_action_memory"):
+                    from services.remake.handoff import finalize_generation_shots
+                    material, = finalize_generation_shots([{**material, "shot_index": index, "source_interval": context["source_interval"]}], execution.language)
+                prepare_remake_prompt(material, catalog, execution.snapshot, execution.language,
                                       strategy_key=context["storyboard_strategy"], duration_seconds=context["duration_seconds"])
 
             from prompts.remake import continuity_instruction, identity_instruction
@@ -307,13 +313,16 @@ class RemakeVideoAnalysisGateway:
             if schema is RemakeShortStoryboard:
                 from prompts.remake import short_storyboard_instruction
                 extra = short_storyboard_instruction(execution.language)
+            if schema in (RemakeShot, RemakeShortStoryboard) and params.get("remake_action_memory"):
+                from prompts.remake import motion_memory_instruction
+                extra = motion_memory_instruction(execution.language, batch=schema is RemakeShortStoryboard)
             if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_cast_appearances"):
                 from prompts.remake import cast_reference_instruction
                 extra += "\n" + cast_reference_instruction(execution.language)
             if getattr(execution, "params", {}).get("remake_asset_appearances"):
                 from prompts.remake import visual_asset_instruction
                 extra += "\n" + visual_asset_instruction(execution.language, inventory=issubclass(schema, RemakeAssets))
-            if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_shot_limit"):
+            if schema in (RemakeShot, RemakeShortStoryboard) and params.get("remake_shot_limit") and not params.get("remake_action_memory"):
                 from prompts.remake import source_handoff_instruction
                 extra += "\n" + source_handoff_instruction(execution.language)
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
@@ -321,7 +330,7 @@ class RemakeVideoAnalysisGateway:
                 if schema is not RemakeShot:
                     return None
                 from services.remake.output_recovery import recover_shot_output
-                recovered = await recover_shot_output(execution.params["task_id"], receipt_segment)
+                recovered = await recover_shot_output(execution.params["task_id"], receipt_segment, RemakeShot)
                 if recovered is None:
                     return None
                 if context_version:

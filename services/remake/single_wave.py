@@ -4,7 +4,6 @@ import time
 from contextlib import aclosing
 from collections import defaultdict
 
-from schemas.agent_workflow import RemakeShot
 
 
 async def analyze_source_shots(paths, durations, evidence, gateway, strategy, saved, report, catalog):
@@ -17,7 +16,10 @@ async def analyze_source_shots(paths, durations, evidence, gateway, strategy, sa
 
 async def analyze_ready_shots(ready, gateway, strategy, saved, report, catalog):
     completed = sum(key.startswith("model:remake:RemakeShot:") and key.rsplit(":", 1)[1].isdigit() for key in saved)
-    schema = RemakeShot.model_json_schema()
+    from services.creation_agent.skill_execution import current_execution
+    from schemas.remake_motion import shot_contracts
+    shot_schema, _ = shot_contracts(getattr(current_execution.get(), "params", {}))
+    schema = shot_schema.model_json_schema()
     tasks = []
     returned = {}
 
@@ -149,7 +151,8 @@ def bind_shot_references(shots, assets):
 
 async def analyze_short_storyboard(source_path, paths, evidence, gateway, strategy, saved, checkpoint, report, catalog, params):
     """Read the short film once, then commit each validated shot under its normal receipt key."""
-    from schemas.remake_short import RemakeShortStoryboard
+    from schemas.remake_motion import shot_contracts
+    _, RemakeShortStoryboard = shot_contracts(params)
     results = {}
     intervals = []
     for i, path in enumerate(paths, 1):
@@ -197,7 +200,7 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
                 for segment in ("1-readmit", "1"):
                     text = await latest_response_text(params["task_id"], f"model:remake:RemakeShortStoryboard:{segment}")
                     if text:
-                        material = recover_short_rows(text, intervals)
+                        material = recover_short_rows(text, intervals, RemakeShortStoryboard)
                         break
                 for i, item in material.items():
                     await save(i, item)

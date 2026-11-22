@@ -304,7 +304,7 @@ class SkillExecution:
             limits=limits,
             on_activity=report_activity,
             # Each detected clip is a separate model step with its own durable retry allowance.
-            repair_root=str(child.id) if skill == "remake" and output_type is RemakeShot else await self.repair_root(),
+            repair_root=str(child.id) if skill == "remake" and issubclass(output_type, RemakeShot) else await self.repair_root(),
             stage=skill,
             repair_attempts=2 if skill == "remake" else 1,
         )

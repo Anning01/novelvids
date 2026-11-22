@@ -30,7 +30,7 @@ async def task_history(params):
         old = task.request_params or {}
         if any(old.get(k) != params.get(k) for k in
                ('remake_source_id', 'chapter_id', 'novel_id', 'team_id', 'user_id', 'prompt_language', 'model_config_id',
-                'remake_context_version', 'remake_shot_limit', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_asset_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
+                'remake_context_version', 'remake_shot_limit', 'remake_action_memory', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_asset_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
             break
         yield task
         previous_id = old.get('retry_of_task_id')
@@ -102,8 +102,8 @@ async def _rate_limited_outcome(task, receipt, child):
 async def reconcile_retry(previous):
     """Do not replay an external step with an unknown outcome in a fresh continuity attempt."""
     from uuid import uuid5
-    from schemas.agent_workflow import RemakeAssets, RemakeCastAssets, RemakeShot, RemakeTimedAssets
-    from schemas.remake_short import RemakeShortStoryboard
+    from schemas.agent_workflow import RemakeAssets, RemakeCastAssets, RemakeTimedAssets
+    from schemas.remake_motion import shot_contracts
     from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
     from services.remake.output_recovery import recover_shot_output
     from exceptions.remake import RemakeError
@@ -113,6 +113,7 @@ async def reconcile_retry(previous):
         return
     done = await completed_outputs(params, keys_only=True)
     async for task in task_history(params):
+        RemakeShot, RemakeShortStoryboard = shot_contracts(task.request_params)
         uncertain = await AgentOperation.filter(Q(key__startswith="model:remake:") | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:"),
                                                 task=task, external=True, state__in=["uncertain", "running"]).order_by("key")
         for receipt in uncertain:
@@ -131,7 +132,7 @@ async def reconcile_retry(previous):
                 if manifest:
                     intervals = manifest.result["intervals"]
                     text = await latest_response_text(task.id, receipt.key)
-                    for i, value in recover_short_rows(text, intervals).items():
+                    for i, value in recover_short_rows(text, intervals, RemakeShortStoryboard).items():
                         key = f"model:remake:RemakeShot:{i}"
                         local, _ = await AgentOperation.get_or_create(task=task, key=key,
                             defaults={"state": "completed", "result": value})
@@ -143,7 +144,7 @@ async def reconcile_retry(previous):
                         # No further model request is needed. Keep the original external outcome intact.
                         continue
             elif is_shot:
-                result = await recover_shot_output(task.id, receipt.key.rsplit(":", 1)[1])
+                result = await recover_shot_output(task.id, receipt.key.rsplit(":", 1)[1], RemakeShot)
             if result is None and (outcome := await _rate_limited_outcome(task, receipt, child)):
                 await AgentOperation.filter(id=receipt.id, state__in=["uncertain", "running"]).update(state="failed", result=outcome)
                 continue
