@@ -237,7 +237,7 @@ class RemakeProjectService:
                             **workflow,
                             "remake_context_version": 5,
                             "remake_shot_limit": novel.shot_duration_max,
-                            "remake_action_memory": True,
+                            "remake_action_memory": "timeline",
                             "remake_identity_evidence": True,
                             "remake_cast_appearances": True,
                             "remake_asset_appearances": True,

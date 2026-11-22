@@ -286,6 +286,8 @@ class RemakeVideoAnalysisGateway:
                                for ref in output.asset_refs]
                     if len({item["id"] for item in catalog}) != len(catalog):
                         raise ValueError("Shot-local asset IDs must be unique")
+                if params.get("remake_action_memory") == "timeline":
+                    return  # Schema parsing and reference IDs are sufficient for this contract.
                 material = output.model_dump()
                 if params.get("remake_action_memory"):
                     from services.remake.handoff import finalize_generation_shots
@@ -314,8 +316,9 @@ class RemakeVideoAnalysisGateway:
                 from prompts.remake import short_storyboard_instruction
                 extra = short_storyboard_instruction(execution.language)
             if schema in (RemakeShot, RemakeShortStoryboard) and params.get("remake_action_memory"):
-                from prompts.remake import motion_memory_instruction
-                extra = motion_memory_instruction(execution.language, batch=schema is RemakeShortStoryboard)
+                from prompts.remake import motion_memory_instruction, timeline_instruction
+                instruction = timeline_instruction if params["remake_action_memory"] == "timeline" else motion_memory_instruction
+                extra = instruction(execution.language, batch=schema is RemakeShortStoryboard)
             if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_cast_appearances"):
                 from prompts.remake import cast_reference_instruction
                 extra += "\n" + cast_reference_instruction(execution.language)

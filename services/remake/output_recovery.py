@@ -148,3 +148,45 @@ def recover_short_rows(text, intervals, schema=None):
     except (ValueError, TypeError):
         return {}
     return result
+
+
+async def recover_failed_material(task):
+    """Re-read complete model replies after a format failure, without submitting or changing the external call."""
+    from models.novel import Novel
+    from prompts.skill_pack import SkillSnapshot
+    from schemas.agent_workflow import remake_asset_schema
+    from schemas.remake_motion import shot_contracts
+    from services.remake.asset_validation import render_remake_assets
+
+    params = task.request_params
+    asset_type = remake_asset_schema(params)
+    shot_type, batch_type = shot_contracts(params)
+    failed = await AgentOperation.filter(task=task, external=True, state="failed", key__startswith="model:remake:")
+    for receipt in failed:
+        kind = receipt.key.split(":")[2]
+        if kind not in (asset_type.__name__, batch_type.__name__, shot_type.__name__):
+            continue
+        text = await latest_response_text(task.id, receipt.key)
+        if not text:
+            continue
+        try:
+            if kind == asset_type.__name__:
+                assets = asset_type.model_validate_json(text)
+                project = await Novel.get(id=params["novel_id"])
+                values = {"remake:recovered-assets": render_remake_assets(assets.model_dump(),
+                    SkillSnapshot.model_validate(params["skill_snapshot"]), params["prompt_language"], project.aspect_ratio or "16:9")}
+            elif kind == batch_type.__name__:
+                manifest = await AgentOperation.get_or_none(task=task, key="remake:short-input", state="completed")
+                if not manifest:
+                    continue
+                rows = batch_type.model_validate_json(text).materialize(manifest.result["intervals"])
+                values = {f"model:remake:RemakeShot:{i}": row for i, row in rows.items()}
+            else:
+                index = receipt.key.rsplit(":", 1)[1]
+                if not index.isdigit():
+                    continue
+                values = {f"remake:recovered-shot:{index}": shot_type.model_validate_json(text).model_dump(mode="json")}
+        except ValueError:
+            continue
+        for key, value in values.items():
+            await AgentOperation.get_or_create(task=task, key=key, defaults={"state":"completed", "result":value})

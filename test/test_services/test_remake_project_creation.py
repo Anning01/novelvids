@@ -389,7 +389,7 @@ async def test_folder_creation_sorts_three_episodes_and_creates_independent_task
         params = (await AiTask.get(id=item["task_id"])).request_params
         assert params["model_config_id"] == selected.id
         assert params["remake_context_version"] == 5
-        assert params["remake_action_memory"] is True
+        assert params["remake_action_memory"] == "timeline"
         assert params["remake_shot_limit"] == (await Novel.get(id=result["novel_id"])).shot_duration_max
         assert params["remake_short_storyboard"] is True
         assert params["remake_cast_appearances"] is True

@@ -366,3 +366,24 @@ def motion_memory_instruction(language, *, batch):
             "Prefix actual narration and dialogue with absolute source times. Use sound_design.ambience for background audio and cues for timed sounds with absolute start/end fields. No embedded timecodes in prose. "
             "internal_cuts are guide edits, preserve other actual changes of angle. output_seconds is the whole-second target. "
             "Transcribe actual speech, use shot-local unique asset references and use the same action timeline for optional segments.")
+
+
+def timeline_instruction(language, *, batch):
+    if language == 'zh':
+        source = ('整片只附一次。按给定区间和镜号写齐，每镜承接上一镜末帧。' if batch else
+                  '最后一段是本镜原片；前一段及 confirmed_handoff 供判断上一镜末帧。')
+        return (source + '在 actions 中按发生顺序写最终画面，每条只填原片绝对秒数 start、end 和要保存的 text。'
+                '先看切点两边：谁持有什么、手停在哪里、物体还在移动还是已经停下。换角度、换景别或出现字幕时，'
+                '承接已经完成的部分，只写新的视角、剩余动作和新变化。比如手已经递到对方面前，反打时写手仍举着和对方的反应。'
+                '原片确有第二次起手就照实写。visual_prose 只写本镜开场，last_visible_state 只写末帧。'
+                '声音底色写在 sound_design.ambience，音效和原片绝对起止秒写在 cues。旁白和对白按原声记录。'
+                'asset_refs、dialogue、narration、last_visible_state 都是分镜字段，与 sound_design 同级。')
+    source = ('Use the full source once. Cover every numbered interval and carry forward the preceding final frame. '
+              if batch else 'The last clip is the target. Use the preceding clip and any confirmed_handoff for its opening state. ')
+    return (source + 'Write each final action in order as absolute source seconds start, end and the text to save. '
+            'At each edit observe possession, hand position and motion on both sides. After a reverse angle, framing change or '
+            'caption, describe the held state, remaining motion and new details. If a hand is already extended, show the '
+            'held hand and the recipient’s reaction. Preserve actual second starts. visual_prose is the opening frame; '
+            'last_visible_state is the final frame. Put background audio in sound_design.ambience and timed audio in cues '
+            'using absolute source seconds. Transcribe actual speech. asset_refs, dialogue, narration and last_visible_state '
+            'belong to the shot alongside sound_design.')

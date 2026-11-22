@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
-from schemas.scene import BlockingMap, SceneLayout, SoraScenePromptConfig
+from schemas.scene import BlockingMap, SceneLayout, SoraScenePromptConfig, ScenePromptSegment as BaseScenePromptSegment
 from schemas.video import VideoGenerationOptions
 from schemas.video_export import ExportEnhanceIn
 
@@ -103,6 +103,13 @@ class RemakeTimedAssets(RemakeCastAssets):
     scenes: list[TimedVisualAsset] = Field(max_length=100)
     objects: list[TimedVisualAsset] = Field(max_length=100)
 
+    @field_validator("characters", "scenes", "objects", mode="before")
+    @classmethod
+    def unpack_named_fields(cls, value, info):
+        from schemas.remake_asset_format import unpack_asset_rows
+        item_type = TimedCharacter if info.field_name == "characters" else TimedVisualAsset
+        return unpack_asset_rows(value, item_type.model_fields)
+
 
 def remake_asset_schema(params):
     if params.get("remake_asset_appearances"):
@@ -138,7 +145,17 @@ class RemakeBlockingMap(BlockingMap):
         return value
 
 
+class ScenePromptSegment(BaseScenePromptSegment):
+    """一次生成请求内的小镜头；编号和起止时间由渲染器产生。"""
+
+    def reject_model_owned_numbering_and_shorthand(self):
+        # Remake stores the source model's wording verbatim.
+        return self
+
+
 class RemakeShot(StructuredSkillShot):
+    segments: list[ScenePromptSegment] = Field(default_factory=list,
+        description=SoraScenePromptConfig.model_fields["segments"].description)
     blocking_map: RemakeBlockingMap | None = None
     model_config = ConfigDict(extra="forbid")
     asset_refs: list[RemakeReference] = Field(max_length=30)

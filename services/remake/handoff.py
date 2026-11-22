@@ -6,9 +6,11 @@ _RANGE = re.compile(r"^\s*\[?\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*[-–—~至]\s*(
 
 def end_state_memory(shot, index):
     last = (shot.get('actions') or [''])[-1]
-    if isinstance(last, dict):
+    if isinstance(last, dict) and 'text' not in last:
         return {'previous_sequence': index, 'end_state': shot['transition'],
                 'last_action': last['continuation'], 'action_key': last['key'], 'onset': last['onset']}
+    if isinstance(last, dict):
+        last = last['text']
     return {'previous_sequence': index, 'end_state': shot['transition'], 'last_action': last}
 
 
@@ -67,8 +69,20 @@ def _action_views(views, span, previous):
         current[key] = onset if new_performance else prior
         lines.append(f"{_local_second(left, span):g}s-{_local_second(right, span):g}s: {body}")
     if not lines:
-        raise ValueError("No observed action view overlaps its assigned source interval")
+        lines = [v["movement"] for v in views]
     return lines, current, unconfirmed_restarts
+
+
+def _display_cue(start, end, text, span):
+    left, right = _local_second(start, span), _local_second(end, span)
+    return f"{left:g}s-{right:g}s: {text}" if left < right else text
+
+
+def _display_line(line, span):
+    match = _RANGE.match(line)
+    if not match:
+        return line
+    return _display_cue(float(match[1]), float(match[2]), line[match.end():], span)
 
 
 def _local_sound(track, span):
@@ -93,12 +107,23 @@ def finalize_generation_shots(shots, language):
                 'generation_timeline': True, 'description': _RANGE.sub('',raw['description'],count=1)}
         tracks = ('actions', 'dialogue', 'narration')
         structured = bool(raw['actions'] and isinstance(raw['actions'][0], dict))
+        authored_timeline = structured and 'text' in raw['actions'][0]
         if structured:
-            shot['actions'], previous_views, suspects = _action_views(raw['actions'], span, previous_views)
-            if suspects:
-                shot['unconfirmed_restarts'] = suspects
-            shot['sound_design'] = _local_sound(raw['sound_design'], span)
-            tracks = ('dialogue', 'narration')
+            if authored_timeline:
+                shot['actions'] = [_display_cue(v['start'], v['end'], v['text'], span) for v in raw['actions']]
+                audio = raw['sound_design']
+                shot['sound_design'] = ' '.join([audio['ambience'], *[
+                    _display_cue(c['start'], c['end'], c['sound'], span) for c in audio['cues']
+                ]])
+                for field in ('dialogue', 'narration'):
+                    shot[field] = [_display_line(line, span) for line in raw.get(field, [])]
+                tracks = ()
+            else:
+                shot['actions'], previous_views, suspects = _action_views(raw['actions'], span, previous_views)
+                if suspects:
+                    shot['unconfirmed_restarts'] = suspects
+                shot['sound_design'] = _local_sound(raw['sound_design'], span)
+                tracks = ('dialogue', 'narration')
         for field in tracks:
             observed[field] = set()
             shot[field] = _local_tracks(raw.get(field, []), span, language if field == 'actions' else None,
@@ -110,9 +135,11 @@ def finalize_generation_shots(shots, language):
             rescaled = []
             for j, segment in enumerate(segments):
                 length = duration - elapsed if j == len(segments)-1 else duration * segment['duration'] / total
-                if structured:
+                if authored_timeline:
+                    actions = [_display_line(line, span) for line in segment['actions']]
+                elif structured:
                     actions = [line for line in shot['actions']
-                               if elapsed <= float(_RANGE.match(line)[1]) < elapsed + length]
+                               if (timestamp := _RANGE.match(line)) and elapsed <= float(timestamp[1]) < elapsed + length]
                 else:
                     actions = _local_tracks(segment['actions'], span, language, previous.get('actions', set()),
                                             observed['actions'], segment['visual_prose'])

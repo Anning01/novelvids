@@ -40,12 +40,14 @@ async def completed_outputs(params, *, keys_only=False):
     results = {}
     async for task in task_history(params):
         fields = ('key',) if keys_only else ('key', 'result')
-        rows = await AgentOperation.filter(Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
+        rows = await AgentOperation.filter(Q(key__startswith='remake:recovered-') | Q(key__startswith='remake:clip:') | Q(key__startswith='model:remake:') | Q(key__startswith="model:structured:RemakeContinuityVerdict:") | Q(key__startswith="model:structured:RemakeSpeechEvidence:") | Q(key__in=['remake:catalog', 'remake:bindings', 'remake:timeline']),
                                            task=task, state='completed').values(*fields)
         for row in rows:
             key = row["key"]
             results.setdefault(key, row.get("result"))
-            if key in ASSET_RECEIPT_KEYS:
+            if key.startswith("remake:recovered-shot:"):
+                results.setdefault("model:remake:RemakeShot:" + key.rsplit(":", 1)[1], row.get("result"))
+            if key in ASSET_RECEIPT_KEYS or key == "remake:recovered-assets":
                 results.setdefault("model:remake:RemakeAssets:1", row.get("result"))
             if key == "model:remake:RemakeShortStoryboard:1-readmit":
                 results.setdefault(key.removesuffix("-readmit"), row.get("result"))
@@ -111,6 +113,9 @@ async def reconcile_retry(previous):
     params = {**previous.request_params, "retry_of_task_id": str(previous.id)}
     if not params.get("remake_context_version"):
         return
+    if params.get("remake_action_memory"):
+        from services.remake.output_recovery import recover_failed_material
+        await recover_failed_material(previous)
     done = await completed_outputs(params, keys_only=True)
     async for task in task_history(params):
         RemakeShot, RemakeShortStoryboard = shot_contracts(task.request_params)

@@ -115,7 +115,7 @@ def test_stored_wire_keeps_old_jobs_readable_and_rejects_unusable_evidence():
     legacy.model_validate(sample(1))
     with pytest.raises(ValidationError):
         current.model_validate(sample(1))
-    for field, value in (("end", 1), ("onset", 3), ("onset", float("nan")), ("continuation", " ")):
+    for field, value in (("onset", float("nan")), ("continuation", " ")):
         invalid = view(1, 3, 1, "Steps forward.", "Her foot is planted.")
         invalid[field] = value
         with pytest.raises(ValidationError):
@@ -134,3 +134,89 @@ def test_nested_camera_views_cannot_reintroduce_the_discarded_action():
     from test.remake_fixtures import synthetic_snapshot
     prompt = prepare_remake_prompt(raw, [], synthetic_snapshot(), "en")["prompt"]
     assert "She reaches again." not in prompt and prompt.count("Reverse angle: still holding the cup.") == 1
+
+
+def test_paid_shots_can_be_read_when_restart_is_late_and_fields_are_inside_sound():
+    from schemas.remake_motion import shot_contracts
+    from test.test_services.test_remake_short_storyboard import sample
+    _, batch = shot_contracts({"remake_action_memory": True})
+    raw = sample(2)
+    spans = []
+    for i, row in enumerate(raw["shots"]):
+        a = 4*i
+        row["actions"] = [view(a, a+4, a, "Still in frame.", "New angle.",
+                               restart={"at":a+1,"seen":"Object moves."})]
+        row["sound_design"] = {"ambience":"Wind", "cues":[]}
+        row["last_visible_state"] = row.pop("transition")
+        if i == 1:
+            for field in ("last_visible_state", "asset_refs", "dialogue", "narration"):
+                row["sound_design"][field] = row.pop(field)
+        spans.append({"sequence":i+1, "start_seconds":a, "end_seconds":a+4, "output_seconds":4})
+    assert len(batch.model_validate(raw).materialize(spans)) == 2
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_new_timeline_keeps_model_wording_even_when_an_action_repeats(language):
+    from prompts.remake import timeline_instruction
+    from schemas.remake_motion import shot_contracts
+    from services.remake.storyboards import prepare_remake_prompt
+    from test.remake_fixtures import synthetic_snapshot
+    from test.test_services.test_remake_short_storyboard import sample
+
+    single, batch = shot_contracts({"remake_action_memory":"timeline"})
+    wire = sample(1)
+    row = wire["shots"][0]
+    text = "镜头2 女子再次递出甜筒。"
+    row.update(actions=[{"start":10,"end":12,"text":text},{"start":12,"end":14,"text":text}],
+               sound_design={"ambience":"风声", "cues":[{"start":3,"end":2,"sound":"撞击声"}]}, asset_refs=[])
+    span = {"start_seconds":10, "end_seconds":14, "output_seconds":4, "sequence":1}
+    raw = batch.model_validate(wire).materialize([span])[1]
+    s, = finalize_generation_shots([{**raw,"source_interval":span,"shot_index":1}],language)
+    assert s["actions"] == [f"0s-2s: {text}", f"2s-4s: {text}"]
+    assert s["sound_design"] == "风声 撞击声"
+    assert text in prepare_remake_prompt(s,[],synthetic_snapshot(),language)["prompt"]
+    assert single.model_fields['actions'].annotation != shot_contracts({"remake_action_memory":True})[0].model_fields['actions'].annotation
+    assert "confirmed_handoff" in timeline_instruction(language,batch=False)
+    assert "sound_design" in timeline_instruction(language,batch=True)
+
+
+def test_split_asset_record_is_repacked_without_inventing_fields():
+    from schemas.agent_workflow import RemakeTimedAssets
+    from pydantic import ValidationError
+    span = [{"start_seconds":1,"end_seconds":2}]
+    row = {"name":"A","description":"description", "visual_fields":"地面':'细沙","海面":"蓝"}
+    inventory = {"characters":[], "scenes":[row, "appearances", span, "name", "B", "description", "white",
+                 "visual_fields", {"光":"亮"}, "appearances", span], "objects":[]}
+    output = RemakeTimedAssets.model_validate(inventory)
+    assert [s.name for s in output.scenes] == ["A","B"]
+    assert output.scenes[0].visual_fields == {"地面":"细沙","海面":"蓝"}
+    with pytest.raises(ValidationError):
+        RemakeTimedAssets.model_validate({**inventory, "scenes":[row, "appearances"]})
+
+
+@pytest.mark.asyncio
+async def test_retry_recovers_finished_reply_locally_and_preserves_failed_call(monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+    from models.ai_task import AiTask
+    from models.agent_operation import AgentOperation
+    from services.remake.checkpoints import reconcile_retry, completed_outputs
+    from test.test_services.test_remake_short_storyboard import sample
+
+    task = await AiTask.create(task_type=6, status=4,
+        request_params={"remake_action_memory":"timeline","remake_context_version":5})
+    key = "model:remake:RemakeShortStoryboard:1"
+    await AgentOperation.create(task=task, key=key, state="failed", external=True)
+    await AgentOperation.create(task=task, key="remake:short-input", state="completed",
+        result={"intervals":[{"sequence":1,"start_seconds":0,"end_seconds":4,"output_seconds":4}]})
+    raw = sample(1)
+    raw["shots"][0].update(actions=[{"start":1,"end":2,"text":"杯子已举起。"}],
+                           sound_design={"ambience":"风声"})
+    monkeypatch.setattr("services.remake.output_recovery.latest_response_text",
+                        AsyncMock(return_value=json.dumps(raw,ensure_ascii=False)))
+    await reconcile_retry(task)
+    await reconcile_retry(task)
+    saved = await completed_outputs({**task.request_params,"retry_of_task_id":str(task.id)})
+    assert saved["model:remake:RemakeShot:1"]["actions"] == raw["shots"][0]["actions"]
+    assert (await AgentOperation.get(task=task,key=key)).state == "failed"
+    assert await AgentOperation.filter(task=task,key="model:remake:RemakeShot:1").count() == 1

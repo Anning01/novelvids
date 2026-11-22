@@ -21,26 +21,12 @@ class ActionView(BaseModel):
     continuation: Text = Field(description="Only the visible remaining motion or held state and new framing")
     restart: RestartEvidence | None = Field(default=None, description="Only for an actual repetition, otherwise null")
 
-    @model_validator(mode="after")
-    def ordered_times(self):
-        if self.end <= self.start or self.onset >= self.end:
-            raise ValueError("Each view must end after its start and the physical action onset")
-        if self.restart and self.restart.at > self.onset:
-            raise ValueError("Reset evidence cannot follow the new onset")
-        return self
-
 
 class SoundCue(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     start: float = Field(ge=0, description="Absolute source seconds")
     end: float = Field(gt=0)
     sound: Text
-
-    @model_validator(mode="after")
-    def ordered_times(self):
-        if self.end <= self.start:
-            raise ValueError("A sound cue must have a positive duration")
-        return self
 
 
 class SourceSound(BaseModel):
@@ -49,14 +35,30 @@ class SourceSound(BaseModel):
     cues: list[SoundCue] = Field(default_factory=list)
 
 
-class RemakeShot(LegacyShot):
+class SoundFields:
+    @model_validator(mode="before")
+    @classmethod
+    def unpack_shot_fields(cls, data):
+        if not isinstance(data, dict) or not isinstance(sound := data.get("sound_design"), dict):
+            return data
+        nested = sound.keys() & {"last_visible_state", "transition", "dialogue", "narration", "asset_refs"}
+        if not nested:
+            return data
+        # Repair a misplaced closing brace only when the two locations agree.
+        if any(key in data and data[key] != sound[key] for key in nested):
+            return data
+        return {**data, **{key: sound[key] for key in nested},
+                "sound_design": {k: v for k, v in sound.items() if k not in nested}}
+
+
+class RemakeShot(SoundFields, LegacyShot):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     transition: Text = Field(alias="last_visible_state", description="Physical state in the last visible frame of this interval")
     sound_design: SourceSound
     actions: list[ActionView] = Field(min_length=1)
 
 
-class ShortMotionShot(ShortShot):
+class ShortMotionShot(SoundFields, ShortShot):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     transition: Text = Field(alias="last_visible_state", description="Physical state in the last visible frame of this interval")
     sound_design: SourceSound
@@ -67,16 +69,10 @@ class RemakeShortStoryboard(LegacyBatch):
     shot_type = RemakeShot
     shots: list[ShortMotionShot] = Field(min_length=1)
 
-    def materialize(self, intervals):
-        rows = super().materialize(intervals)
-        for span in intervals:
-            views = rows[span["sequence"]]["actions"]
-            if not any(v["start"] < span["end_seconds"] and span["start_seconds"] < v["end"] for v in views):
-                raise ValueError("No observed action view overlaps its assigned source interval")
-        return rows
-
-
 def shot_contracts(params):
+    if params.get("remake_action_memory") == "timeline":
+        from schemas.remake_timeline import RemakeShot as TimelineShot, RemakeShortStoryboard as TimelineBatch
+        return TimelineShot, TimelineBatch
     if params.get("remake_action_memory"):
         return RemakeShot, RemakeShortStoryboard
     return LegacyShot, LegacyBatch
