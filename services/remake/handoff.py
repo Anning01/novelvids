@@ -33,10 +33,7 @@ def _local_tracks(lines, span, language, previous, observed, opening):
         if a < start and event in previous:
             if language is None:
                 continue  # Same utterance and source occurrence already assigned to its onset.
-            body = (f'从当前状态继续：{opening}；不重复起手。' if language == 'zh' else
-                    f'Continue from the current state: {opening}. Do not restart the movement.')
-        elif a < start and language is not None:
-            body = ('仅延续跨切点动作：' if language == 'zh' else 'Continue the ongoing movement: ') + body
+            body = opening
         local.append(f'{left:g}s-{right:g}s: {body}')
     return local
 
@@ -150,10 +147,6 @@ def finalize_generation_shots(shots, language):
             round((t - span['start_seconds']) * duration / (span['end_seconds'] - span['start_seconds']), 3)
             for t in span.get('internal_cuts', []) if span['start_seconds'] < t < span['end_seconds']
         ]
-        if result:
-            prior = result[-1]
-            shot['handoff'] = {**end_state_memory(prior, prior['shot_index']),
-                               'source_end_seconds': prior['source_interval']['end_seconds']}
         result.append(shot)
         previous = observed
     return result

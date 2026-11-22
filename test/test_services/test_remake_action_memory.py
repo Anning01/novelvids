@@ -36,7 +36,7 @@ def test_motion_across_generated_shots_and_independent_simultaneous_actions():
     assert previous["actions"][0].endswith(a["movement"])
     assert current["actions"][0].endswith(b["continuation"])
     assert current["actions"][1].endswith(c["movement"])
-    assert current["handoff"]["last_action"] == previous["actions"][-1]
+    assert "handoff" not in current
 
 
 @pytest.mark.parametrize("batch", [False, True])

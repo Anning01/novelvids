@@ -42,11 +42,11 @@ def test_completed_throw_is_excluded_but_a_distinct_repeat_and_the_catch_survive
     x,y=finalize_generation_shots([a,b],'zh')
     assert (x['duration'],y['duration']) == ('4s','5s')
     assert len(y['actions'])==3 and sum('抛出甜筒。' in l for l in y['actions'])==1
-    assert '不重复起手' in y['actions'][0] and y['actions'][0].startswith('0s-')
+    assert y['actions'][0].startswith('0s-') and y['actions'][0].endswith(b['visual_prose'])
     assert '女子接住甜筒' in y['actions'][1]
-    assert y['handoff']['end_state']==a['transition']
+    assert 'handoff' not in y
     prompt=prepare_remake_prompt(y,[],synthetic_snapshot(),'zh')['prompt']
-    assert a['transition'] in prompt and prompt.count(y['actions'][1])==1
+    assert a['transition'] not in prompt and prompt.count(y['actions'][1])==1
     assert '总时长：@{镜头时长:5s}' in prompt
 
 
@@ -76,3 +76,13 @@ async def test_remote_worker_receives_frozen_shot_limit(tmp_path):
     with pytest.raises(ValidationError):
         await remote.split(tmp_path,timeline=True,shot_limit=12)
     remote._command.assert_awaited_once_with('split_timeline',shot_limit=12)
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_old_shot_with_saved_memory_renders_only_current_content(language):
+    raw = {**remake_shot(2, refs=[]), "generation_timeline": True,
+           "visual_prose": "On the beach, an airplane passes the sign.",
+           "handoff": {"end_state": "PREVIOUS_SHOT_CONTENT"}}
+    result = prepare_remake_prompt(raw, [], synthetic_snapshot(), language)
+    assert raw["visual_prose"] in result["prompt"]
+    assert "PREVIOUS_SHOT_CONTENT" not in result["prompt"]

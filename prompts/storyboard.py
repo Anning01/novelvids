@@ -459,8 +459,7 @@ def format_storyboard_prompt(
     entities: Sequence[StoryboardEntity] = (),
     strategy: StoryboardStrategyPrompt = CINEMATIC_STORYBOARD_STRATEGY,
     localize_strategy: bool = True,
-    source_handoff: bool = False,
-    preceding_end_state: str | None = None,
+    generation_timeline: bool = False,
     internal_cuts: Sequence[float] = (),
 ) -> str:
     """Render one structured shot as the stable professional video prompt."""
@@ -486,9 +485,9 @@ def format_storyboard_prompt(
     if segments:
         details = [
             _format_primary_generation_instruction(shot, language),
-            *_format_prompt_segments(segments, language, shot.actions if source_handoff else ()),
+            *_format_prompt_segments(segments, language, shot.actions if generation_timeline else ()),
         ]
-        if not source_handoff:
+        if not generation_timeline:
             if narration:
                 details.extend([prompt_label("【旁白 / 内心 OS】", language), narration])
             if dialogue:
@@ -499,7 +498,7 @@ def format_storyboard_prompt(
             f"{prompt_label('【镜头1 · ', language)}{duration_token} · {shot.shot_size_and_camera} · {shot.description}{prompt_label('】', language)}",
             _format_primary_generation_instruction(shot, language),
         ]
-        if not source_handoff:
+        if not generation_timeline:
             details.extend([prompt_label("【详细执行】", language), *shot_body_parts])
     blocking = getattr(shot, "blocking_map", None)
     layout = []
@@ -527,9 +526,6 @@ def format_storyboard_prompt(
             _format_asset_references(shot, entities, language),
             "",
             prompt_label("【全局前置条件】", language),
-            *([("上一镜结束时（只供衔接，不重演）：" if language == "zh" else
-                "Preceding ending (continuity only; do not replay): ") + preceding_end_state]
-              if source_handoff and preceding_end_state else []),
             f"{prompt_label('时间：', language)}{shot.time_setting}",
             f"{prompt_label('环境：', language)}{shot.environment}",
             f"{prompt_label('空间关系：', language)}{shot.spatial_relationships}",

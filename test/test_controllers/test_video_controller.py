@@ -803,7 +803,8 @@ async def test_并发查询同一完成任务只收口一次():
 
 
 @pytest.mark.asyncio
-async def test_返回尾帧_注入同章下一分镜参考图():
+@pytest.mark.parametrize("requested", [False, None, True])
+async def test_返回尾帧_注入同章下一分镜参考图(requested):
     scene, config = await _create_scene_with_config()
     next_scene = await Scene.create(
         chapter_id=scene.chapter_id,
@@ -820,7 +821,7 @@ async def test_返回尾帧_注入同章下一分镜参考图():
         metadata={
             "model_config_id": config.id,
             "video_model_type": "seedance_2",
-            "return_last_frame": True,
+            **({"return_last_frame": requested} if requested is not None else {}),
         },
     )
 
@@ -840,6 +841,11 @@ async def test_返回尾帧_注入同章下一分镜参考图():
         result = await video_controller.query_status(video.id)
 
     await next_scene.refresh_from_db()
+    if not requested:
+        assert next_scene.prompt == "下一镜头"
+        assert next_scene.metadata["video_reference_media"] == [{"type": "image", "url": "https://cdn.example.com/manual.png"}]
+        mock_frame_download.assert_not_awaited()
+        return
     references = next_scene.metadata["video_reference_media"]
     assert references[0]["url"] == f"/media/video-references/last-frame-{video.id}.png"
     assert references[0]["source_scene_id"] == scene.id

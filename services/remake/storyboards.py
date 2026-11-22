@@ -29,7 +29,7 @@ def prepare_remake_prompt(raw, catalog, snapshot, language, *, strategy_key=None
         prohibitions=resource["restrictions"], generation_rules=resource["rules"])
     prepared = shot.model_copy(update=normalized_storyboard_reference_fields(shot, entities))
     prompt = format_storyboard_prompt(prepared, language, entities=entities, strategy=strategy, localize_strategy=False,
-                                     source_handoff=raw.get("generation_timeline", False), preceding_end_state=(raw.get("handoff") or {}).get("end_state"),
+                                     generation_timeline=raw.get("generation_timeline", False),
                                      internal_cuts=raw.get("internal_cut_seconds", ()))
     used = {entity.name for entity in referenced_entities(prepared, entities)} | {reference['asset_name'] for reference in references}
     references = [{'asset_id':item['id'], 'asset_name':item['name'], 'asset_type':item['type']}
