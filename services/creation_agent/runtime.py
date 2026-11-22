@@ -687,7 +687,7 @@ async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
     from services.creation_agent.skill_execution import current_execution
     from services.creation_agent.receipts import production_receipts
     from services.model_resolution import resolve_scope_configs
-    from services.video.capabilities import capabilities_for as video_capabilities
+    from services.video.capabilities import capabilities_for_config as video_capabilities
     from services.image_generation.capabilities import capabilities_for as image_capabilities
     from config import settings
 
@@ -700,7 +700,7 @@ async def get_production_context(ctx: RunContext[CreationAgentDeps]) -> dict:
     for task_type, kind in ((2, 'image'), (4, 'video')):
         for item in await resolve_scope_configs(task_type, team_id):
             capabilities = (image_capabilities(item.image_model_type) if kind == 'image'
-                else video_capabilities(item.video_model_type, item.api_protocol))
+                else video_capabilities(item))
             models.append({'id': item.id, 'name': item.name, 'kind': kind, 'capabilities': capabilities.public_dict()})
     from models.remake_source import RemakeSource
     sources = await RemakeSource.filter(novel_id=execution.params['novel_id']).values('id', 'chapter_id', 'episode_number', 'media_status')

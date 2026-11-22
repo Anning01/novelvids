@@ -4,6 +4,7 @@ from utils.messages import localized_message
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -35,6 +36,33 @@ async def agent_configuration() -> AgentConfiguration:
 async def agent_models(ctx: AuthContext):
     return await resolve_scope_configs(AiTaskTypeEnum.creation_agent.value, ctx.team_id,
         capability_filter=lambda config: config.supports_tool_calls)
+
+
+async def chapter_extraction_from_chat(conversation, request, ctx):
+    if (request.write_scope != 'chapter' or not request.chapter_id or request.targets
+            or request.production_intents or request.plan_confirmation or request.resume_from_task_id):
+        return None
+    command = request.message.casefold().strip().rstrip('。！!.').strip()
+    explicit = re.fullmatch(r'(?:请)?(?:帮我)?(?:再|重新|再次)?提取(?:一次)?(?:本[章集]的?)?(?:全部|所有)?资产(?:一次)?', command)
+    explicit = bool(explicit or command in {'extract assets', 'extract chapter assets', 'extract assets again'})
+    if not explicit and command not in {'再提取一次', '重新提取', '再次提取', '重新提取一次', '再执行一次', '再试一次', '重试', 'try again', 'retry'}:
+        return None
+
+    last = await AgentMessage.filter(conversation=conversation, role='user').select_related('task').order_by('-id').first()
+    prior = {}
+    if last and last.task.task_type == AiTaskTypeEnum.extraction and last.task.status in (3, 4, 5):
+        params = last.task.request_params
+        if (params.get('chapter_id') == request.chapter_id and params.get('team_id') == ctx.team_id
+                and not params.get('origin_run_id')):
+            prior = params
+    if not explicit and not prior:
+        return None
+
+    from controllers.chapter import chapter_controller
+    return await chapter_controller.extract(request.chapter_id, conversation_id=conversation.id,
+        user_id=ctx.user.id if ctx.user else None, team_id=ctx.team_id,
+        assistant_model_config_id=request.model_config_id or prior.get('assistant_model_config_id'),
+        skill_id=prior.get('creative_method', {}).get('id'), require_new_task=True)
 
 
 class AgentSessions:
@@ -127,12 +155,6 @@ class AgentSessions:
             raise HTTPException(422, localized_message('选中目标超过本次运行上限'))
         await self.validate_scope(conversation.novel_id, request)
         models = await agent_models(ctx)
-        chosen_id = recovery[0].request_params['model_config_id'] if recovery else request.model_config_id
-        chosen = next((model for model in models if chosen_id is None or model.id == chosen_id), None)
-        if chosen is None:
-            raise HTTPException(422, localized_message('请配置已启用且支持工具调用的创作助手模型'))
-        if recovery and chosen.id != recovery[0].request_params['model_config_id']:
-            raise HTTPException(409, '恢复任务必须使用原模型')
         payload = request.model_dump(mode="json")
         if request.resume_from_task_id is None:
             payload.pop('resume_from_task_id', None)
@@ -160,6 +182,17 @@ class AgentSessions:
                     return await AiTask.get(id=resumed.result['task_id'])
             if current.active_task_id and await AiTask.filter(id=current.active_task_id, status__in=ACTIVE_STATUSES).using_db(connection).exists():
                 raise HTTPException(409, localized_message('当前会话仍在执行，请等待完成或停止后继续'))
+            extraction = await chapter_extraction_from_chat(current, request, ctx)
+            if extraction:
+                from services.creation_agent.skill_execution import require_workflow_model
+                chosen, _ = await require_workflow_model(extraction.request_params)
+                return await self._record_run(current, extraction, request, payload, digest, chosen, connection)
+            chosen_id = recovery[0].request_params['model_config_id'] if recovery else request.model_config_id
+            chosen = next((model for model in models if chosen_id is None or model.id == chosen_id), None)
+            if chosen is None:
+                raise HTTPException(422, localized_message('请配置已启用且支持工具调用的创作助手模型'))
+            if recovery and chosen.id != recovery[0].request_params['model_config_id']:
+                raise HTTPException(409, '恢复任务必须使用原模型')
             if recovery:
                 from services.creation_agent.run_recovery import resume_source
                 recovery = await resume_source(current, request.resume_from_task_id)
@@ -206,16 +239,20 @@ class AgentSessions:
                 await copy_planning_receipts(recovery[3], task)
                 await AgentOperation.create(task_id=request.resume_from_task_id, key='recovery:resumed',
                     state='completed', result={'task_id': str(task.id)})
-            await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
-                request_hash=digest, role="user", content=request.message, run_input=payload, using_db=connection)
-            await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
-                request_hash=digest, role="assistant", model_snapshot={
-                    "id": chosen.id, "name": chosen.name, "model": chosen.model,
-                    "scope": chosen.scope, "pricing": chosen.pricing,
-                    "image_model_type": None, "video_model_type": None,
-                }, using_db=connection)
-            await AgentConversation.filter(id=current.id).using_db(connection).update(active_task_id=task.id)
-            return task
+            return await self._record_run(current, task, request, payload, digest, chosen, connection)
+
+    @staticmethod
+    async def _record_run(current, task, request, payload, digest, chosen, connection):
+        await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
+            request_hash=digest, role="user", content=request.message, run_input=payload, using_db=connection)
+        await AgentMessage.create(conversation=current, task=task, request_id=request.request_id,
+            request_hash=digest, role="assistant", model_snapshot={
+                "id": chosen.id, "name": chosen.name, "model": chosen.model,
+                "scope": chosen.scope, "pricing": chosen.pricing,
+                "image_model_type": None, "video_model_type": None,
+            }, using_db=connection)
+        await AgentConversation.filter(id=current.id).using_db(connection).update(active_task_id=task.id)
+        return task
 
 
 agent_sessions = AgentSessions()

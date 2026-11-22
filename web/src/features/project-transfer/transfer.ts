@@ -1,19 +1,23 @@
 import { API_BASE, authHeaders, request } from '@/api'
 import { tr } from '@/i18n'
 import type { SingleResponse } from '@/types'
-import { parseWorkbenchState, WORKBENCH_LAYOUT_VERSION } from '@/features/workbench/store/workbenchPersistence'
+import { parseWorkbenchState, type SavedWorkbenchStateV2, WORKBENCH_LAYOUT_VERSION } from '@/features/workbench/store/workbenchPersistence'
+import { loadWorkbenchViewForExport } from '@/features/workbench/viewport/workbenchViewportPersistence'
 import { BrowserMedia } from './canvasMedia'
 import { ProjectZip } from './projectZip'
 
 interface ExportMedia { member: string; url: string; authenticated: boolean; storage: 'media' | 'remake' | 'export' }
-interface ExportPlan { project: Record<string, unknown>; files: ExportMedia[] }
+interface ExportPlan {
+  project: { chapters: Array<{ id: number }>; canvases: Record<string, SavedWorkbenchStateV2> }
+  files: ExportMedia[]
+}
 
 export async function exportProject(id: number, signal: AbortSignal) {
   const route = `/novel/${id}/transfer`
   let {data: plan} = await request<SingleResponse<ExportPlan>>(route, {signal})
   const browserMedia = new BrowserMedia()
   const layouts: Record<string, unknown> = {}
-  for (const chapter of plan.project.chapters as Array<{id:number}>) {
+  for (const chapter of plan.project.chapters) {
     const key = `novelvids:canvas:${chapter.id}:layout:v`
     const saved = localStorage.getItem(key + WORKBENCH_LAYOUT_VERSION) || localStorage.getItem(key + '1')
     if (!saved) continue
@@ -39,8 +43,16 @@ export async function exportProject(id: number, signal: AbortSignal) {
   for await (const {member,blob} of browserMedia.files(plan.files.length,signal)) {
     media.push({...await archive.add(member,blob,signal),storage:'media' as const})
   }
-  if (Object.keys(layouts).length) plan.project.canvases = browserMedia.attach(plan.project.canvases)
-  const manifest = { format: 'novelvids.project', version: 2, project: plan.project, media }
+  const canvases = { ...plan.project.canvases }
+  for (const { id } of plan.project.chapters) {
+    const view = loadWorkbenchViewForExport(String(id))
+    if (view) {
+      const layout = canvases[id] ?? { version: WORKBENCH_LAYOUT_VERSION, nodes: {}, manualNodes: [], manualEdges: [] }
+      canvases[id] = { ...layout, ...view }
+    }
+  }
+  const project = { ...plan.project, canvases: Object.keys(layouts).length ? browserMedia.attach(canvases) : canvases }
+  const manifest = { format: 'novelvids.project', version: 2, project, media }
   await archive.add('project.json', new Blob([JSON.stringify(manifest)]), signal)
   return archive.finish()
 }

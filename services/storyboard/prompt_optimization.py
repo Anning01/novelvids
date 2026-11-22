@@ -17,12 +17,17 @@ from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 from utils.messages import localized_message
 
 
+async def resolve_prompt_optimizer(model_id, ctx):
+    model = await ai_model_config_controller.get_active(AiTaskTypeEnum.video, model_id, team_id=ctx.team_id)
+    optimizer = snapshot_optimizer(model.video_model_type, Path(settings.CREATION_AGENT_OPTIONAL_SKILLS_PATH))
+    return model, optimizer
+
+
 async def submit_prompt_optimization(scene_id, body, ctx):
     scene = await Scene.get_or_none(id=scene_id).select_related("chapter")
     if not scene:
         raise HTTPException(404, localized_message("分镜不存在"))
-    model = await ai_model_config_controller.get_active(AiTaskTypeEnum.video, body.model_config_id, team_id=ctx.team_id)
-    optimizer = snapshot_optimizer(model.video_model_type, Path(settings.CREATION_AGENT_OPTIONAL_SKILLS_PATH))
+    model, optimizer = await resolve_prompt_optimizer(body.model_config_id, ctx)
     if optimizer["mode"] != "optimize":
         raise HTTPException(422, localized_message("当前视频模型尚未安装提示词优化技能"))
     facts = body.model_dump(exclude={"model_config_id"})
@@ -55,6 +60,9 @@ async def submit_prompt_optimization(scene_id, body, ctx):
 
 class PromptOptimizationHandler(BaseTaskHandler):
     async def execute(self, params):
+        if params.get("operation") == "optimize_chapter_prompts":
+            from services.storyboard.prompt_batch import run_batch
+            return await run_batch(params)
         optimizer = params["video_optimizer"]
         from prompts.video_optimizer import validate_asset_markers
         async def validate(draft):

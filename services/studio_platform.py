@@ -178,12 +178,17 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
                           supports_strict_output=entry.strict_output, text_api=entry.text_api,
                           processing_options=processing_options)
+            tariff = public_tariff(entry.pricing)
             if row:
+                if entry.video_model_type and tariff.get('billing_unit') == 'second' and tariff.get('prices'):
+                    # Refresh base rates and tiers together; keep locally configured markups.
+                    local = row.pricing or {}
+                    values['pricing'] = {**tariff, **{key: local[key] for key in ('discount', 'discount_description') if key in local}}
                 row.update_from_dict(values)
                 await row.save(using_db=db, update_fields=[*values, "updated_at"])
             else:
                 await AiModelConfig.create(using_db=db, model=entry.id, scope=SYNC_SCOPE,
-                    pricing=public_tariff(entry.pricing) or None, **values)
+                    pricing=tariff or None, **values)
         if unsupported and not seen:
             # Keep local prices and outstanding receipt associations; stale channels must not be offered.
             await synced.exclude(model__in=unsupported).update(is_active=False)

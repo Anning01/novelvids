@@ -167,3 +167,17 @@ it('never falls back to the base when a selected variant no longer exists', asyn
   expect(api.updateAsset).not.toHaveBeenCalled()
   expect(api.updateAssetVariant).not.toHaveBeenCalled()
 })
+
+it('spaces new asset and shot rows for portrait previews before their sizes are measured', () => {
+  graph()
+  store.assets.push({ ...base, id: 2, variants: [] })
+  store.scenes.push({ ...store.scenes[0]!, id: 21, sequence: 2 })
+  store.rebuildGraph()
+  const a = store.nodeByKey('asset-1')!.position
+  const b = store.nodeByKey('asset-2')!.position
+  const shot = store.nodeByKey('shot-20')!.position
+  const nextShot = store.nodeByKey('shot-21')!.position
+  expect(shot.x - a.x).toBeGreaterThan(384)
+  expect(b.y - store.nodeByKey('asset-1-variant-8')!.position.y).toBeGreaterThan(683)
+  expect(nextShot.y - shot.y).toBeGreaterThan(683)
+})

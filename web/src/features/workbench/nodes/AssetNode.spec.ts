@@ -63,7 +63,7 @@ it.each(['light', 'dark'])('loads originals on the canvas and repairs thumbnail 
   expect(image.attributes('src')).toBe('/media/original.png')
   expect(image.attributes('loading')).toBe('lazy')
   expect(wrapper.get('.workbench-asset-image-stack-layer img').attributes('src')).toBe('/media/side-thumbnail.webp')
-  Object.defineProperties(image.element, { naturalWidth: { value: 2048 }, naturalHeight: { value: 1152 } })
+  Object.defineProperties(image.element, { naturalWidth: { value: 2048, configurable: true }, naturalHeight: { value: 1152, configurable: true } })
   await image.trigger('load')
   expect(updateMetadata).toHaveBeenCalledWith(90, { width: 2048, height: 1152 }, undefined)
   expect(wrapper.get('.workbench-node-frame__media-size').text()).toBe('2048 × 1152')
@@ -75,6 +75,15 @@ it.each(['light', 'dark'])('loads originals on the canvas and repairs thumbnail 
     metadata: { workbenchImage: {} } }, generate_capability: false } })
   expect(wrapper.get('.workbench-uploaded-image-preview').attributes('src')).toBe('/media/replacement.png')
   expect(wrapper.find('.workbench-node-frame__media-size').exists()).toBe(false)
+  const stage = wrapper.get<HTMLElement>('.workbench-asset-image-stage')
+  expect(stage.element.style.aspectRatio).toBe('9 / 16')
+  const replacement = wrapper.get<HTMLImageElement>('.workbench-uploaded-image-preview')
+  Object.defineProperties(replacement.element, {
+    naturalWidth: { value: 600, configurable: true },
+    naturalHeight: { value: 400, configurable: true },
+  })
+  await replacement.trigger('load')
+  expect(stage.element.style.aspectRatio).toBe('600 / 400')
   wrapper.unmount()
   delete document.documentElement.dataset.appTheme
 })

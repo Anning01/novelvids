@@ -441,3 +441,19 @@ class ScenePromptOptimization(BaseModel):
     duration: int = Field(gt=0)
     aspect_ratio: str = Field(min_length=1, max_length=32)
     submitted_media: list[PromptMediaReference] = Field(default_factory=list, max_length=256)
+
+
+class BatchPromptShot(ScenePromptOptimization):
+    scene_id: int = Field(gt=0)
+    expected_prompt: str | None
+    cached_prompt: str | None = Field(default=None, min_length=1, max_length=100_000)
+
+
+class ChapterPromptOptimization(BaseModel):
+    shots: list[BatchPromptShot] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def same_model_and_distinct_scenes(self):
+        if len({s.model_config_id for s in self.shots}) != 1 or len({s.scene_id for s in self.shots}) != len(self.shots):
+            raise ValueError('请选择同一模型和不重复的分镜')
+        return self

@@ -40,26 +40,38 @@ export function saveWorkbenchViewport(workspaceKey: string, viewport: WorkbenchV
   if (!workspaceKey || size.width <= 0 || size.height <= 0)
     return;
   try {
-    globalThis.localStorage?.setItem(`${STORAGE_PREFIX}${workspaceKey}`, JSON.stringify(viewportToFocus(viewport, size)));
+    globalThis.localStorage?.setItem(`${STORAGE_PREFIX}${workspaceKey}`, JSON.stringify({ ...viewportToFocus(viewport, size), width: size.width, height: size.height }));
   }
   catch {
     // Storage can be unavailable in private or restricted browser contexts.
   }
 }
 
-export function loadWorkbenchViewport(workspaceKey: string, size: ViewportSize): WorkbenchViewport | null {
-  if (!workspaceKey || size.width <= 0 || size.height <= 0)
-    return null;
+function readSavedFocus(workspaceKey: string) {
   try {
     const serialized = globalThis.localStorage?.getItem(`${STORAGE_PREFIX}${workspaceKey}`);
-    if (!serialized)
-      return null;
-    const focus = JSON.parse(serialized) as Partial<WorkbenchViewportFocus>;
+    if (!serialized) return null;
+    const focus = JSON.parse(serialized) as WorkbenchViewportFocus & Partial<ViewportSize>;
     if (!validNumber(focus.centerX) || !validNumber(focus.centerY) || !validNumber(focus.zoom) || focus.zoom < WORKBENCH_MIN_ZOOM || focus.zoom > WORKBENCH_MAX_ZOOM)
       return null;
-    return focusToViewport(focus as WorkbenchViewportFocus, size);
+    return focus;
   }
   catch {
     return null;
   }
+}
+
+export function loadWorkbenchViewport(workspaceKey: string, size: ViewportSize): WorkbenchViewport | null {
+  if (!workspaceKey || size.width <= 0 || size.height <= 0)
+    return null;
+  const focus = readSavedFocus(workspaceKey);
+  return focus ? focusToViewport(focus, size) : null;
+}
+
+export function loadWorkbenchViewForExport(workspaceKey: string) {
+  const focus = readSavedFocus(workspaceKey);
+  if (!focus || !validNumber(focus.width) || !validNumber(focus.height) || focus.width <= 0 || focus.height <= 0)
+    return null;
+  const canvasSize = { width: focus.width, height: focus.height };
+  return { viewport: focusToViewport(focus, canvasSize), canvasSize };
 }

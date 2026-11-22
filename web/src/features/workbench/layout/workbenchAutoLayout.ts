@@ -45,6 +45,7 @@ const EDGE_AFFINITY: Record<string, number> = {
 const DEFAULT_NODE_SIZE: NodeSize = { width: 360, height: 280 };
 const DEFAULT_ORIGIN: Point = { x: 80, y: 80 };
 const DEFAULT_COLUMN_GAP = 72;
+// Leave room for the floating node title and its selected toolbar.
 const DEFAULT_ROW_GAP = 96;
 const BARYCENTRIC_SWEEPS = 4;
 const HEADER_BAND_ORDER: Record<string, number> = {};
@@ -613,12 +614,7 @@ export function buildWorkbenchAutoLayout(
   reduceEdgeCrossings(orderedColumns, incoming, outgoing, connectionCounts);
   enforcePinnedSequenceOrder(orderedColumns, nodeByKey, incoming, outgoing);
   transposeCrossedNeighbors(orderedColumns, incoming, outgoing)
-  const packedColumns = orderedColumns.flatMap((column) => {
-    const family = workbenchLayoutFamily(column[0]!);
-    return (family === 'shot' || family === 'result')
-      ? packLane(column, sizes, rowGap, maxColumnHeight)
-      : [column];
-  });
+  const packedColumns = orderedColumns.flatMap(column => packLane(column, sizes, rowGap, maxColumnHeight));
 
   const columns = placeShotInputs(packedColumns, outgoing, incoming, sizes, rowGap, maxColumnHeight)
 
@@ -635,7 +631,8 @@ export function buildWorkbenchAutoLayout(
   columns.forEach((column, columnIndex) => {
     let y = mainOriginY + (layoutHeight - columnHeights[columnIndex]!) / 2;
     for (const node of column) {
-      positions[node.key] = { x: columnX[columnIndex]!, y };
+      const x = columnX[columnIndex]! + (columnWidths[columnIndex]! - sizes[node.key]!.width) / 2;
+      positions[node.key] = { x, y };
       y += sizes[node.key]!.height + rowGap;
     }
   });

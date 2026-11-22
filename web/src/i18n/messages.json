@@ -2433,6 +2433,8 @@
     "运行失败": "Run failed",
     "运行中 {p0}%": "Running {p0}%",
     "最近运行已完成": "Latest run completed",
+    "锁定画布": "Lock canvas",
+    "解锁画布": "Unlock canvas",
     "画布已就绪": "Canvas ready",
     "关闭运行异常提示": "Dismiss run error",
     "请选择": "Select",

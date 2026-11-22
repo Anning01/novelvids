@@ -17,6 +17,7 @@ from models.chapter import Chapter
 from models.scene import Scene
 from schemas.scene import (
     BlockingMap,
+    ChapterPromptOptimization,
     SceneBriefOut,
     SceneCreate,
     SceneGenerateCreate,
@@ -144,6 +145,22 @@ async def patch_scene(
 ):
     scenes = await scene_controller.patch(scene_id, scene)
     return ResponseSchema(data=scenes)
+
+
+@router.post("/chapter/{chapter_id}/optimize-prompts", response_model=ResponseSchema[AiTaskOut])
+async def optimize_chapter_prompts(chapter_id: int, body: ChapterPromptOptimization,
+        ctx: AuthContext = Depends(get_auth_context), _: AuthContext = _EDITOR):
+    from services.storyboard.prompt_batch import submit_batch
+    await _ensure_chapter_team_access(chapter_id, ctx)
+    # The production worker picks up committed tasks, including after a restart.
+    return ResponseSchema(data=await submit_batch(chapter_id, body, ctx))
+
+
+@router.get("/chapter/{chapter_id}/optimize-prompts/latest", response_model=ResponseSchema[AiTaskOut | None])
+async def latest_prompt_batch(chapter_id: int, ctx: AuthContext = Depends(get_auth_context)):
+    from services.storyboard.prompt_batch import latest_batch
+    await _ensure_chapter_team_access(chapter_id, ctx)
+    return ResponseSchema(data=await latest_batch(chapter_id, ctx))
 
 
 @router.post("/{scene_id}/optimize-prompt", summary="按所选视频模型优化分镜提示词", response_model=ResponseSchema[AiTaskOut])

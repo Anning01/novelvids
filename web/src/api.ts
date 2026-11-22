@@ -62,7 +62,7 @@ export function authHeaders(): Record<string, string> {
   return headers
 }
 
-const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|\d+\/storyboard-sheet)|video\/(?:generate\/|batch|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
+const isGenerationRequest = (url: string) => /^\/(?:asset\/(?:reference\/\d+|reference-batch)|chapter\/extract\/\d+|novel\/\d+\/(?:analyze|cover)|scene\/(?:generate\/|chapter\/\d+\/optimize-prompts|\d+\/storyboard-sheet)|video\/(?:generate\/|batch|merge|exports(?:\/\d+\/enhance|\/video\/\d+)?))(?:\?|$)/.test(url)
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly code: number, readonly httpStatus: number) { super(message) }
@@ -427,6 +427,12 @@ export const api = {
   videoGenerationHistory: (sceneId: number) => request<SingleResponse<Video[]>>(`/video/scene/${sceneId}/generation-history`),
   selectCurrentVideo: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/select-current`, { method: 'POST' }),
   extractVideoLastFrame: (videoId: number) => request<SingleResponse<Video>>(`/video/${videoId}/last-frame`, { method: 'POST' }),
+  optimizeChapterPrompts: (chapterId: number, shots: Array<{
+    scene_id: number; expected_prompt: string | null; cached_prompt?: string; model_config_id: number
+    generic_prompt: string; generation_mode: 'reference' | 'keyframes'; duration: number; aspect_ratio: string
+    submitted_media: { type: 'image' | 'video' | 'audio'; label: string }[]
+  }>) => request<SingleResponse<AiTask>>(`/scene/chapter/${chapterId}/optimize-prompts`, {method: 'POST', body: JSON.stringify({shots})}),
+  latestPromptBatch: (chapterId: number) => request<SingleResponse<AiTask | null>>(`/scene/chapter/${chapterId}/optimize-prompts/latest`),
   optimizeScenePrompt: (sceneId: number, input: {
     model_config_id: number; generic_prompt: string; generation_mode: 'reference' | 'keyframes'
     duration: number; aspect_ratio: string; submitted_media: { type: 'image' | 'video' | 'audio'; label: string }[]

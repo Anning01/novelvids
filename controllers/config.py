@@ -17,6 +17,7 @@ from services.model_resolution import resolve_scope_configs
 from services.studio_platform import SYNC_SCOPE
 from services.video.capabilities import (
     capabilities_for as video_capabilities_for,
+    capabilities_for_config as configured_video_capabilities,
     protocol_options as video_protocol_options,
     validate_protocol as validate_video_protocol,
 )
@@ -70,13 +71,14 @@ def _validate_input_image_pricing(pricing: dict, label: str) -> None:
             raise HTTPException(status_code=400, detail=localized_message('输入图超出单价 price_per_image 必须为非负数字'))
 
 
-def _validate_video_pricing(pricing: dict, model_type) -> None:
+def _validate_video_pricing(pricing: dict, model_type, instance=None) -> None:
     if pricing.get("type") != "video":
         raise HTTPException(status_code=400, detail=localized_message('视频模型的费用配置 type 必须为 video'))
     prices = pricing.get("prices")
     if not isinstance(prices, dict):
         raise HTTPException(status_code=400, detail=localized_message('视频费用需要 prices 档位对象'))
-    allowed = set(video_capabilities_for(model_type).resolutions)
+    caps = configured_video_capabilities(instance) if instance and instance.scope == SYNC_SCOPE else video_capabilities_for(model_type)
+    allowed = set(caps.resolutions)
     for tier, value in prices.items():
         if tier not in allowed:
             raise HTTPException(status_code=400, detail=localized_message('视频费用包含不支持的分辨率档位：{p1}', p1=f'{tier}'))
@@ -192,7 +194,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
             model_type = data.get("video_model_type") or (
                 instance.video_model_type if instance else None
             )
-            _validate_video_pricing(pricing, model_type)
+            _validate_video_pricing(pricing, model_type, instance)
             return
         if AiTaskTypeEnum.audio_recognition.value in task_types:
             _validate_asr_pricing(pricing)
@@ -341,7 +343,7 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
                 continue
             try:
                 self._validate_video_payload({}, config)
-                capabilities = video_capabilities_for(config.video_model_type, config.api_protocol)
+                capabilities = configured_video_capabilities(config)
             except HTTPException:
                 continue
             result.append({

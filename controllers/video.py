@@ -34,7 +34,7 @@ from services.video.asset_resolver import (
     resolve_image_source,
 )
 from services.video.capabilities import validate_selection
-from services.video.capabilities import capabilities_for
+from services.video.capabilities import capabilities_for_config
 from services.video.content import limit_subject_images
 from services.video.reference_media import (
     reference_mention_syntax,
@@ -418,9 +418,9 @@ class VideoController(CRUDBase[Video, dict, dict]):
         generator = get_generator(config)
         record_model_type = get_record_model_type(config)
         duration = req.duration if req.duration is not None else int(scene.duration or 6)
+        capabilities = capabilities_for_config(config)
         selection = validate_selection(
-            config.video_model_type,
-            api_protocol=config.api_protocol,
+            capabilities,
             generation_mode=req.generation_mode,
             resolution=req.resolution,
             aspect_ratio=req.aspect_ratio,
@@ -444,7 +444,6 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 last_frame = resolve_image_source(last_frame)
             except FileNotFoundError as error:
                 raise HTTPException(400, detail=localized_message('首尾帧图片不存在：{p1}', p1=f'{error}')) from error
-        capabilities = capabilities_for(config.video_model_type, config.api_protocol)
         reference_images: list[str] = []
         image_mentions: dict[str, str] = {}
         reference_videos: list[str] = []

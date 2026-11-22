@@ -8,8 +8,9 @@ import type { CompatibleNodeCreation, WorkbenchConnectionOrigin, WorkbenchNodeCr
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { PanOnScrollMode, SelectionMode, VueFlow } from '@vue-flow/core'
+import { LockKeyhole, Maximize, Minus, Plus, UnlockKeyhole } from 'lucide-vue-next'
 import { MiniMap } from '@vue-flow/minimap'
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { type ComputedRef, computed, markRaw, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { api } from '@/api'
 import { notice } from '@/shared/notice'
 import type { WorkbenchCapabilities } from '@/types'
@@ -59,9 +60,10 @@ import SectionNode from '../nodes/SectionNode.vue'
 import type { NodeSize, Point, WorkbenchEdge, WorkbenchNode, WorkbenchNodeKind, WorkbenchPromptEditor } from '../types/workbenchTypes'
 import { commonMarkerColor, DEFAULT_SECTION_COLOR } from '../graph/nodeAppearance'
 import { useWorkbenchStore } from '../store/workbenchStore'
-import { screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
-import { loadWorkbenchViewport, saveWorkbenchViewport, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
-import './noop.css'
+import { initialCardViewport, screenPointForCenteredNode } from '../viewport/workbenchCoordinates'
+import { focusToViewport, loadWorkbenchViewport, saveWorkbenchViewport, viewportToFocus, WORKBENCH_MAX_ZOOM, WORKBENCH_MIN_ZOOM } from '../viewport/workbenchViewportPersistence'
+import '../styles/workbenchCanvas.css'
+import '../styles/workbenchNodeSizes.css'
 
 const props = withDefaults(defineProps<{ novelId: number; chapterId: number; bootstrap?: ReturnType<typeof api.workbenchBootstrap>; aspectRatio?: string; resolution?: string }>(), {
   aspectRatio: '9:16',
@@ -109,7 +111,7 @@ const promptEditors = computed<WorkbenchPromptEditor[]>(() => (capabilities.valu
 })))
 const restoredViewportChapterId = ref<number | null>(null)
 const zoomActivationKeyCode = canvasZoomModifier()
-const { fitView, getNodes, getViewport, panBy, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
+const { findNode, fitView, getNodes, getViewport, panBy, updateNode, screenToFlowCoordinate, setViewport, userSelectionRect, viewport, vueFlowRef } = useWorkbenchFlow()
 const nodeTypes: NodeTypesObject = { chapter: markRaw(ChapterNode), source_video: markRaw(RemakeSourceNode), ai_decomposition: markRaw(RemakeAnalysisNode), asset: markRaw(AssetNode), audio_reference: markRaw(AudioReferenceNode), digital_human: markRaw(DigitalHumanNode), image_media: markRaw(ImageMediaNode), video_media: markRaw(VideoMediaNode), audio_media: markRaw(AudioMediaNode), shot: markRaw(ShotNode), video_result: markRaw(VideoResultNode), video_enhancement: markRaw(VideoEnhancementNode), watermark: markRaw(WatermarkNode), video_composer: markRaw(VideoComposerNode), section: markRaw(SectionNode), note: markRaw(NoteNode) }
 const edgeTypes = { asset_reference: markRaw(AssetReferenceEdge), shot_sequence: markRaw(ShotSequenceEdge), output_binding: markRaw(OutputBindingEdge) }
 const nodeCreationCandidates: WorkbenchNodeCreationCandidate[] = [
@@ -142,27 +144,40 @@ const visibleStoreEdges = computed(() => store.edges
   .filter(item => item.source !== item.target
     && visibleNodeKeys.value.has(item.source)
     && visibleNodeKeys.value.has(item.target)))
-const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => ({
-  id: item.key, type: item.kind, class: neighborClass, position: item.position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
-  ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px`, ...(item.kind === 'section' ? { '--section-layer': item.zIndex } : {}) } } : {}),
-  data: {
-    ...item.data,
-    kind: item.kind,
-    title: item.title,
-    status: item.status,
-    ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
-    ...(item.kind === 'shot' ? { generate_capability: capabilities.value.generate_video, project_defaults: projectDefaults.value } : {}),
-    ...(() => {
+// Vue Flow owns the live drag. A graph refresh can still request the current coordinates.
+const dragPositions = new Map<string, Point>()
+const nodeDataCache = new WeakMap<WorkbenchNode, ComputedRef<WorkbenchNode['data']>>()
+function projectedNodeData(item: WorkbenchNode) {
+  let cached = nodeDataCache.get(item)
+  if (!cached) {
+    cached = computed(() => {
       const editor = promptEditorForNode(item, promptEditors.value)
-      return editor
-        ? { prompt_editor: editor, prompt_editor_open: promptEditorNodeKey.value === item.key }
-        : { prompt_editor: null, prompt_editor_open: false }
-    })(),
-    ...(item.kind === 'watermark' ? { apply_capability: capabilities.value.apply_watermark, capability_key: 'apply_watermark' } : {}),
-    ...(item.kind === 'video_composer' ? { compose_capability: capabilities.value.compose_video, capability_key: 'compose_video' } : {}),
-    ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
-  },
-})))
+      return {
+        ...item.data,
+        kind: item.kind,
+        title: item.title,
+        status: item.status,
+        prompt_editor: editor,
+        prompt_editor_open: Boolean(editor && promptEditorNodeKey.value === item.key),
+        ...(item.kind === 'asset' ? { generate_capability: capabilities.value.generate_asset } : {}),
+        ...(item.kind === 'shot' ? { generate_capability: capabilities.value.generate_video, project_defaults: projectDefaults.value } : {}),
+        ...(item.kind === 'watermark' ? { apply_capability: capabilities.value.apply_watermark, capability_key: 'apply_watermark' } : {}),
+        ...(item.kind === 'video_composer' ? { compose_capability: capabilities.value.compose_video, capability_key: 'compose_video' } : {}),
+        ...(item.kind === 'section' ? { drop_candidate: sectionDropTargetKey.value === item.key } : {}),
+      }
+    })
+    nodeDataCache.set(item, cached)
+  }
+  return cached.value
+}
+const flowNodes = computed<Node[]>(() => visibleStoreNodes.value.map(item => {
+  const { position } = item
+  return {
+    id: item.key, type: item.kind, class: neighborClass, position: dragPositions.get(item.key) ?? position, zIndex: item.zIndex, selected: store.selectedNodeKeys.includes(item.key),
+    ...(item.size && item.kind !== 'shot' && item.kind !== 'chapter' ? { dimensions: { ...item.size }, style: { width: `${item.size.width}px`, height: `${item.size.height}px`, ...(item.kind === 'section' ? { '--section-layer': item.zIndex } : {}) } } : {}),
+    data: projectedNodeData(item),
+  }
+}))
 const hoveredWireNode = ref('')
 const focusedWireNode = ref('')
 function trackWireFocus(target: EventTarget | null) {
@@ -325,9 +340,9 @@ provide(workbenchKeyboardConnectorKey, {
 })
 
 function canvasNodeSize(item: WorkbenchNode) {
-  const rendered = getNodes.value.find(candidate => candidate.id === item.key)?.dimensions
+  const rendered = findNode(item.key)?.dimensions
   if (rendered && rendered.width > 0 && rendered.height > 0) return { width: rendered.width, height: rendered.height }
-  if (item.kind === 'shot') return { width: 560, height: 760 }
+  if (item.kind === 'shot') return { width: 384, height: 684 }
   if (item.size) return item.size
   if (item.kind === 'video_result') return { width: 360, height: 300 }
   if (item.kind === 'video_enhancement') return { width: 560, height: 480 }
@@ -345,14 +360,17 @@ function nodeGroupGeometry(items: WorkbenchNode[], padding = SECTION_PADDING) {
 function sectionMemberKeys(section: WorkbenchNode) { return Array.isArray(section.data.node_keys) ? section.data.node_keys.filter((key): key is string => typeof key === 'string') : [] }
 function sectionMemberNodes(section: WorkbenchNode) { return sectionMemberKeys(section).map(key => store.nodeByKey(key)).filter((item): item is WorkbenchNode => Boolean(item && item.kind !== 'section')) }
 function nodeCenter(item: WorkbenchNode, position = item.position) { const size = canvasNodeSize(item); return { x: position.x + size.width / 2, y: position.y + size.height / 2 } }
+const sectionsByArea = computed(() => store.nodes.filter(item => item.kind === 'section').sort((left, right) => {
+  const leftSize = left.size || { width: 420, height: 260 }
+  const rightSize = right.size || { width: 420, height: 260 }
+  return leftSize.width * leftSize.height - rightSize.width * rightSize.height || right.zIndex - left.zIndex
+}))
 function sectionContainingPoint(point: Point, excludedKey?: string) {
-  return store.nodes.filter(item => item.kind === 'section' && item.key !== excludedKey).filter((item) => {
+  return sectionsByArea.value.find((item) => {
+    if (item.key === excludedKey) return false
     const size = item.size || { width: 420, height: 260 }
     return point.x >= item.position.x && point.x <= item.position.x + size.width && point.y >= item.position.y && point.y <= item.position.y + size.height
-  }).sort((left, right) => {
-    const leftSize = left.size || { width: 420, height: 260 }; const rightSize = right.size || { width: 420, height: 260 }
-    return leftSize.width * leftSize.height - rightSize.width * rightSize.height || right.zIndex - left.zIndex
-  })[0] || null
+  })
 }
 function reconcileMembership(nodeKeys: string[]) {
   const sections = store.nodes.filter(item => item.kind === 'section')
@@ -379,6 +397,7 @@ async function fitSectionToContent(sectionKey: string) {
 provide(workbenchSectionActionsKey, { fitToContent: fitSectionToContent })
 
 function nodeDragStart(event: NodeDragEvent) {
+  dragPositions.clear()
   if (selectionIntent?.kind === 'node' && selectionIntent.key === event.node.id) {
     applyAuthoritativeSelection(selectionAfterNodeClick(
       selectionIntent.before,
@@ -390,31 +409,39 @@ function nodeDragStart(event: NodeDragEvent) {
   if (item?.kind === 'section') sectionDrag = { sectionKey: item.key, startPosition: { ...item.position }, memberPositions: Object.fromEntries(sectionMemberNodes(item).map(member => [member.key, { ...member.position }])) }
   else sectionDrag = null
 }
-function nodeDrag(event: NodeDragEvent) {
-  if (sectionDrag && event.node.id === sectionDrag.sectionKey) {
-    const delta = { x: event.node.position.x - sectionDrag.startPosition.x, y: event.node.position.y - sectionDrag.startPosition.y }
-    store.updateNodeLayout(sectionDrag.sectionKey, event.node.position)
-    Object.entries(sectionDrag.memberPositions).forEach(([key, position]) => store.updateNodeLayout(key, { x: position.x + delta.x, y: position.y + delta.y }))
-    return
+function trackDraggedPositions(event: NodeDragEvent, previewMembers: boolean) {
+  for (const node of event.nodes?.length ? event.nodes : [event.node]) {
+    dragPositions.set(node.id, node.position)
   }
-  const draggedNodes = event.nodes?.length ? event.nodes : [event.node]
-  draggedNodes.forEach(node => store.updateNodeLayout(node.id, node.position))
+  if (!sectionDrag || sectionDrag.sectionKey !== event.node.id) return
+  const dx = event.node.position.x - sectionDrag.startPosition.x
+  const dy = event.node.position.y - sectionDrag.startPosition.y
+  for (const [key, start] of Object.entries(sectionDrag.memberPositions)) {
+    const position = { x: start.x + dx, y: start.y + dy }
+    dragPositions.set(key, position)
+    if (previewMembers) updateNode(key, { position })
+  }
+}
+function nodeDrag(event: NodeDragEvent) {
+  trackDraggedPositions(event, true)
+  if (sectionDrag) return
   const item = store.nodeByKey(event.node.id); sectionDropTargetKey.value = item && item.kind !== 'section' ? sectionContainingPoint(nodeCenter(item, event.node.position))?.key || null : null
 }
 function nodeDragStop(event: NodeDragEvent) {
-  const draggedNodes = event.nodes?.length ? event.nodes : [event.node]
-  draggedNodes.forEach(node => store.updateNodeLayout(node.id, node.position))
+  trackDraggedPositions(event, false)
+  for (const [key, position] of dragPositions) store.updateNodeLayout(key, position)
   if (sectionDrag?.sectionKey === event.node.id) { absorbCoveredNodes(event.node.id); sectionDrag = null }
-  else reconcileMembership(draggedNodes.map(node => node.id))
+  else reconcileMembership([...dragPositions.keys()])
+  dragPositions.clear()
   selectionIntent = null
   sectionDropTargetKey.value = null; store.persistLayout()
 }
 function handleNodesChange(changes: NodeChange[]) {
-  if (selectionIntent || suppressNativeSelectionChanges) return
+  if (selectionIntent || suppressNativeSelectionChanges || !changes.some(change => change.type === 'select' || change.type === 'remove')) return
   const next = applyNodeSelectionChanges(
     store.selectedNodeKeys,
     changes,
-    new Set(store.nodes.map(node => node.key)),
+    store.nodesByKey,
   )
   if (!sameSelection(next, store.selectedNodeKeys)) {
     store.selectNodes(next)
@@ -552,11 +579,11 @@ function clearPane() {
   connectionPicker.value = null
   store.clearSelection()
 }
-function canvasSize() { const canvas = document.getElementById('novel-workbench'); const bounds = canvas?.getBoundingClientRect(); return { width: Math.max(1, bounds?.width || window.innerWidth), height: Math.max(1, bounds?.height || window.innerHeight) } }
+function canvasSize() { const bounds = vueFlowRef.value?.getBoundingClientRect(); return { width: Math.max(1, bounds?.width || window.innerWidth), height: Math.max(1, bounds?.height || window.innerHeight) } }
 function visibleNodePosition(size: NodeSize) {
   const bounds = vueFlowRef.value?.getBoundingClientRect()
   if (!bounds || !isWorkbenchFlowReady(bounds)) return { x: 80, y: 80 }
-  return screenToFlowCoordinate(screenPointForCenteredNode(bounds, size))
+  return screenToFlowCoordinate(screenPointForCenteredNode(bounds, size, getViewport().zoom))
 }
 async function ensureNodeVisible(key: string) {
   await nextTick()
@@ -565,7 +592,7 @@ async function ensureNodeVisible(key: string) {
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
 }
 async function addShot() {
-  const created = await store.addShot(visibleNodePosition({ width: 560, height: 760 }))
+  const created = await store.addShot(visibleNodePosition({ width: 384, height: 684 }))
   if (created) await ensureNodeVisible(created.key)
 }
 function addNote() {
@@ -583,11 +610,11 @@ function addVideoComposer(position = visibleNodePosition({ width: 390, height: 4
   return created
 }
 async function addAsset() {
-  const created = await store.addEmptyAsset(visibleNodePosition({ width: 520, height: 293 }))
+  const created = await store.addEmptyAsset(visibleNodePosition({ width: 384, height: 216 }))
   if (created) await ensureNodeVisible(created.key)
 }
 async function uploadMedia(kind: Extract<WorkbenchNodeKind, 'image_media' | 'video_media' | 'audio_media'>, file: File, position?: Point) {
-  const size = kind === 'audio_media' ? { width: 420, height: 170 } : kind === 'image_media' ? { width: 520, height: 360 } : { width: 360, height: 340 }
+  const size = kind === 'audio_media' ? { width: 420, height: 170 } : kind === 'image_media' ? { width: 384, height: 216 } : { width: 360, height: 340 }
   try {
     const created = kind === 'image_media'
       ? await store.uploadImageAsset(file, position ?? visibleNodePosition(size))
@@ -640,7 +667,10 @@ async function dropFiles(event: DragEvent) {
     }
   }
 }
-function moveEnd() { store.viewport = getViewport(); saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize()); store.persistLayout() }
+function moveEnd() {
+  store.viewport = getViewport()
+  saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
+}
 function trackSelectionAutoPanPointer(event: PointerEvent) {
   selectionAutoPanPointer = { clientX: event.clientX, clientY: event.clientY }
   if (selectionIntent?.kind === 'pane' && selectionGestureMoved(
@@ -702,28 +732,38 @@ function startSelectionAutoPan(event: MouseEvent) {
   window.addEventListener('pointercancel', stopSelectionAutoPan, true)
   selectionAutoPanFrame = window.requestAnimationFrame(runSelectionAutoPan)
 }
-async function autoArrange() {
-  const { height } = canvasSize()
+function arrangeMeasuredNodes(recordHistory = false) {
+  const bounds = vueFlowRef.value?.getBoundingClientRect()
+  if (!bounds || !isWorkbenchFlowReady(bounds)) return
   const measuredSizes = Object.fromEntries(getNodes.value.flatMap((item) => {
     const { width, height } = item.dimensions
     return width > 0 && height > 0 ? [[item.id, { width, height } satisfies NodeSize]] : []
   }))
   const fixedNodeKeys = protectedLayoutKeys(store.nodes)
+  const totalArea = Object.entries(measuredSizes).reduce((sum, [key, size]) => (
+    fixedNodeKeys.has(key) ? sum : sum + size.width * size.height
+  ), 0)
   const positions = buildWorkbenchGroupedAutoLayout(visibleStoreNodes.value, visibleStoreEdges.value, {
     sizes: measuredSizes,
-    maxColumnHeight: Math.max(1100, height * 2.2),
+    maxColumnHeight: Math.max(1100, bounds.height * 2.2, Math.sqrt(totalArea * bounds.height / bounds.width)),
     fixedNodeKeys,
   })
   const changed = store.nodes.filter(node => {
     const next = positions[node.key]
     return next && (Math.abs(node.position.x - next.x) > 0.01 || Math.abs(node.position.y - next.y) > 0.01)
   })
-  if (!changed.length) {
+  if (!changed.length) return false
+  if (recordHistory) store.checkpoint()
+  for (const node of changed) {
+    node.position = positions[node.key]!
+  }
+  return true
+}
+async function autoArrange() {
+  if (!arrangeMeasuredNodes(true)) {
     notice.info(tr('画布已整齐，无需移动节点'))
     return
   }
-  store.checkpoint()
-  for (const node of changed) node.position = positions[node.key]!
   await nextTick()
   store.viewport = getViewport()
   saveWorkbenchViewport(String(props.chapterId), store.viewport, canvasSize())
@@ -808,7 +848,7 @@ watch([() => store.selectedNodeKeys[0], canvasTool], ([selectedNodeKey, tool]) =
 })
 
 async function restoreViewport() {
-  if (restoredViewportChapterId.value === props.chapterId) return
+  if (restoredViewportChapterId.value === props.chapterId || store.loading || store.chapterId !== props.chapterId || !store.nodes.length) return
   const bounds = vueFlowRef.value?.getBoundingClientRect()
   if (!bounds || !isWorkbenchFlowReady(bounds)) return
   restoredViewportChapterId.value = props.chapterId
@@ -816,11 +856,32 @@ async function restoreViewport() {
   const saved = loadWorkbenchViewport(workspaceKey, bounds)
   if (saved) {
     await setViewport(saved)
-  } else if (store.nodes.length) {
-    await fitView({ padding: 0.12, minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 0 })
+  } else if (store.loadedLayoutSize) {
+    const size = store.loadedLayoutSize
+    const view = size.width > 0 && size.height > 0
+      ? focusToViewport(viewportToFocus(store.viewport, size), bounds)
+      : store.viewport
+    await setViewport(view)
+  } else {
+    arrangeMeasuredNodes()
+    await nextTick()
+    const dock = vueFlowRef.value?.querySelector('.workbench-canvas-dock')?.getBoundingClientRect()
+    const bottomInset = dock ? Math.max(24, bounds.bottom - dock.top + 16) : 24
+    const firstCard = visibleStoreNodes.value.find(node => node.kind === 'shot')
+      ?? visibleStoreNodes.value.find(node => node.kind === 'asset')
+      ?? visibleStoreNodes.value[0]
+    if (bounds.width <= 600 && firstCard) {
+      await setViewport(initialCardViewport(bounds, firstCard.position, canvasNodeSize(firstCard), bottomInset))
+    } else {
+      await fitView({
+        padding: { x: '32px', top: '56px', bottom: `${bottomInset}px` },
+        minZoom: WORKBENCH_MIN_ZOOM, maxZoom: 0.85, duration: 0,
+      })
+    }
   }
   store.viewport = getViewport()
   saveWorkbenchViewport(workspaceKey, store.viewport, bounds)
+  if (!saved && !store.loadedLayoutSize) store.persistLayout()
 }
 
 const loadError = ref('')
@@ -856,12 +917,20 @@ onBeforeUnmount(() => { mounted = false; store.cancelPendingWork(); stopSelectio
       @node-mouse-leave="hoveredWireNode = ''"
       @focusin="trackWireFocus($event.target)" @focusout="trackWireFocus($event.relatedTarget)"
       @nodes-initialized="restoreViewport" @node-drag-start="nodeDragStart" @node-drag="nodeDrag" @node-drag-stop="nodeDragStop" @nodes-change="handleNodesChange" @pane-click="clearPane" @selection-start="startSelectionAutoPan" @selection-end="stopSelectionAutoPan" @move-end="moveEnd" @connect="connectNodes" @connect-start="handleConnectStart" @connect-end="handleConnectEnd">
-      <Background variant="lines" color="var(--app-border-strong)" :gap="38" :line-width="1" />
-      <MiniMap aria-hidden="true" :tabindex="-1" pannable zoomable />
-      <Controls position="bottom-right" />
-      <CanvasToolSwitcher v-model="canvasTool" />
+      <Background variant="dots" pattern-color="var(--canvas-dot)" :gap="24" :size="2.4" aria-hidden="true" />
+      <MiniMap aria-hidden="true" :tabindex="-1" :width="152" :height="96" pannable zoomable />
       <CatalogResourcePicker :open="libraryOpen" @close="libraryOpen = false" @choose="addLibraryVideos" />
-      <WorkbenchToolbar @choose-library="libraryOpen = true" :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :can-color-selection="selectedNodes.length > 1" :selection-color="commonMarkerColor(selectedNodes)" @color-selection="store.setNodeColors(store.selectedNodeKeys, $event)" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+      <div class="workbench-canvas-dock">
+        <CanvasToolSwitcher v-model="canvasTool" />
+        <WorkbenchToolbar @choose-library="libraryOpen = true" :running="generating" :can-undo="store.canUndo" :can-redo="store.canRedo" :has-selection="hasDeletableSelection" :can-copy="canCopy" :can-paste="Boolean(store.clipboardNode)" :can-create-section="canCreateSection" :can-color-selection="selectedNodes.length > 1" :selection-color="commonMarkerColor(selectedNodes)" @color-selection="store.setNodeColors(store.selectedNodeKeys, $event)" :run-state="runState" watermark-enabled composer-enabled @add-shot="addShot" @add-note="addNote" @add-asset="addAsset" @add-watermark="addWatermark" @add-composer="addVideoComposer" @upload-image="uploadMedia('image_media', $event)" @upload-video="uploadMedia('video_media', $event)" @upload-audio="uploadMedia('audio_media', $event)" @create-section="createSection" @run-selected="runSelected" @delete-selection="store.deleteSelection" @copy="store.copySelection" @paste="store.paste" @undo="undoCanvasAction" @redo="redoCanvasAction" @auto-arrange="autoArrange" />
+        <Controls position="bottom-right">
+          <template #icon-zoom-in><Plus aria-hidden="true" /><span class="sr-only">{{ tr('放大') }}</span></template>
+          <template #icon-zoom-out><Minus aria-hidden="true" /><span class="sr-only">{{ tr('缩小') }}</span></template>
+          <template #icon-fit-view><Maximize aria-hidden="true" /><span class="sr-only">{{ tr('适应画布') }}</span></template>
+          <template #icon-unlock><UnlockKeyhole aria-hidden="true" /><span class="sr-only">{{ tr('锁定画布') }}</span></template>
+          <template #icon-lock><LockKeyhole aria-hidden="true" /><span class="sr-only">{{ tr('解锁画布') }}</span></template>
+        </Controls>
+      </div>
       <div class="workbench-status-stack"><WorkbenchRunStatus :status="generating ? 'RUNNING' : 'IDLE'" :progress="generating ? 0 : undefined" /></div>
       <ConnectionNodePicker v-if="connectionPicker" :options="connectionPicker.options" :x="connectionPicker.x" :y="connectionPicker.y" :accent-class="connectionPicker.accentClass" @select="createCompatibleNode" @close="connectionPicker = null" />
       <p class="workbench-keyboard-status" role="status" :aria-label="tr('键盘连线状态')" aria-live="polite">{{ keyboardStatus }}</p>

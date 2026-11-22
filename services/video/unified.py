@@ -13,7 +13,7 @@ from services.platform.http_contract import check_upstream_response, public_task
 from pydantic import BaseModel, Field, ValidationError
 
 from services.video.base import BaseVideoGenerator, VideoProviderError
-from services.video.capabilities import capabilities_for, validate_selection
+from services.video.capabilities import capabilities_for_config, validate_selection
 from services.video.content import PreparedVideoContent, prepare_video_content, reference_indexes, replace_display_mentions
 from services.video.provider_http import public_provider_error, request_id
 from services.video.public_media import PublicMediaResolver, public_media_url
@@ -122,11 +122,11 @@ class UnifiedVideoGenerator(BaseVideoGenerator):
         if self.config.api_protocol == "unified_video":
             raise VideoProviderError(localized_message("通用视频接口已停用，请使用火山方舟协议"))
         mode = kwargs.get("generation_mode", "reference")
-        selection = validate_selection(self.config.video_model_type, api_protocol=self.config.api_protocol,
+        caps = capabilities_for_config(self.config)
+        selection = validate_selection(caps,
             generation_mode=mode, resolution=kwargs.get("resolution"), aspect_ratio=aspect_ratio,
             duration=duration, output_format=kwargs.get("output_format"), generate_audio=kwargs.get("generate_audio"),
             return_last_frame=kwargs.get("return_last_frame"))
-        caps = capabilities_for(self.config.video_model_type, self.config.api_protocol)
         images = kwargs.get("reference_images") or []
         videos = kwargs.get("reference_videos") or []
         prepared = prepare_video_content(prompt=prompt, subjects=subjects, generation_mode=mode,

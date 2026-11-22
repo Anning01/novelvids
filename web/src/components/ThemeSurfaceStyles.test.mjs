@@ -56,7 +56,7 @@ it('uses shared surfaces instead of white blocks for icon tiles', () => {
 it('shares a layered neutral dark palette across the shell, home and system fallback', () => {
   const theme = readFileSync('src/app-theme.css', 'utf8')
   const home = readFileSync('src/pages/HomePage.vue', 'utf8')
-  const explicit = theme.slice(theme.indexOf(":root[data-app-theme='dark'],"), theme.indexOf('@media (prefers-color-scheme: dark)'))
+  const explicit = theme.slice(theme.indexOf(":root[data-app-theme='dark'] {"), theme.indexOf('@media (prefers-color-scheme: dark)'))
   const fallback = theme.slice(theme.indexOf('@media (prefers-color-scheme: dark)'), theme.indexOf(":root[data-app-theme='dark'] body"))
   const tokens = [...explicit.matchAll(/(--app-(?:canvas|surface(?:-muted|-hover)?|fill-subtle|border(?:-strong)?|text(?:-secondary|-muted)?)):\s*(#[0-9a-f]{6});/g)]
   expect(tokens.length).toBeGreaterThanOrEqual(10)

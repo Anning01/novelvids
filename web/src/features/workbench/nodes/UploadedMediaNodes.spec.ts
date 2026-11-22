@@ -53,6 +53,7 @@ it('renders uploaded video and audio replacement controls', () => {
   const video = mountNode(VideoMediaNode as typeof ImageMediaNode, {
     title: 'clip',
     url: '/media/clip.mp4',
+    poster_url: '/media/clip.webp',
     durationSeconds: 1,
   })
   const audio = mountNode(AudioMediaNode as typeof ImageMediaNode, {
@@ -61,6 +62,7 @@ it('renders uploaded video and audio replacement controls', () => {
     durationSeconds: 1,
   })
 
+  expect(video.get('img').attributes('src')).toBe('/media/clip.webp')
   expect(video.find('video').exists()).toBe(false)
   expect(video.find('button[aria-label="播放clip"]').exists()).toBe(true)
   expect(video.get('input[type="file"]').attributes('accept')).toBe('video/mp4,video/webm,video/quicktime')

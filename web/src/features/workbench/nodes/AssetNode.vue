@@ -154,34 +154,39 @@ watch(hasMultipleImages, multiple => {
 const stackedAssetImages = computed(() => assetImages.value.filter(image => image.key !== primaryImage.value?.key))
 const galleryImages = computed(() => primaryImage.value ? [primaryImage.value, ...stackedAssetImages.value] : [])
 const assetImageStackDepth = computed(() => stackedAssetImages.value.length)
+const primaryImageSize = computed(() => {
+  const width = loadedImageWidth.value || imageMetadata.value.width || 0
+  const height = loadedImageHeight.value || imageMetadata.value.height || 0
+  return width > 0 && height > 0 ? { width, height } : null
+})
+const primaryPreviewRatio = computed(() => {
+  const size = primaryImageSize.value
+  // Reserve a portrait slot while the original loads. Later dimensions can only shrink it.
+  return size && size.width / size.height >= 9 / 16 ? `${size.width}:${size.height}` : '9:16'
+})
 const assetImageStageStyle = computed(() => {
   const stackOffset = assetImageStackDepth.value * 4
-  return stackOffset
-    ? { marginRight: `${stackOffset}px` }
-    : undefined
+  return {
+    aspectRatio: mediaAspectRatioCss(primaryPreviewRatio.value),
+    marginRight: stackOffset ? `${stackOffset}px` : undefined,
+  }
 })
 const showDefaultVisualImage = computed(() => !hasImagePreview.value)
 const defaultVisualImageStyle = computed(() => ({
   aspectRatio: mediaAspectRatioCss(config.value.aspectRatio),
 }))
 const annotations = computed(() => imageMetadata.value.annotations || [])
-const imagePixelSize = computed(() => {
-  const width = loadedImageWidth.value || imageMetadata.value.width || 0
-  const height = loadedImageHeight.value || imageMetadata.value.height || 0
-  return width > 0 && height > 0 ? `${Math.round(width)} × ${Math.round(height)}` : ''
-})
+const imagePixelSize = computed(() => primaryImageSize.value
+  ? `${Math.round(primaryImageSize.value.width)} × ${Math.round(primaryImageSize.value.height)}`
+  : '')
 function assetImageAspectRatio(image: { key: string; url: string } | null | undefined) {
   if (!image) return config.value.aspectRatio
   const loaded = loadedGalleryImageSizes.value[image.key]
   if (loaded?.width && loaded.height) return `${loaded.width}:${loaded.height}`
-  if (image.key === primaryImage.value?.key) {
-    const width = loadedImageWidth.value || imageMetadata.value.width || 0
-    const height = loadedImageHeight.value || imageMetadata.value.height || 0
-    if (width > 0 && height > 0) return `${width}:${height}`
-  }
+  if (image.key === primaryImage.value?.key && primaryImageSize.value)
+    return `${primaryImageSize.value.width}:${primaryImageSize.value.height}`
   return config.value.aspectRatio
 }
-const primaryImageAspectRatio = computed(() => assetImageAspectRatio(primaryImage.value))
 const imageDownloadFilename = computed(() => {
   const extension = imageMetadata.value.mimeType?.includes('webp')
     ? 'webp'
@@ -497,7 +502,7 @@ function imageRoleLabel(image: { key: string; url: string }) {
 function assetImageStackLayerStyle(image: { key: string; url: string }, layerIndex: number) {
   const xOffset = layerIndex * 4
   return {
-    ...containedAspectRatioSize(assetImageAspectRatio(image), primaryImageAspectRatio.value),
+    ...containedAspectRatioSize(assetImageAspectRatio(image), primaryPreviewRatio.value),
     transform: `translateX(${xOffset}px)`,
     transformOrigin: 'top left',
     zIndex: -layerIndex,

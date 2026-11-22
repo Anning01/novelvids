@@ -41,6 +41,7 @@ async def conversation_for_task(task):
         "story_memory_repair": ("按审核意见补全", "Resolve story memory findings"),
         "story_memory_recheck": ("顺序复核故事记忆", "Recheck story memory in order"),
         "project_cover": ("生成项目封面", "Generate project cover"),
+        "optimize_chapter_prompts": ("一键 Skills 优化", "Optimize chapter prompts"),
         "optimize_video_prompt": ("优化分镜提示词", "Optimize shot prompt"),
         "screenplay": ("生成本集剧本", "Adapt episode screenplay"),
         "remake": ("重制视频", "Analyze source video"),

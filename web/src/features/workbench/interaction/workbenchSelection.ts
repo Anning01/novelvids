@@ -3,7 +3,7 @@ import type { NodeChange } from '@vue-flow/core'
 export function applyNodeSelectionChanges(
   current: string[],
   changes: NodeChange[],
-  validKeys: ReadonlySet<string>,
+  validKeys: Pick<ReadonlySet<string>, 'has'>,
 ) {
   const selected = new Set(current.filter(key => validKeys.has(key)))
   for (const change of changes) {

@@ -41,6 +41,16 @@ async def test_submit_keeps_private_text_out_of_general_task_and_is_idempotent()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(('text', 'scope'), [
+    ('再提取一次', 'chapter'), ('提取资产？', 'chapter'), ('提取资产', 'read_only')])
+async def test_unscoped_retry_questions_and_read_only_remain_chat(text, scope):
+    conversation, request, _ = await session_fixture()
+    request = request.model_copy(update={'message': text, 'write_scope': scope, 'targets': []})
+    task = await agent_sessions.submit(conversation, request, AuthContext())
+    assert task.task_type == AiTaskTypeEnum.creation_agent
+
+
+@pytest.mark.asyncio
 async def test_concurrent_runs_in_one_conversation_are_serialized():
     conversation, request, _ = await session_fixture()
     results = await asyncio.gather(

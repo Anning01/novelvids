@@ -376,6 +376,19 @@ def capabilities_for(
         raise HTTPException(status_code=400, detail=localized_message('该视频配置未选择受支持的视频模型类型')) from exc
 
 
+def capabilities_for_config(config) -> VideoModelCapabilities:
+    caps = capabilities_for(config.video_model_type, config.api_protocol)
+    if getattr(config, 'scope', None) != 'studio_platform':
+        return caps
+    pricing = config.pricing or {}
+    # The platform publishes the channel's per-second output tiers under its public model family.
+    if pricing.get('billing_unit') == 'second' and pricing.get('prices'):
+        tiers = tuple(pricing['prices'])
+        default = next((tier for tier in tiers if tier.casefold() == caps.default_resolution.casefold()), tiers[0])
+        return replace(caps, resolutions=tiers, default_resolution=default)
+    return caps
+
+
 def validate_protocol(model_type: str | VideoGenerationModelTypeEnum, protocol: str) -> None:
     if protocol == ImageApiProtocol.unified_video.value:
         raise HTTPException(400, localized_message("通用视频接口已停用，请使用火山方舟协议"))
@@ -417,7 +430,7 @@ def _canonical_value(value: object, supported: tuple[str, ...], fallback: str) -
 
 
 def validate_selection(
-    model_type: str | VideoGenerationModelTypeEnum,
+    model_type: str | VideoGenerationModelTypeEnum | VideoModelCapabilities,
     *,
     generation_mode: str,
     resolution: object,
@@ -428,7 +441,7 @@ def validate_selection(
     return_last_frame: object = None,
     api_protocol: str | ImageApiProtocol | None = None,
 ) -> VideoGenerationSelection:
-    capabilities = capabilities_for(model_type, api_protocol)
+    capabilities = model_type if isinstance(model_type, VideoModelCapabilities) else capabilities_for(model_type, api_protocol)
     selected_resolution = _canonical_value(
         resolution,
         capabilities.resolutions,

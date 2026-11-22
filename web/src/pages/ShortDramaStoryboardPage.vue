@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { runVideoGenerationQueue } from '@/shared/videoGenerationQueue'
 import { provide } from 'vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
@@ -82,11 +81,10 @@ import { analysisGate } from '@/shared/analysisGate'
 import { nextManualSceneSequence } from '@/shared/manualSceneSequence'
 import { formatVideoGenerationError } from '@/shared/videoGenerationError'
 import { hasLastFrameContinuity, injectLastFrameContinuityInstruction, rebaseLastFrameContinuity } from '@/shared/lastFrameContinuity'
-import { agentApi } from '@/features/creation-agent/api'
 import { buildVoiceReferenceMappings, injectEditableVoiceReferenceInstruction } from '@/shared/voiceReferencePrompt'
 import { referenceAudioUsage } from '@/shared/referenceAudioUsage'
 import { AssetTypeEnum, TaskStatusEnum } from '@/types'
-import type { Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia, AutoEnhancement, VideoDefaults } from '@/types'
+import type { AiTask, Asset, AssetVariant, AudioReference, Chapter, Novel, Scene, Video as VideoResult, VideoGenerationModel, VideoInputImageReference, VideoReferenceMedia, AutoEnhancement, VideoDefaults } from '@/types'
 
 interface ProjectView extends Novel {
   aspectRatio: string
@@ -406,7 +404,7 @@ const selectedVideoModelInput = computed({
   set: (value: string) => {
     const modelId = Number(value)
     if (!Number.isInteger(modelId) || modelId < 1 || String(modelId) === selectedVideoModel.value) return
-    cancelPromptOptimizations()
+    cancelSinglePromptOptimizations()
     selectedVideoModel.value = String(modelId)
     for (const scene of scenes.value) {
       const draft = draftFor(scene)
@@ -1669,6 +1667,7 @@ async function loadChapter(chapterId: number) {
     if (loadVersion !== chapterLoadVersion || activeChapterId.value !== chapterId) return
     showChapterScenes(result)
     loading.value = false
+    restorePromptBatch()
     void api.latestVideoBatch(chapterId).then(response => {
       if (alive && loadVersion === chapterLoadVersion && response.data) void monitorVideoBatch(response.data.id)
     }).catch(() => { /* Video polling remains available if batch status is temporarily unavailable. */ })
@@ -1905,62 +1904,104 @@ function selectPromptVersion(scene: Scene, prompt: string, model: string) {
 const promptOptimizations = ref(new Map<number, AbortController>())
 const batchPromptProgress = ref<{ total: number; finished: number; failed: number; running: boolean; error?: string } | null>(null)
 let batchPromptController: AbortController | null = null
-const unsavedModelPrompts = ref(new Set<number>())
 const pendingModelPrompts = computed(() => scenes.value.filter(scene => {
   const draft = draftFor(scene)
-  return draft.prompt.trim() && (draft.promptModel !== selectedVideoModelConfig.value?.model_type || unsavedModelPrompts.value.has(scene.id))
+  return draft.prompt.trim() && draft.promptModel !== selectedVideoModelConfig.value?.model_type
 }))
 
-async function optimizeChapterPrompts() {
-  const model = selectedVideoModelConfig.value
-  if (!model || batchPromptProgress.value?.running || promptOptimizations.value.size || !pendingModelPrompts.value.length) return
-  const targets = [...pendingModelPrompts.value]
-  const controller = new AbortController()
-  batchPromptController = controller
-  batchPromptProgress.value = { total: targets.length, finished: 0, failed: 0, running: true }
-  try {
-    const { data: configuration } = await agentApi.capabilities(projectId.value)
-    const assistant = configuration.models[0]
-    if (!assistant) throw new Error(tr('还需要配置一个对话模型'))
-    await runVideoGenerationQueue(targets, assistant.concurrency, false, async scene => {
-      if (controller.signal.aborted) return false
-      const applied = draftFor(scene).promptModel === model.model_type || await optimizeModelPrompt(scene, model, false)
-      if (controller.signal.aborted) return false
-      const saved = applied && await saveScene(scene, false, model)
-      if (controller.signal.aborted) return false
-      const progress = batchPromptProgress.value!
-      progress.finished += 1
-      if (!saved) {
-        progress.failed += 1
-        if (applied) unsavedModelPrompts.value.add(scene.id)
-      } else unsavedModelPrompts.value.delete(scene.id)
-      return saved
-    })
-    if (!controller.signal.aborted) {
-      const progress = batchPromptProgress.value!
-      const message = tr('Skills 优化完成：成功 {p0} 镜，失败 {p1} 镜', {
-        p0: progress.finished - progress.failed, p1: progress.failed,
-      })
-      progress.failed ? notice.error(message) : notice.success(message)
+async function monitorPromptBatch(task: AiTask, controller: AbortController) {
+  const refreshed = new Set<number>()
+  async function show(state: AiTask) {
+    if (controller.signal.aborted) return
+    const ids = (state.response_data?.saved_scene_ids ?? []) as number[]
+    const failures = (state.response_data?.failed_scene_ids ?? []) as number[]
+    batchPromptProgress.value = {
+      total: Number(state.response_data?.total ?? state.request_params?.total ?? 0),
+      finished: ids.length + failures.length, failed: failures.length,
+      running: !terminalTaskStatuses.has(state.status), error: state.error_message || undefined,
     }
-  } catch (error) {
-    if (!controller.signal.aborted) {
-      batchPromptProgress.value!.error = (error as Error).message
-      notice.error((error as Error).message)
-    }
-  } finally {
-    if (batchPromptController === controller) {
-      batchPromptProgress.value!.running = false
-      batchPromptController = null
+    for (const id of ids) {
+      if (refreshed.has(id)) continue
+      const before = scenes.value.find(scene => scene.id === id)
+      if (!before || sceneSaveQueues.has(id) || sceneAutoSaveTimers.has(id)) continue
+      if (state.request_params?.model_type && before.metadata?.video_prompt_model === state.request_params.model_type) {
+        refreshed.add(id)
+        continue
+      }
+      const draft = draftFor(before)
+      if (JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(before))) continue
+      const original = JSON.stringify(draft)
+      const updated = (await api.scene(id)).data
+      if (controller.signal.aborted || original !== JSON.stringify(draft) || sceneSaveQueues.has(id) || sceneAutoSaveTimers.has(id)) continue
+      scenes.value = scenes.value.map(scene => scene.id === id ? updated : scene)
+      sceneDrafts.value[id] = makeSceneDraft(updated)
+      refreshed.add(id)
     }
   }
+  await show(task)
+  if (terminalTaskStatuses.has(task.status)) return
+  await pollUntilTerminal(async signal => {
+    const state = (await api.task(task.id, signal)).data
+    await show(state)
+    return state
+  }, {signal: controller.signal, intervalMs: 2000, terminalStatuses: terminalTaskStatuses,
+    requestTimeoutMs: 45000, retryOnError: retryableStatusError})
+}
+
+async function trackPromptBatch(load: () => Promise<AiTask | null>) {
+  batchPromptController?.abort()
+  const controller = new AbortController()
+  batchPromptController = controller
+  try {
+    const task = await load()
+    if (controller.signal.aborted) return
+    if (task) await monitorPromptBatch(task, controller)
+    else batchPromptProgress.value = null
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      const message = (error as Error).message
+      batchPromptProgress.value = {total: 0, finished: 0, failed: 0, running: false, error: message}
+    }
+  }
+}
+
+function restorePromptBatch() {
+  const chapterId = activeChapterId.value
+  if (alive && chapterId) void trackPromptBatch(async () => (await api.latestPromptBatch(chapterId)).data)
+}
+
+function reconnectPromptBatch() {
+  if (!document.hidden && batchPromptProgress.value?.error) restorePromptBatch()
+}
+
+function optimizeChapterPrompts() {
+  const model = selectedVideoModelConfig.value
+  if (!model || batchPromptProgress.value?.running || promptOptimizations.value.size || !pendingModelPrompts.value.length) return
+  const chapterId = activeChapterId.value
+  const targets = pendingModelPrompts.value.map(scene => {
+    const facts = optimizationInput(scene, model)
+    const draft = draftFor(scene)
+    return {draft, input: {scene_id: scene.id, model_config_id: model.config_id, ...facts,
+      cached_prompt: cachedModelPrompt(scene, model, facts, draft.modelVersions)}}
+  })
+  batchPromptProgress.value = {total: targets.length, finished: 0, failed: 0, running: true}
+  void trackPromptBatch(async () => {
+    if ((sceneAutoSaveTimers.size || sceneSaveQueues.size) && !await flushPendingSceneSaves()) {
+      throw new Error(tr('分镜内容已修改，请按当前内容重新优化'))
+    }
+    const shots = targets.map(({draft, input}) => ({...input, expected_prompt: draft.basePrompt}))
+    return (await api.optimizeChapterPrompts(chapterId, shots)).data
+  })
 }
 
 function cancelPromptOptimizations() {
   batchPromptController?.abort()
   batchPromptController = null
   batchPromptProgress.value = null
-  unsavedModelPrompts.value.clear()
+  cancelSinglePromptOptimizations()
+}
+
+function cancelSinglePromptOptimizations() {
   for (const controller of promptOptimizations.value.values()) controller.abort()
   promptOptimizations.value.clear()
 }
@@ -2124,7 +2165,7 @@ async function saveScene(
 }
 
 function guardReleaseRefresh(event: Event) {
-  if (batchPromptProgress.value?.running || promptOptimizations.value.size || sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
+  if (promptOptimizations.value.size || sceneSaveQueues.size || sceneAutoSaveTimers.size || scenes.value.some(scene => {
     const draft = sceneDrafts.value[scene.id]
     return draft && JSON.stringify(draft) !== JSON.stringify(makeSceneDraft(scene))
   })) event.preventDefault()
@@ -2138,8 +2179,8 @@ async function flushPendingSceneSaves() {
     .filter((scene): scene is Scene => Boolean(scene))
   for (const timer of sceneAutoSaveTimers.values()) clearTimeout(timer)
   sceneAutoSaveTimers.clear()
-  await Promise.all(pendingScenes.map(scene => saveScene(scene)))
-  await Promise.all(sceneSaveQueues.values())
+  const saved = await Promise.all([...sceneSaveQueues.values(), ...pendingScenes.map(scene => saveScene(scene))])
+  return saved.every(Boolean)
 }
 
 async function insertSceneAfter(scene: Scene) {
@@ -2588,6 +2629,8 @@ async function saveChapterDetails(value: { name: string; content: string }) {
 
 onMounted(load)
 onMounted(() => {
+  window.addEventListener('focus', reconnectPromptBatch)
+  window.addEventListener('online', reconnectPromptBatch)
   window.addEventListener('focus', syncVisibleVideoTasks)
   document.addEventListener('visibilitychange', syncVisibleVideoTasks)
   window.addEventListener('pointerdown', closeAssetActionsFromOutside)
@@ -2599,6 +2642,8 @@ onBeforeUnmount(() => {
   void flushPendingSceneSaves()
   alive = false
   stopVideoPolling()
+  window.removeEventListener('focus', reconnectPromptBatch)
+  window.removeEventListener('online', reconnectPromptBatch)
   window.removeEventListener('focus', syncVisibleVideoTasks)
   document.removeEventListener('visibilitychange', syncVisibleVideoTasks)
   chapterToolbarObserver?.disconnect()
@@ -2946,7 +2991,8 @@ onBeforeUnmount(() => {
 .storyboard-shell { min-height: calc(100vh - 72px); }
 .storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; min-height: 0; }
 .storyboard-main { --storyboard-right-gutter: 2px; min-width: 0; padding: 16px var(--storyboard-right-gutter) 42px 16px; }
-.storyboard-main.is-workflow-view { height: 100%; padding: 0; }
+.storyboard-main.is-workflow-view { display: flex; flex-direction: column; height: 100%; padding: 0; }
+.storyboard-main.is-workflow-view > .batch-skills-progress { flex: none; margin: 62px 16px 8px; }
 .batch-skills-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block: 8px 16px; color: var(--app-text-secondary); font-size: 13px; }
 .batch-skills-progress progress { width: 120px; height: 8px; accent-color: var(--app-accent); }
 .chapter-toolbar { position: sticky; top: var(--short-drama-header-height,72px); z-index: 19; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); min-width: 0; align-items: center; gap: 24px; margin: -16px calc(-1 * var(--storyboard-right-gutter)) 2px -16px; padding: 5px; background: var(--app-surface-muted, #f7f8fb); color: var(--app-text, #303442); }
@@ -2973,7 +3019,7 @@ onBeforeUnmount(() => {
 .storyboard-page.is-workflow-view .workspace-view-switch button:hover { color: var(--app-text); background: var(--app-surface-hover); }
 .storyboard-page.is-workflow-view .workspace-view-switch button.is-active { color: var(--app-accent); background: var(--app-accent-soft); box-shadow: none; }
 .storyboard-page.is-workflow-view .workspace-view-switch button:focus-visible { outline-color: var(--app-accent); }
-.workflow-canvas-shell { width: 100%; height: 100%; min-height: 0; overflow: hidden; background: var(--app-canvas); }
+.workflow-canvas-shell { width: 100%; flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--app-canvas); }
 .storyboard-state { display: grid; min-height: calc(100vh - 210px); place-items: center; align-content: center; gap: 8px; color: #686ef1; text-align: center; }
 .storyboard-state__spinner { animation: spin 1s linear infinite; }
 .storyboard-state strong { color: #454a59; font-size: 14px; }
@@ -3053,7 +3099,7 @@ onBeforeUnmount(() => {
 .preview-empty.is-running svg { color: #8587ff; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @container creation-workspace (max-width: 1180px) { .shot-editor-grid { grid-template-columns: 260px minmax(380px,1fr); }.preview-panel { grid-column: 1 / -1; }.preview-stage { min-height: 420px; max-height: 560px; } }
-@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { margin-inline: -14px; padding-inline: 14px; }.chapter-actions { padding-bottom: 4px; }.workflow-canvas-shell { min-height: 520px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
+@container creation-workspace (max-width: 820px) { .workspace-view-switch { flex: 0 0 auto; }.storyboard-page.is-workflow-view .storyboard-shell { height: 100vh; }.storyboard-main { padding: 16px 14px 36px; }.storyboard-main.is-workflow-view { height: 100%; padding: 0; }.chapter-toolbar { margin-inline: -14px; padding-inline: 14px; }.chapter-actions { padding-bottom: 4px; }.shot-editor { scroll-margin-top: calc(var(--short-drama-header-height,124px) + 180px); }.shot-editor-header { flex-wrap: wrap; gap: 6px; padding-block: 7px; }.shot-editor-header > nav { order: 3; width: 100%; }.shot-editor-grid { grid-template-columns: 1fr; }.preview-panel { grid-column: 1; }.shot-info-panel { max-height: none; }.prompt-panel > footer { align-items: stretch; flex-direction: column; }.prompt-panel > footer > div { overflow-x: auto; }.prompt-panel > footer > button { width: 100%; } }
 @container creation-workspace (max-width: 520px) { .chapter-toolbar { grid-template-columns: minmax(0, 1fr); gap: 12px; }.chapter-actions { justify-content: flex-start; }.chapter-toolbar p { white-space: normal; }.shot-editor-grid { padding: 7px; }.prompt-panel > textarea { min-height: 320px; }.preview-stage { min-height: 360px; } }
 @media (prefers-reduced-motion: reduce) { .storyboard-state svg,.preview-empty.is-running svg { animation-duration: 1.8s; } }
 .scene-video-cost { margin-left: 6px; font-size: 10px; font-weight: 600; opacity: .85; }

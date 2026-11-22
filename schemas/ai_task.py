@@ -30,6 +30,7 @@ class AiTaskOut(BaseResponse):
                 "skill_snapshot",
                 "video_optimizer",
                 "prompt_inputs",
+                "prompt_batch_shots",
                 "agent_configuration",
                 "config_snapshot",
                 "auto_enhancement_snapshot",
