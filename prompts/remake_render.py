@@ -26,7 +26,7 @@ def _deduplicate_assets(
     unique: dict[str, dict[str, Any]] = {}
     items = value if isinstance(value, list) else []
     reserved = {_normalize(item.get("name")) for item in items if isinstance(item, dict)}
-    identities = set()
+    identities = {}
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -40,8 +40,15 @@ def _deduplicate_assets(
         if separate_conflicts:
             signature = (key, cleaned.get("label"), str(cleaned.get("description", "")).strip())
             if signature in identities:
+                original = identities[signature]
+                if cleaned.get("appearances"):
+                    spans = list(original.get("appearances", []))
+                    for span in cleaned["appearances"]:
+                        if span not in spans:
+                            spans.append(span)
+                    original["appearances"] = spans
                 continue
-            identities.add(signature)
+            identities[signature] = cleaned
             if key in unique:
                 number = 2
                 while True:

@@ -49,7 +49,8 @@ async def failure_message(task):
         keys = await AgentOperation.filter(task=task, state='completed', key__startswith='model:remake:').values_list('key', flat=True)
         done = sorted(int(k.rsplit(':', 1)[1]) for k in keys if re.fullmatch(r'model:remake:RemakeShot:\d+', k))
         parts = [localized_message(reason, p0=index)]
-        if any(key in keys for key in ('model:remake:RemakeAssets:1', 'model:remake:RemakeCastAssets:1', 'model:remake:RemakeCastAssets:1-readmit', 'model:remake:RemakeAssets:1-readmit')):
+        from services.remake.checkpoints import ASSET_RECEIPT_KEYS
+        if ASSET_RECEIPT_KEYS.intersection(keys):
             parts.append(localized_message('本集的人物、场景和道具设定已保留。'))
         if done:
             parts.append(localized_message('已保留 {p0} 个片段的分镜结果。', p0=len(done)))

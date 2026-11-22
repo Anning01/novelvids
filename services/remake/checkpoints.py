@@ -12,6 +12,13 @@ from models.ai_task import AiTask
 from utils.enums import AiTaskTypeEnum, TaskStatusEnum
 
 
+ASSET_RECEIPT_KEYS = frozenset(
+    f"model:remake:{schema}:{segment}"
+    for schema in ("RemakeAssets", "RemakeCastAssets", "RemakeTimedAssets")
+    for segment in ("1", "1-readmit")
+)
+
+
 async def task_history(params):
     previous_id = params.get('retry_of_task_id')
     visited = set()
@@ -23,7 +30,7 @@ async def task_history(params):
         old = task.request_params or {}
         if any(old.get(k) != params.get(k) for k in
                ('remake_source_id', 'chapter_id', 'novel_id', 'team_id', 'user_id', 'prompt_language', 'model_config_id',
-                'remake_context_version', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
+                'remake_context_version', 'remake_identity_evidence', 'remake_cast_appearances', 'remake_asset_appearances', 'remake_short_storyboard', 'source_checksum', 'skill_snapshot', 'remake_block_size', 'remake_episode_count')):
             break
         yield task
         previous_id = old.get('retry_of_task_id')
@@ -38,9 +45,9 @@ async def completed_outputs(params, *, keys_only=False):
         for row in rows:
             key = row["key"]
             results.setdefault(key, row.get("result"))
-            if key in {"model:remake:RemakeCastAssets:1", "model:remake:RemakeCastAssets:1-readmit"}:
+            if key in ASSET_RECEIPT_KEYS:
                 results.setdefault("model:remake:RemakeAssets:1", row.get("result"))
-            if key in {"model:remake:RemakeShortStoryboard:1-readmit", "model:remake:RemakeAssets:1-readmit"}:
+            if key == "model:remake:RemakeShortStoryboard:1-readmit":
                 results.setdefault(key.removesuffix("-readmit"), row.get("result"))
     return results
 
@@ -95,7 +102,7 @@ async def _rate_limited_outcome(task, receipt, child):
 async def reconcile_retry(previous):
     """Do not replay an external step with an unknown outcome in a fresh continuity attempt."""
     from uuid import uuid5
-    from schemas.agent_workflow import RemakeAssets, RemakeCastAssets, RemakeShot
+    from schemas.agent_workflow import RemakeAssets, RemakeCastAssets, RemakeShot, RemakeTimedAssets
     from schemas.remake_short import RemakeShortStoryboard
     from schemas.remake import RemakeContinuityVerdict, RemakeSpeechEvidence
     from services.remake.output_recovery import recover_shot_output
@@ -113,7 +120,7 @@ async def reconcile_retry(previous):
                 continue
             child = await AiTask.get_or_none(id=uuid5(task.id, receipt.key))
             is_shot = receipt.key.startswith("model:remake:RemakeShot:")
-            schema = {"RemakeCastAssets": RemakeCastAssets, "RemakeShortStoryboard": RemakeShortStoryboard, "RemakeContinuityVerdict": RemakeContinuityVerdict, "RemakeSpeechEvidence": RemakeSpeechEvidence,
+            schema = {"RemakeTimedAssets": RemakeTimedAssets, "RemakeCastAssets": RemakeCastAssets, "RemakeShortStoryboard": RemakeShortStoryboard, "RemakeContinuityVerdict": RemakeContinuityVerdict, "RemakeSpeechEvidence": RemakeSpeechEvidence,
                       "RemakeShot": RemakeShot, "RemakeAssets": RemakeAssets}[receipt.key.split(":")[2]]
             result = None
             if child and child.status == TaskStatusEnum.completed and child.response_data:
@@ -207,7 +214,7 @@ async def shot_progress(task, source, current_rows=None):
     keys = {key for key, state in current_rows if state == "completed"}
     if task.request_params.get("retry_of_task_id"):
         keys.update(await completed_outputs(task.request_params, keys_only=True))
-    if keys.intersection({'model:remake:RemakeAssets:1-readmit', 'model:remake:RemakeCastAssets:1', 'model:remake:RemakeCastAssets:1-readmit'}):
+    if keys.intersection(ASSET_RECEIPT_KEYS):
         keys.add('model:remake:RemakeAssets:1')
     prefix = 'model:remake:RemakeShot:'
     indices = {int(key[len(prefix):]) for key in keys if key.startswith(prefix) and key[len(prefix):].isdigit()}

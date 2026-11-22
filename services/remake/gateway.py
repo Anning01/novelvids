@@ -257,9 +257,9 @@ class RemakeVideoAnalysisGateway:
             from schemas.remake_short import RemakeShortStoryboard
             schema = {"short_video_storyboard": RemakeShortStoryboard, "shot_continuity_check": RemakeContinuityVerdict, "shot_speech_evidence": RemakeSpeechEvidence,
                       "global_key_assets": RemakeAssets}.get(schema_name, RemakeShot)
-            if schema is RemakeAssets and getattr(execution, "params", {}).get("remake_cast_appearances"):
-                from schemas.agent_workflow import RemakeCastAssets
-                schema = RemakeCastAssets
+            if schema is RemakeAssets:
+                from schemas.agent_workflow import remake_asset_schema
+                schema = remake_asset_schema(getattr(execution, "params", {}))
 
             async def source_media(media_path):
                 if getattr(self.config, "api_protocol", None) == "novelvids":
@@ -310,6 +310,9 @@ class RemakeVideoAnalysisGateway:
             if schema in (RemakeShot, RemakeShortStoryboard) and getattr(execution, "params", {}).get("remake_cast_appearances"):
                 from prompts.remake import cast_reference_instruction
                 extra += "\n" + cast_reference_instruction(execution.language)
+            if getattr(execution, "params", {}).get("remake_asset_appearances"):
+                from prompts.remake import visual_asset_instruction
+                extra += "\n" + visual_asset_instruction(execution.language, inventory=issubclass(schema, RemakeAssets))
             observer = capacity_observer.set(capacity_state if schema is RemakeShot and context_version else None)
             async def recover():
                 if schema is not RemakeShot:

@@ -308,3 +308,18 @@ def cast_reference_instruction(language):
     return ("In each shot's asset_refs list every character actually seen or heard, even when the project catalog "
             "is empty. Use a shot-local ID and an identifiable character name consistently in the shot text. "
             "Omit characters who are only mentioned.")
+
+
+
+def visual_asset_instruction(language, *, inventory):
+    if inventory:
+        return ("每个场景和道具都按原片秒数填写 appearances。记录真正入画的起止时间，切走后再次出现要分段。"
+                "同一分镜可以切换布景；只在对白提及、只出现在图案中或仅可推断为附近的实物不算出镜。"
+                if language == 'zh' else
+                "For settings and props give actual on-screen source-time intervals in appearances. Split separate "
+                "appearances, including setting changes within a shot. Mentions, depictions of a prop and objects "
+                "merely inferred to be nearby do not establish that the physical object is on screen.")
+    return ("每镜 asset_refs 也列出实际入画的场景和道具，使用 scene 或 object 类型。镜内转场、产品特写与片尾卡分开辨认。"
+            if language == 'zh' else
+            "Include each actually visible setting and prop in each shot's asset_refs with type scene or object. "
+            "Identify changes of setting inside the shot, product close-ups and end cards.")

@@ -95,6 +95,23 @@ class RemakeCastAssets(RemakeAssets):
     characters: list[TimedCharacter] = Field(max_length=100)
 
 
+class TimedVisualAsset(RemakeAsset):
+    appearances: list[CastAppearance] = Field(min_length=1, description="Disjoint source-time ranges where this setting or prop is visible")
+
+
+class RemakeTimedAssets(RemakeCastAssets):
+    scenes: list[TimedVisualAsset] = Field(max_length=100)
+    objects: list[TimedVisualAsset] = Field(max_length=100)
+
+
+def remake_asset_schema(params):
+    if params.get("remake_asset_appearances"):
+        return RemakeTimedAssets
+    if params.get("remake_cast_appearances"):
+        return RemakeCastAssets
+    return RemakeAssets
+
+
 class RemakeReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=100)

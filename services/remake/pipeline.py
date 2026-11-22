@@ -162,7 +162,8 @@ class RemakeDecompositionPipeline:
                         **({"readmission_segment": segment} if segment else {}))
                 if short_storyboard:
                     from services.remake.short_admission import run_admitted
-                    receipt_name = "RemakeCastAssets" if execution.params.get("remake_cast_appearances") else "RemakeAssets"
+                    from schemas.agent_workflow import remake_asset_schema
+                    receipt_name = remake_asset_schema(execution.params).__name__
                     raw = await run_admitted(request_assets, model_config, execution.params, receipt_name)
                 else:
                     raw = await request_assets(None)

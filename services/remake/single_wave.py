@@ -103,8 +103,11 @@ async def stream_source_analysis(detector, source_path, directory, gateway, stra
 def bind_shot_references(shots, assets):
     """A provisional ID is local to its shot. Bind only an unambiguous typed name."""
     by_name = defaultdict(list)
+    timed = []
     for group, kind in (('characters', 'character'), ('scenes', 'scene'), ('objects', 'object')):
         for asset in assets.get(group, []):
+            if asset.get('appearances'):
+                timed.append((kind, asset))
             names = {asset['name'], *(asset.get('aliases') or []), *(asset.get('source_names') or [])}
             if asset.get('form_name'):
                 names.add(asset['name'].partition('#')[0])
@@ -123,12 +126,14 @@ def bind_shot_references(shots, assets):
         interval = shot.get('source_interval')
         present_names = []
         if interval:
-            for character in assets.get('characters', []):
+            resolved_ids = {ref['asset_id'] for ref in resolved}
+            for kind, asset in timed:
                 if any(span['start_seconds'] < interval['end_seconds'] and interval['start_seconds'] < span['end_seconds']
-                       for span in character.get('appearances', [])):
-                    present_names.append(character['name'])
-                    if not any(ref['asset_id'] == character['id'] for ref in resolved):
-                        resolved.append({'asset_id': character['id'], 'asset_name': character['name'], 'asset_type': 'character'})
+                       for span in asset['appearances']):
+                    present_names.append(asset['name'])
+                    if asset['id'] not in resolved_ids:
+                        resolved.append({'asset_id': asset['id'], 'asset_name': asset['name'], 'asset_type': kind})
+                        resolved_ids.add(asset['id'])
         item = {**shot, 'asset_refs': resolved, **({'unresolved_asset_refs': missing} if missing else {})}
         if present_names and shot.get('visible_asset_names') is not None:
             item['visible_asset_names'] = list(dict.fromkeys([*shot['visible_asset_names'], *present_names]))

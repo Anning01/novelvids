@@ -241,3 +241,60 @@ async def test_new_asset_request_collects_cast_appearances_in_its_existing_model
         current_execution.reset(token)
     assert generate.await_count == 1 and generate.await_args.args[2] is RemakeCastAssets
     assert cast_appearance_instruction('zh') in generate.await_args.kwargs['additional_instructions']
+
+
+def test_settings_and_props_follow_visible_intervals_across_cuts_and_do_not_duplicate_named_refs():
+    def item(key, name, spans):
+        return {'id': key, 'name': name, 'appearances': [
+            {'start_seconds': a, 'end_seconds': b} for a, b in spans]}
+    assets = {'scenes': [item('s1','实验舱',[(0,4)]), item('s2','海滩',[(4,7)]),
+                         item('s3','片尾白底',[(7,8)])],
+              'objects': [item('o1','红椅子',[(0,1),(6,7)]), item('o2','甜筒',[(1,8)])]}
+    shots = [{'source_interval': {'start_seconds': i, 'end_seconds': i+2}, 'visible_asset_names': [],
+              'asset_refs': []} for i in range(0,8,2)]
+    shots[0]['asset_refs'] = [{'asset_type':'object','asset_name':'甜筒','asset_id':'temporary'}]
+    result = bind_shot_references(shots, assets)
+    assert [[r['asset_id'] for r in s['asset_refs']] for s in result] == [
+        ['o2','s1','o1'], ['s1','o2'], ['s2','o2'], ['s2','s3','o1','o2']]
+    assert result[-1]['visible_asset_names'] == ['海滩','片尾白底','红椅子','甜筒']
+
+
+@pytest.mark.asyncio
+async def test_new_visual_inventory_preserves_scene_and_prop_appearances_in_one_request(tmp_path):
+    from schemas.agent_workflow import RemakeTimedAssets, RemakeCastAssets, remake_asset_schema
+    from services.remake.asset_validation import render_remake_assets
+    from prompts.remake import visual_asset_instruction
+    from services.remake.gateway import RemakeVideoAnalysisGateway
+    from services.creation_agent.skill_execution import current_execution
+    from test.test_services.test_remake_gateway import _config, _Client
+    from test.remake_fixtures import design_fields, synthetic_snapshot
+    span = [{'start_seconds':1, 'end_seconds':2}]
+    raw = RemakeTimedAssets.model_validate({'characters':[], 'scenes':[{'name':'海滩','description':'海边',
+        'visual_fields':design_fields(kind='scene'),'appearances':span}], 'objects':[{'name':'甜筒',
+        'description':'冰淇淋','visual_fields':design_fields(kind='item'),'appearances':span}]})
+    rendered = render_remake_assets(raw.model_dump(),synthetic_snapshot(),'zh','9:16')
+    assert RemakeTimedAssets.model_validate(rendered).objects[0].appearances == raw.scenes[0].appearances
+    src = tmp_path/'clip.mp4'; src.write_bytes(b'clip')
+    generate = AsyncMock(return_value=raw)
+    token = current_execution.set(SimpleNamespace(params={'remake_context_version':5,'remake_asset_appearances':True,
+        'remake_cast_appearances':True}, language='zh',generate=generate))
+    try:
+        await RemakeVideoAnalysisGateway(_config(), client=_Client([])).analyze_one(index=1,path=src,prompt='',
+            context={},schema_name='global_key_assets',response_schema={})
+    finally:
+        current_execution.reset(token)
+    assert generate.await_count == 1 and generate.await_args.args[2] is RemakeTimedAssets
+    assert visual_asset_instruction('zh', inventory=True) in generate.await_args.kwargs['additional_instructions']
+    assert 'appearances' in visual_asset_instruction('en', inventory=True)
+    assert remake_asset_schema({'remake_cast_appearances':True}) is RemakeCastAssets
+
+
+def test_repeated_prop_inventory_entries_keep_their_separate_sightings():
+    from prompts.remake_render import normalize_global_assets
+    asset = {'name':'同款甜筒','description':'水果双球'}
+    spans = [{'start_seconds':1,'end_seconds':2}, {'start_seconds':6,'end_seconds':8}]
+    rows = [{**asset, 'appearances':[span]} for span in spans]
+    normalized = normalize_global_assets({'objects':rows + rows}, separate_conflicts=True)
+    prop, = normalized['objects']
+    assert prop['appearances'] == spans
+    assert rows[0]['appearances'] == spans[:1]
