@@ -8,6 +8,8 @@ from services.storyboard.strategies import storyboard_strategy_factory
 
 
 def prepare_remake_prompt(raw, catalog, snapshot, language, *, strategy_key=None, duration_seconds=None):
+    if 'source_prompt_text' in raw:
+        return {**raw, 'prompt': raw['source_prompt_text']}
     index = {item['id']: item for item in catalog}
     references = []
     for reference in raw['asset_refs']:

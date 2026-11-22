@@ -66,8 +66,9 @@ class RemakeProgressService:
             completed_clips, total_clips = 0, None
             shot_states = {}
             if task and status == TaskStatusEnum.completed:
-                total_clips = ((task.response_data or {}).get('pipeline') or {}).get('shot_count')
-                completed_clips = total_clips or 0
+                pipeline = (task.response_data or {}).get('pipeline') or {}
+                completed_clips = pipeline.get('shot_count') or 0
+                total_clips = pipeline.get('segment_count') or pipeline.get('shot_count')
             if task and status != TaskStatusEnum.completed and (progress >= 42 or task.request_params.get('retry_of_task_id')):
                 from services.remake.checkpoints import shot_progress
                 _, saved_progress, completed_clips, total_clips, shot_states = await shot_progress(task, source, receipts[task.id])

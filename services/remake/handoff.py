@@ -100,6 +100,10 @@ def finalize_generation_shots(shots, language):
         observed = {}
         span = raw['source_interval']
         duration = span['output_seconds']
+        if 'source_prompt_text' in raw:
+            result.append({**raw, 'duration': f'{duration}s', 'duration_seconds': duration})
+            previous, previous_views = {}, {}
+            continue
         shot = {**raw, 'duration': f'{duration}s', 'duration_seconds': duration,
                 'generation_timeline': True, 'description': _RANGE.sub('',raw['description'],count=1)}
         tracks = ('actions', 'dialogue', 'narration')

@@ -130,6 +130,11 @@ async def reconcile_retry(previous):
                       "RemakeShot": RemakeShot, "RemakeAssets": RemakeAssets}[receipt.key.split(":")[2]]
             result = None
             if child and child.status == TaskStatusEnum.completed and child.response_data:
+                # Current jobs checkpoint the delivered material, including text-only editor fallbacks.
+                if task.request_params.get("remake_action_memory") == "timeline" and receipt.key.startswith("model:remake:"):
+                    await AgentOperation.filter(id=receipt.id).update(state="completed", result=child.response_data)
+                    done[receipt.key] = None
+                    continue
                 result = schema.model_validate(child.response_data)
             elif schema is RemakeShortStoryboard:
                 from services.remake.output_recovery import latest_response_text, recover_short_rows

@@ -210,8 +210,6 @@ class RemakeResultPersistence:
         assets: dict[str, list[dict[str, Any]]],
         preserve_existing: bool = False,
     ) -> dict[str, Asset]:
-        from services.extraction.extractor import validate_asset_design
-
         result: dict[str, Asset] = {}
         chapter = await Chapter.get(id=source.chapter_id).using_db(connection)
         for group, asset_type in _ASSET_GROUPS:
@@ -223,7 +221,6 @@ class RemakeResultPersistence:
                 if not reference_id or not name:
                     continue
                 description = str(item.get("description", "")).strip()
-                validate_asset_design(description)
                 layout = ({'reference_layout':GROUP_PORTRAIT if item.get('label') == '群像' else CHARACTER_TURNAROUND}
                           if asset_type == AssetTypeEnum.person else {})
                 identity = item.get("project_asset_id")
@@ -408,7 +405,7 @@ class RemakeResultPersistence:
             if referenced:
                 await scene.assets.add(*referenced, using_db=connection)
 
-        if insert_only:
+        if insert_only or len(sequences) < pipeline_metadata.get("segment_count", 0):
             return len(sequences)
 
         owned_scenes = await Scene.filter(chapter_id=source.chapter_id).using_db(connection)

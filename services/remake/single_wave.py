@@ -153,6 +153,8 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
     """Read the short film once, then commit each validated shot under its normal receipt key."""
     from schemas.remake_motion import shot_contracts
     _, RemakeShortStoryboard = shot_contracts(params)
+    direct = params.get("remake_action_memory") == "timeline"
+    from services.remake.delivered_output import delivered_batch
     results = {}
     intervals = []
     for i, path in enumerate(paths, 1):
@@ -175,7 +177,9 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
     if intervals:
         # The original batch receipt survives a crash between individual local commits.
         stored_batch = saved.get("model:remake:RemakeShortStoryboard:1")
-        if stored_batch is not None:
+        if stored_batch is not None and direct:
+            material = delivered_batch(stored_batch, [{"sequence": i, **evidence[p.name]["interval"]} for i,p in enumerate(paths,1)])
+        elif stored_batch is not None:
             batch = RemakeShortStoryboard.model_validate({key: stored_batch[key] for key in ("looks", "shots")})
             indices = {shot.sequence for shot in batch.shots}
             source_intervals = [{"sequence": i, **evidence[p.name]["interval"]} for i,p in enumerate(paths,1)
@@ -207,13 +211,13 @@ async def analyze_short_storyboard(source_path, paths, evidence, gateway, strate
                 if isinstance(exc, asyncio.CancelledError) or len(material) != len(intervals):
                     raise
             else:
-                material = RemakeShortStoryboard.model_validate(raw).materialize(intervals)
-        if not {span["sequence"] for span in intervals}.issubset(material):
+                material = delivered_batch(raw, intervals) if direct else RemakeShortStoryboard.model_validate(raw).materialize(intervals)
+        if not direct and not {span["sequence"] for span in intervals}.issubset(material):
             raise ValueError("Saved storyboard does not cover every unfinished source interval")
         for span in intervals:
             i = span["sequence"]
-            if i not in results:
+            if i not in results and i in material:
                 await save(i, material[i])
         await report(len(results), len(paths))
     return [{**results[i], "shot_index": i, "file": path.name, "source_interval": evidence[path.name]["interval"]}
-            for i,path in enumerate(paths,1)]
+            for i,path in enumerate(paths,1) if i in results]

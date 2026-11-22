@@ -355,8 +355,8 @@ class RemakeVideoAnalysisGateway:
                     media=media,
                     **({"additional_instructions": extra} if extra else {}),
                     **({"receipt_segment": str(receipt_segment)} if draft or readmission_segment else {}),
-                    **({"output_validator": validate_shot} if schema is RemakeShot and context_version else {}),
-                    **({"output_validator": validate_batch} if schema is RemakeShortStoryboard else {}),
+                    **({"output_validator": validate_shot} if schema is RemakeShot and context_version and params.get("remake_action_memory") != "timeline" else {}),
+                    **({"output_validator": validate_batch} if schema is RemakeShortStoryboard and params.get("remake_action_memory") != "timeline" else {}),
                 )
             except asyncio.CancelledError:
                 await recover()
@@ -383,7 +383,7 @@ class RemakeVideoAnalysisGateway:
                 raise RemakeVideoAnalysisError(message, error_code=error_code, usage=dict(self.usage)) from None
             finally:
                 capacity_observer.reset(observer)
-            data = result.model_dump()
+            data = dict(result) if isinstance(result, dict) else result.model_dump()
             if include_segment_metadata:
                 data.update(shot_index=index, file=path.name)
             self._record_timing(index=index, schema_name=schema_name, started_at=started_at, attempts=1, status='completed', draft=draft)

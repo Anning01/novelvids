@@ -171,21 +171,35 @@ async def recover_failed_material(task):
             continue
         try:
             if kind == asset_type.__name__:
-                assets = asset_type.model_validate_json(text)
                 project = await Novel.get(id=params["novel_id"])
-                values = {"remake:recovered-assets": render_remake_assets(assets.model_dump(),
-                    SkillSnapshot.model_validate(params["skill_snapshot"]), params["prompt_language"], project.aspect_ratio or "16:9")}
+                snapshot = SkillSnapshot.model_validate(params["skill_snapshot"])
+                if params.get("remake_action_memory") == "timeline":
+                    from services.remake.delivered_output import delivered_assets
+                    assets = delivered_assets(text, snapshot, params["prompt_language"], project.aspect_ratio or "16:9")
+                else:
+                    assets = render_remake_assets(asset_type.model_validate_json(text).model_dump(), snapshot,
+                        params["prompt_language"], project.aspect_ratio or "16:9")
+                values = {"remake:recovered-assets": assets}
             elif kind == batch_type.__name__:
                 manifest = await AgentOperation.get_or_none(task=task, key="remake:short-input", state="completed")
                 if not manifest:
                     continue
-                rows = batch_type.model_validate_json(text).materialize(manifest.result["intervals"])
+                if params.get("remake_action_memory") == "timeline":
+                    from services.remake.delivered_output import delivered_batch
+                    rows = delivered_batch(text, manifest.result["intervals"])
+                else:
+                    rows = batch_type.model_validate_json(text).materialize(manifest.result["intervals"])
                 values = {f"model:remake:RemakeShot:{i}": row for i, row in rows.items()}
             else:
                 index = receipt.key.rsplit(":", 1)[1]
                 if not index.isdigit():
                     continue
-                values = {f"remake:recovered-shot:{index}": shot_type.model_validate_json(text).model_dump(mode="json")}
+                if params.get("remake_action_memory") == "timeline":
+                    from services.remake.delivered_output import delivered_shot
+                    shot = delivered_shot(text)
+                else:
+                    shot = shot_type.model_validate_json(text).model_dump(mode="json")
+                values = {f"remake:recovered-shot:{index}": shot}
         except ValueError:
             continue
         for key, value in values.items():
