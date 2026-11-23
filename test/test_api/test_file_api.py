@@ -19,11 +19,12 @@ def _ensure_media_dir(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_upload_single_file(client: AsyncClient):
+async def test_upload_single_file(client: AsyncClient, editor_headers):
     """上传单个文件成功。"""
     file_content = b"hello world"
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[("files", ("test.txt", file_content, "text/plain"))],
     )
     assert response.status_code == 200, response.text
@@ -37,7 +38,7 @@ async def test_upload_single_file(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_docx_extracts_book_text(client: AsyncClient):
+async def test_upload_docx_extracts_book_text(client: AsyncClient, editor_headers):
     """DOCX 上传后返回可供 Agent 分析的正文。"""
     document = Document()
     document.add_heading("第一章 山雨", level=1)
@@ -47,6 +48,7 @@ async def test_upload_docx_extracts_book_text(client: AsyncClient):
 
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[
             (
                 "files",
@@ -62,11 +64,12 @@ async def test_upload_docx_extracts_book_text(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_gb18030_text_previews_chapters(client: AsyncClient):
+async def test_upload_gb18030_text_previews_chapters(client: AsyncClient, editor_headers):
     """GB18030 小说应正确解码并在进入项目前识别章节数量。"""
     text = "第一章 山雨\n正文一\n第二章 归途\n正文二"
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[("files", ("gb-book.txt", text.encode("gb18030"), "text/plain"))],
     )
 
@@ -78,11 +81,12 @@ async def test_upload_gb18030_text_previews_chapters(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_long_unstructured_text_reports_invalid(client: AsyncClient):
+async def test_upload_long_unstructured_text_reports_invalid(client: AsyncClient, editor_headers):
     """长文本只识别到单章时，上传预检直接返回失败原因。"""
     text = "没有章节标题的长篇正文。" * 3_000
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[("files", ("invalid.txt", text.encode("utf-8"), "text/plain"))],
     )
 
@@ -94,10 +98,11 @@ async def test_upload_long_unstructured_text_reports_invalid(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_upload_multiple_files(client: AsyncClient):
+async def test_upload_multiple_files(client: AsyncClient, editor_headers):
     """上传多个文件成功。"""
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[
             ("files", ("a.png", b"\x89PNG", "image/png")),
             ("files", ("b.jpg", b"\xff\xd8\xff", "image/jpeg")),
@@ -112,11 +117,12 @@ async def test_upload_multiple_files(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_long_filename_truncated(client: AsyncClient):
+async def test_upload_long_filename_truncated(client: AsyncClient, editor_headers):
     """文件名超长时被截断到10个字符（保留扩展名）。"""
     long_name = "a" * 50 + ".txt"
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[("files", (long_name, b"data", "text/plain"))],
     )
     assert response.status_code == 200, response.text
@@ -130,11 +136,12 @@ async def test_upload_long_filename_truncated(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_to_invalid_path_returns_500(client: AsyncClient):
+async def test_upload_to_invalid_path_returns_500(client: AsyncClient, editor_headers):
     """MEDIA_PATH 无效时返回 500 错误。"""
     settings.MEDIA_PATH = "/nonexistent/path/that/does/not/exist"
     response = await client.post(
         "/api/file/upload",
+        headers=editor_headers,
         files=[("files", ("fail.txt", b"data", "text/plain"))],
     )
     body = response.json()

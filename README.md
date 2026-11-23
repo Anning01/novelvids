@@ -136,7 +136,7 @@
 
 在平台控制台创建用途为「本地猫影」的 API Key，然后用工作台超级管理员打开「模型配置 → 连接开放平台」，填入 Key 并同步模型。工作台默认连接 `https://shortdramas.xiazq.com/v1`，也可通过 `STUDIO_PLATFORM_BASE_URL` 指定其他平台地址。成片由工作台直接下载并保存在本地。
 
-旧版本的 `NOVELVIDS_ROLE=platform` 仅为已有部署保留兼容，新部署应分别安装工作台与 Cat API。旧站用户可登录 [历史作品迁移](https://shortdramas.xiazq.com/#/legacy-works) 下载完整作品包，再导入本地工作台。切换服务前应保留原作品和媒体，预留迁移时间并提前通知用户。
+模型需要临时文件时，工作台按 Cat API 签发的票据直传到服务器磁盘或 OSS。存储方式由 Cat API 的 `OSS_PROVIDER` 决定，工作台无需 OSS 密钥。用户自己的公网 URL 直接随请求发送，支持内联媒体的平台可以直接接收 Base64。旧版 Cat API 使用 OSS 上传票据。小说和项目原件保存在本机。
 
 ## 创作流程
 

@@ -210,6 +210,21 @@ async def client() -> AsyncClient:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
+
+@pytest.fixture
+async def editor_headers():
+    from uuid import uuid4
+
+    from auth.models import Team, TeamMember, User
+    from test.test_auth import issue_test_session
+
+    user = await User.create(username="editor-" + uuid4().hex, password_hash="!")
+    team = await Team.create(name="Upload test")
+    await TeamMember.create(team=team, user=user, role="creator")
+    token = await issue_test_session(user.username)
+    return {"Authorization": f"Bearer {token}", "X-Team-Id": str(team.id)}
+
+
 # --- Performance & SQL Profiling Fixtures ---
 
 class SQLQueryRecorder(logging.Handler):

@@ -1,4 +1,4 @@
-"""Local studio retains originals; only a small signing request goes to the platform."""
+"""Resolve model inputs against the Cat API upload contract selected by the server."""
 import asyncio
 import base64
 import binascii
@@ -58,9 +58,18 @@ def open_source(source):
         yield mime, file
 
 
+def inline_local_image(source):
+    with open_source(source) as (mime, stream):
+        if not mime.startswith("image/"):
+            raise VideoProviderError("参考图需要图片文件")
+        return f"data:{mime};base64," + base64.b64encode(stream.read()).decode()
+
+
 def retain_original(source, directory):
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open_source(source) as (mime, stream):
+        if mime.split("/", 1)[0] not in {"image", "video", "audio"}:
+            raise VideoProviderError("仅模型使用的图片、视频和音频可申请临时上传")
         digest, checksum, count = sha256(), md5(usedforsecurity=False), 0
         with NamedTemporaryFile(dir=directory, delete=False) as file:
             temp = Path(file.name)
@@ -101,7 +110,11 @@ class StudioMediaClient:
             parts.scheme == "https" or parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}
         ):
             raise VideoProviderError("本地猫影的平台地址无效")
-        self.endpoint = base_url.rstrip("/") + "/studio/media-lease"
+        self.base_url = base_url.rstrip("/")
+        self.endpoint = self.base_url + "/studio/media-lease"
+        self._inline_supported = None
+        # Cat API accepts 16 MiB of JSON, including up to 1 MiB of metadata.
+        self._inline_remaining = 15 * 1024**2
         self.api_key = api_key
         root = Path(settings.STUDIO_MEDIA_CACHE_PATH).resolve()
         if root.is_relative_to(Path(settings.MEDIA_PATH).resolve()):
@@ -109,7 +122,42 @@ class StudioMediaClient:
         account = sha256(f"{self.endpoint}\0{api_key}\0{team_id}".encode()).hexdigest()
         self.directory = root / account
 
+    def trusted_upload(self, url):
+        if trusted_object(url):
+            return True
+        origin, target = urlsplit(self.endpoint), urlsplit(url)
+        return (target.scheme == origin.scheme and target.netloc == origin.netloc
+                and not target.fragment and re.fullmatch(
+                    re.escape(origin.path.removesuffix("/studio/media-lease")) +
+                    r"/media/temporary/[1-9][0-9]*/[a-f0-9]{32}\.[a-z0-9]{2,5}", target.path))
+
+    @staticmethod
+    def private_ref(value):
+        return isinstance(value, str) and re.fullmatch(
+            r"https://cat-media\.invalid/studio-temporary/v1/[1-9][0-9]*/[a-f0-9]{32}\.[a-z0-9]{2,5}", value)
+
+    async def resolve_for_generation(self, source):
+        """Old Cat API requires upload tickets even for an inline image or video."""
+        if not isinstance(source, str) or not source.startswith("data:") or len(source) > self._inline_remaining:
+            return await self.resolve(source)
+        if self._inline_supported is None:
+            try:
+                async with httpx.AsyncClient(timeout=8, follow_redirects=False) as http:
+                    reply = await http.get(self.base_url + "/openapi.json")
+                    reply.raise_for_status()
+                    props = reply.json()["components"]["schemas"]["UploadTicket"]["properties"]
+                    self._inline_supported = isinstance(props, dict) and "media_ref" in props
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                # Upload tickets work with both generations and never submit a model task.
+                self._inline_supported = False
+        if self._inline_supported:
+            self._inline_remaining -= len(source)
+            return source
+        return await self.resolve(source)
+
     async def resolve(self, source):
+        if isinstance(source, str) and source.startswith(("https://", "http://")):
+            return source
         obj = await asyncio.to_thread(retain_original, source, self.directory / "originals")
         identity = sha256((obj.path.name + "\0" + obj.content_type).encode()).hexdigest()
         cache = self.directory / (identity + ".json")
@@ -124,6 +172,8 @@ class StudioMediaClient:
                     if not isinstance(saved, dict):
                         saved = {}
                     url = saved.get("url", "")
+                    if saved.get("expires_at", 0) > time.time() + 60 and self.private_ref(url):
+                        return url
                     if saved.get("expires_at", 0) > time.time() + 60 and trusted_object(url):
                         # GET signatures are method-specific. A range read checks the actual object.
                         async with http.stream("GET", url, headers={"Range":"bytes=0-0"}) as check:
@@ -136,8 +186,15 @@ class StudioMediaClient:
                 if result.status_code != 200:
                     raise VideoProviderError(f"平台未签发本地素材上传凭证（HTTP {result.status_code}）")
                 ticket = result.json()
-                put, get = ticket["upload_url"], ticket["read_url"]
-                if not trusted_object(put) or not trusted_object(get) or put.partition("?")[0] != get.partition("?")[0]:
+                put = ticket["upload_url"]
+                get = ticket.get("media_ref") or ticket.get("read_url")
+                if self.private_ref(get):
+                    key = urlsplit(get).path.removeprefix("/studio-temporary/v1/")
+                    valid = self.trusted_upload(put) and urlsplit(put).path.endswith("/" + key)
+                else:
+                    valid = (isinstance(get, str) and trusted_object(put) and trusted_object(get)
+                             and put.partition("?")[0] == get.partition("?")[0])
+                if not valid:
                     raise VideoProviderError("平台返回的临时素材地址无效")
                 response = await http.put(put, headers=ticket["headers"], content=file_chunks(obj.path))
                 if response.status_code not in (200, 201, 204):
@@ -160,6 +217,6 @@ def studio_client(team_id, *, base_url=None, api_key=None):
         return None
     if api_key and api_key.startswith("nv_") and base_url:
         return StudioMediaClient(base_url, api_key, team_id)
-    if settings.STUDIO_PLATFORM_BASE_URL and settings.STUDIO_PLATFORM_API_KEY:
+    if not base_url and not api_key and settings.STUDIO_PLATFORM_BASE_URL and settings.STUDIO_PLATFORM_API_KEY:
         return StudioMediaClient(settings.STUDIO_PLATFORM_BASE_URL, settings.STUDIO_PLATFORM_API_KEY, team_id)
     return None

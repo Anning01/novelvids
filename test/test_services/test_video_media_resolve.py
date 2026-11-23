@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from schemas.video import VideoOut, VideoQueryOut
+from services.oss import base as storage
 
 
 def _video_out(metadata: dict):
@@ -20,8 +21,9 @@ def _video_out(metadata: dict):
 def test_video_out_resolves_metadata_media(monkeypatch):
     """VideoOut 对 url 与 metadata 中的首尾帧/参考素材统一解析并写回。"""
     calls: list[str] = []
+    monkeypatch.setattr(storage.settings, "OSS_BUCKET", "")
     monkeypatch.setattr(
-        "schemas.video.resolve_media_url",
+        storage.oss, "resolve_url",
         lambda raw: calls.append(raw) or f"public://{raw}",
     )
     out = _video_out({
@@ -66,6 +68,18 @@ def test_video_out_resolves_metadata_media(monkeypatch):
     ]
 
 
+def test_studio_video_and_poster_keep_legacy_oss_urls(monkeypatch):
+    monkeypatch.setattr(storage.settings, "DEPLOYMENT_ROLE", "studio")
+    monkeypatch.setattr(storage.settings, "OSS_BUCKET", "old-bucket")
+    monkeypatch.setattr(storage.settings, "OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
+    monkeypatch.setattr(storage.settings, "OSS_PUBLIC_BASE", "https://media.example")
+    monkeypatch.setattr(storage, "oss", storage.LocalProvider())
+
+    out = _video_out({"poster_url": "uploads/0/posters/preview.webp"})
+    assert out.url == "https://media.example/uploads/0/20260820/x-video.mp4"
+    assert out.metadata["poster_url"] == "https://media.example/uploads/0/posters/preview.webp"
+
+
 def test_video_out_keeps_non_media_metadata(monkeypatch):
     """非字符串/缺失字段不触发解析，其它 metadata 原样保留。"""
     out = _video_out({"return_last_frame": True})
@@ -76,8 +90,9 @@ def test_video_out_keeps_non_media_metadata(monkeypatch):
 def test_video_query_out_resolves_injected_oss_last_frame(monkeypatch):
     """生成完成轮询响应也必须把注入尾帧的 OSS key 转成浏览器可访问 URL。"""
     calls: list[str] = []
+    monkeypatch.setattr(storage.settings, "OSS_BUCKET", "")
     monkeypatch.setattr(
-        "schemas.video.resolve_media_url",
+        storage.oss, "resolve_url",
         lambda raw: calls.append(raw) or f"public://{raw}",
     )
 

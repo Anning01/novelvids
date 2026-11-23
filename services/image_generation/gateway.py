@@ -154,17 +154,22 @@ async def generate_images(
     timeout: float | None = 600,
 ) -> list[GeneratedImage]:
     """Generate images through a backend-configured provider protocol."""
-    # URL-capable protocols can use private studio storage instead of embedding image bytes.
+    # Only media used by a model leaves the workstation.
     images = (extra_body or {}).get("image")
-    if images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value, ImageApiProtocol.novelvids.value}:
+    if images and api_protocol == ImageApiProtocol.novelvids.value:
         from services.oss.studio_client import studio_client
         studio = studio_client(None, base_url=base_url, api_key=api_key)
-        if not studio and api_protocol == ImageApiProtocol.novelvids.value:
+        if not studio:
             raise ImageGenerationError("本地猫影的平台密钥尚未配置")
-        if studio:
-            refs = [images] if isinstance(images, str) else images
-            uploaded = [await studio.resolve(ref) if ref.startswith(("data:", "/media/")) else ref for ref in refs]
-            extra_body = {**extra_body, "image":uploaded[0] if isinstance(images, str) else uploaded}
+        refs = [images] if isinstance(images, str) else images
+        resolved = [await studio.resolve_for_generation(ref) for ref in refs]
+        extra_body = {**extra_body, "image":resolved[0] if isinstance(images, str) else resolved}
+    elif images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value}:
+        # A directly configured provider cannot resolve Cat account-private references.
+        from services.oss.studio_client import inline_local_image
+        refs = [images] if isinstance(images, str) else images
+        direct = [await asyncio.to_thread(inline_local_image, ref) if ref.startswith("/media/") else ref for ref in refs]
+        extra_body = {**extra_body, "image": direct[0] if isinstance(images, str) else direct}
     prepared = image_protocol_adapter(api_protocol).prepare(
         ImageGenerationInput(
             model=model,

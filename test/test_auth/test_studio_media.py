@@ -49,11 +49,11 @@ async def test_reference_upload_policy_prefers_local_for_studio_storage(client, 
         return response.json()["data"]["direct"]
 
     assert await policy(model_config_id=platform.id) is False
-    assert await policy(model_config_id=custom.id) is True
+    assert await policy(model_config_id=custom.id) is False
     monkeypatch.setattr(settings, "STUDIO_PLATFORM_BASE_URL", "https://platform.example/v1")
     monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "nv_test")
     assert await policy(model_config_id=custom.id) is False
-    assert await policy() is True
+    assert await policy() is False
 
 
 @pytest.mark.parametrize("method,ttl,headers,expected", [
@@ -172,7 +172,7 @@ def test_signed_query_is_not_written_to_http_log():
     assert record.getMessage()=="HTTP Request: GET https://bucket.example/file"
 
 
-async def test_url_image_model_sends_direct_reference_without_inline_bytes(monkeypatch):
+async def test_direct_image_model_forwards_inline_without_platform_upload(monkeypatch):
     from unittest.mock import AsyncMock
     from services.image_generation.gateway import generate_images
     from services.oss import studio_client as local
@@ -182,11 +182,90 @@ async def test_url_image_model_sends_direct_reference_without_inline_bytes(monke
     original=httpx.AsyncClient
     def vendor(req):
         body=json.loads(req.content)
-        assert body['image']==["https://example.invalid/signed-file.png"]
-        assert b"base64" not in req.content
+        assert body['image']==["data:image/png;base64,YQ=="]
         return httpx.Response(200,json={"data":[{"url":"https://example.invalid/result.png"}]})
     monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:original(**kw,transport=httpx.MockTransport(vendor)))
     results=await generate_images(base_url="https://example.invalid/v3",api_key="custom-test",model="model",prompt="test",
         api_protocol="volcengine_ark",extra_body={"image":["data:image/png;base64,YQ=="]})
     assert results[0].url.endswith("/result.png")
-    reader.resolve.assert_awaited_once_with("data:image/png;base64,YQ==")
+    reader.resolve.assert_not_awaited()
+
+
+@pytest.mark.parametrize("use_oss", [False, True])
+async def test_studio_sends_provider_file_to_selected_backend_only(tmp_path, monkeypatch, use_oss):
+    from services.oss.studio_client import StudioMediaClient
+    monkeypatch.setattr(settings, "MEDIA_PATH", str(tmp_path/"projects"))
+    monkeypatch.setattr(settings, "STUDIO_MEDIA_CACHE_PATH", str(tmp_path/"cache"))
+    root = tmp_path/"projects"
+    root.mkdir()
+    (root/"frame.png").write_bytes(b"frame")
+    (root/"novel.txt").write_text("private novel")
+    key = "1/" + "a"*32 + ".png"
+    ref = "https://cat-media.invalid/studio-temporary/v1/"+key
+    put = ("https://bucket.oss-cn-guangzhou.aliyuncs.com/studio-temporary/v1/" if use_oss
+           else "https://cat.example/v1/media/temporary/")+key+"?signature=test"
+    sent = []
+    def dispatch(req):
+        sent.append(req.method)
+        if req.method == "POST":
+            assert req.url.host == "cat.example"
+            assert json.loads(req.content)["byte_length"] == 5
+            return httpx.Response(200, json={"media_ref":ref, "upload_url":put,
+                "headers":{"content-type":"image/png"}, "expires_at":4102444800})
+        assert req.method == "PUT" and str(req.url) == put
+        assert "authorization" not in req.headers and req.content == b"frame"
+        return httpx.Response(204)
+    orig = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: orig(transport=httpx.MockTransport(dispatch), **kw))
+    client = StudioMediaClient("https://cat.example/v1", "nv_test", 1)
+    from services.video.base import VideoProviderError
+    with pytest.raises(VideoProviderError):
+        await client.resolve("/media/novel.txt")
+    assert await client.resolve("https://user.example/image") == "https://user.example/image"
+    assert await client.resolve("/media/frame.png") == ref
+    assert await client.resolve("/media/frame.png") == ref
+    assert sent == ["POST", "PUT"] and (root/"novel.txt").exists()
+
+
+@pytest.mark.parametrize("backend", ["legacy_oss", "oss", "local", "legacy_without_schema"])
+async def test_inline_input_selects_wire_contract_before_generation(tmp_path, monkeypatch, backend):
+    from services.oss.studio_client import StudioMediaClient
+
+    monkeypatch.setattr(settings, "STUDIO_MEDIA_CACHE_PATH", str(tmp_path / "cache"))
+    client = StudioMediaClient("https://cat.example/v1", "nv_test", 1)
+    private = backend in {"oss", "local"}
+    object_key = "studio-temporary/v1/1/" + "a"*32 + ".png"
+    oss_url = "https://example.oss-cn-guangzhou.aliyuncs.com/" + object_key
+    put = ("https://cat.example/v1/media/temporary/1/" + "a"*32 + ".png" if backend == "local" else oss_url) + "?write=1"
+    read = "https://cat-media.invalid/" + object_key if private else oss_url + "?read=1"
+    calls = []
+    pixels = b"\x89PNG\r\n\x1a\nexample"
+    uri = "data:image/png;base64," + base64.b64encode(pixels).decode()
+
+    def dispatch(request):
+        calls.append(request.method)
+        if request.url.path == "/v1/openapi.json":
+            assert "authorization" not in request.headers
+            if backend == "legacy_without_schema":
+                return httpx.Response(404)
+            fields = {"media_ref" if private else "read_url": {"type":"string"}}
+            return httpx.Response(200, json={"components":{"schemas":{"UploadTicket":{"properties":fields}}}})
+        if request.url.path == "/v1/studio/media-lease":
+            assert request.headers["authorization"] == "Bearer nv_test"
+            return httpx.Response(200, json={"upload_url":put, "media_ref" if private else "read_url":read,
+                                            "headers":{"content-type":"image/png"}, "expires_at":4102444800})
+        assert str(request.url) == put and request.content == pixels and "authorization" not in request.headers
+        return httpx.Response(204)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(dispatch), **kw))
+    assert await client.resolve_for_generation("https://user.example/image.png") == "https://user.example/image.png"
+    assert not calls
+    assert await client.resolve_for_generation(uri) == (uri if private else read)
+    if private:
+        assert calls == ["GET"]
+        assert not (tmp_path / "cache").exists()
+        # After spending the request's inline budget the same input travels by ticket.
+        client._inline_remaining = 0
+        assert await client.resolve_for_generation(uri) == read
+    assert calls == ["GET", "POST", "PUT"]
