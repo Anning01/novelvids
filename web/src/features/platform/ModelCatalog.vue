@@ -260,7 +260,7 @@ function pricingRows(model: CatalogModel) {
   const pricing = model.pricing
   const rows: Array<{ label: string; value: number; unit: string; reference?: boolean }> = []
   const unit = model.kinds.includes('image') ? tr('张') : pricing.billing_unit === 'second' ? tr('秒')
-    : pricing.billing_unit === 'minute' ? tr('分钟') : tr('百万 token')
+    : pricing.billing_unit === 'per_video' ? tr('每条视频') : pricing.billing_unit === 'minute' ? tr('分钟') : tr('百万 token')
   for (const [field, label] of [
     ['input_price_per_1m', tr('输入单价')], ['output_price_per_1m', tr('输出单价')], ['cache_input_price_per_1m', tr('缓存输入')],
   ] as const) {

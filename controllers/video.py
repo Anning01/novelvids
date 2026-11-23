@@ -865,6 +865,8 @@ class VideoController(CRUDBase[Video, dict, dict]):
                 "status": new_status,
                 "usage_reported": result_metadata.get("duration") is not None,
                 "reported_seconds": result_metadata.get("duration"),
+                **({"video_count": int(new_status == TaskStatusEnum.completed.value)}
+                   if (config.pricing or {}).get("billing_unit") == "per_video" else {}),
                 "seconds": (result_metadata["duration"] if result_metadata.get("duration") is not None else metadata.get("duration")) if new_status == 3 else 0,
             }, "billing_pending": True}
             if "metadata" not in update_fields:

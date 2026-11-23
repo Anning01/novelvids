@@ -1116,3 +1116,33 @@ it.each(['dark', 'light'])('edits the synced H3 channel’s exact resolution tie
     delete document.documentElement.dataset.appTheme
   }
 })
+
+it.each(['dark', 'light'])('edits only the published fixed-price tier for a synced channel (%s)', async theme => {
+  document.documentElement.dataset.appTheme = theme
+  baseMocks()
+  const pinia = teamAdminStore()
+  useAuthStore(pinia).$patch({ deploymentRole: 'studio' })
+  useAuthStore(pinia).user!.is_super_admin = true
+  const pricing = { type: 'video', currency: 'CNY', billing_unit: 'per_video', prices: { '720p': 5 }, discount: 1 }
+  const current = { id: 851, scope: 'studio_platform', task_type: 4, task_types: [4], name: '测试渠道',
+    model: 'nv-851', video_model_type: 'seedance_2_5', api_protocol: 'novelvids', pricing, concurrency: 1, is_active: true }
+  vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [current] } } as never)
+  vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: true } } as never)
+  vi.spyOn(api, 'generationCapabilities').mockResolvedValue({ data: { image: {}, video: { seedance_2_5: ['480p', '720p', '1080p'] } } } as never)
+  const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: current } as never)
+  const wrapper = mountPage(pinia)
+  try {
+    await flushPromises()
+    await wrapper.get('.model-category-card.is-video').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '编辑本地价格')!.trigger('click')
+    const editor = wrapper.get('.pricing-editor')
+    expect(editor.text()).toContain('生成视频（元 / 条）')
+    expect(editor.findAll('label').map(label => [label.text(), label.get('input').element.value])).toEqual([['分辨率 720p', '5']])
+    await wrapper.get('form.model-modal').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(851, { pricing })
+  } finally {
+    wrapper.unmount()
+    delete document.documentElement.dataset.appTheme
+  }
+})

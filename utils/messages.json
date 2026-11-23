@@ -215,7 +215,7 @@
   "生图费用需要 prices 档位对象": "Image pricing requires a prices tier object",
   "视频模型的费用配置 type 必须为 video": "Video model pricing type must be video",
   "视频费用需要 prices 档位对象": "Video pricing requires a prices tier object",
-  "视频计费单位 billing_unit 仅支持 token 或 second": "Video billing_unit must be token or second",
+  "视频计费单位 billing_unit 仅支持 token、second 或 per_video": "Video billing_unit must be token, second or per_video",
   "当前视频模型必须使用{p1}计费": "This video model requires {p1} billing",
   "文本费用缺少合法的 {p1}": "Text pricing has an invalid or missing {p1}",
   "生图费用包含不支持的清晰度档位：{p1}": "Unsupported image quality tiers: {p1}",

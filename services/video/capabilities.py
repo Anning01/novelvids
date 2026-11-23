@@ -381,8 +381,8 @@ def capabilities_for_config(config) -> VideoModelCapabilities:
     if getattr(config, 'scope', None) != 'studio_platform':
         return caps
     pricing = config.pricing or {}
-    # The platform publishes the channel's per-second output tiers under its public model family.
-    if pricing.get('billing_unit') == 'second' and pricing.get('prices'):
+    # Channels in the same model family may sell different resolution tiers.
+    if pricing.get('type') == 'video' and pricing.get('prices'):
         tiers = tuple(pricing['prices'])
         default = next((tier for tier in tiers if tier.casefold() == caps.default_resolution.casefold()), tiers[0])
         return replace(caps, resolutions=tiers, default_resolution=default)

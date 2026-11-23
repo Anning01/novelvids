@@ -143,17 +143,20 @@ def compute_video_cost(
     input_video_seconds: float = 0.0,
     has_video_reference: bool = False,
     input_image_count: int = 0,
+    *, video_count: int = 1,
 ) -> Decimal:
-    """按配置的 token/秒策略计算输出视频及输入素材费用。
+    """计算按条、按秒或按 token 计费的视频费用。
 
     ``billing_unit=second`` 时，输出视频与输入参考视频分别按秒计费；
-    其余配置保持 Seedance 的元/百万 token 兼容算法。
+    per_video 按成片数量计费，与时长无关。
     """
     if not isinstance(pricing, dict) or pricing.get("type") != "video":
         return Decimal("0")
     output_prices = pricing.get("prices")
     if not isinstance(output_prices, dict) or resolution not in output_prices:
         return Decimal("0")
+    if pricing.get("billing_unit") == "per_video":
+        return _money(video_count * _as_decimal(output_prices[resolution]) * _discount(pricing))
     reference_prices = pricing.get("video_reference_prices") or output_prices
     if not isinstance(reference_prices, dict):
         reference_prices = output_prices

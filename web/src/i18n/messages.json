@@ -1,4 +1,8 @@
 {
+  "videoTariff": {
+    "每条视频": "video",
+    "生成视频（元 / 条）": "Generated video (CNY per video)"
+  },
   "remake_continuity": {
     "待衔接校对": "Awaiting continuity check",
     "识别资产与切分镜头": "Identifying assets and splitting shots",
