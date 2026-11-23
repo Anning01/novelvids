@@ -34,10 +34,28 @@ it('only offers a manual refresh after frontend replacement and honors a draft g
   window.removeEventListener('studio-before-refresh', guard)
   w.unmount()
 })
-it('remembers dismissal only for this optional release', async () => {
-  const w = await render(false)
-  await w.get('button').trigger('click')
-  expect(w.find('[role="region"]').exists()).toBe(false)
+it.each([true, false])('reopens a dismissed optional release after reload, admin=%s', async admin => {
+  const first = await render(admin)
+  await first.get('button[aria-expanded="true"]').trigger('click')
+  expect(first.text()).not.toContain('支持新模型')
   expect(localStorage.getItem('studio-release-dismissed')).toBe('1.2.0')
+  first.unmount()
+
+  const reopened = await render(admin)
+  const toggle = reopened.get('button[aria-expanded="false"]')
+  expect(toggle.text()).toContain('查看工作台更新')
+  await toggle.trigger('click')
+  expect(toggle.attributes('aria-expanded')).toBe('true')
+  expect(reopened.text()).toContain('支持新模型')
+  expect(reopened.text().includes('升级工作台')).toBe(admin)
+  expect(reopened.text().includes('请联系部署管理员')).toBe(!admin)
+  expect(localStorage.getItem('studio-release-dismissed')).toBeNull()
+  reopened.unmount()
+})
+
+it('shows a new optional release even when the previous version was dismissed', async () => {
+  localStorage.setItem('studio-release-dismissed', '1.1.1')
+  const w = await render(false)
+  expect(w.text()).toContain('支持新模型')
   w.unmount()
 })

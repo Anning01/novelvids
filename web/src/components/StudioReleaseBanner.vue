@@ -23,7 +23,9 @@ const newer = computed(() => {
 })
 const required = computed(() => Boolean(latest.value?.required.length))
 const failure = computed(() => ['rolled_back','failed','recovery_needed'].includes(status.value?.updater?.phase ?? ''))
-const visible = computed(() => pending.value || stale.value || (newer.value && (required.value || dismissed.value !== latest.value?.version)))
+const visible = computed(() => pending.value || stale.value || newer.value)
+const collapsible = computed(() => newer.value && !pending.value && !stale.value && !required.value)
+const collapsed = computed(() => collapsible.value && dismissed.value === latest.value?.version)
 let timer: ReturnType<typeof setTimeout>
 let checking = false
 let active = true
@@ -50,9 +52,15 @@ async function check() {
 function visibility() { if (Date.now() - checkedAt >= 15000) void check() }
 onMounted(() => { void check(); document.addEventListener('visibilitychange', visibility) })
 onBeforeUnmount(() => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility) })
-function dismiss() {
-  dismissed.value = latest.value!.version
-  localStorage.setItem('studio-release-dismissed', dismissed.value)
+function toggleDetails() {
+  if (!latest.value) return
+  if (collapsed.value) {
+    localStorage.removeItem('studio-release-dismissed')
+    dismissed.value = null
+  } else {
+    dismissed.value = latest.value.version
+    localStorage.setItem('studio-release-dismissed', dismissed.value)
+  }
 }
 async function refresh() {
   if (!window.dispatchEvent(new Event('studio-before-refresh', { cancelable: true }))) {
@@ -81,8 +89,8 @@ async function upgrade() {
 </script>
 
 <template>
-  <div v-if="visible" class="studio-release" role="region" :aria-label="tr('工作台更新')">
-    <span role="status">
+  <div v-if="visible" class="studio-release" :class="{ 'is-collapsed': collapsed }" role="region" :aria-label="tr('工作台更新')">
+    <span v-if="!collapsed" role="status">
       <template v-if="pending">{{ status?.updater?.phase === 'preparing' ? tr('正在准备新版工作台') : status?.updater?.phase === 'draining' ? tr('等待后台任务完成') : status?.updater?.phase === 'rolling_back' ? tr('正在恢复上一版工作台') : tr('正在升级工作台') }}</template>
       <template v-else-if="stale">{{ tr('工作台已更新，保存当前编辑后可刷新页面。') }}</template>
       <template v-else-if="latest">
@@ -94,20 +102,25 @@ async function upgrade() {
       </template>
       <span v-if="error" role="alert">{{ error }}</span>
     </span>
-    <template v-if="!pending">
+    <template v-if="!pending && !collapsed">
       <button v-if="stale" type="button" @click="refresh">{{ tr('刷新页面') }}</button>
       <template v-else-if="auth.isSuperAdmin">
         <button v-if="latest?.online && status?.updater && status.updater.phase !== 'recovery_needed'" type="button" :disabled="busy" @click="upgrade">{{ tr('升级工作台') }}</button>
         <a v-else href="https://github.com/Anning01/novelvids#在线升级" target="_blank" rel="noopener">{{ tr('查看升级步骤') }}</a>
       </template>
-      <button v-if="!stale && !required" type="button" @click="dismiss">{{ tr('收起此版本提醒') }}</button>
     </template>
+    <button v-if="collapsible" type="button" :aria-expanded="!collapsed" @click="toggleDetails">
+      {{ collapsed ? tr('查看工作台更新') : tr('收起此版本提醒') }}
+    </button>
   </div>
 </template>
 
 <style scoped>
 .studio-release { display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .85rem; padding:.55rem 1rem; flex:none; background:var(--app-surface,#fff); color:var(--app-text,#272936); border-bottom:1px solid var(--app-border,#dedee6); font-size:.875rem }
+.studio-release.is-collapsed { justify-content:flex-end; padding-block:.125rem }
 .studio-release > span { flex:1 1 20rem }
 .studio-release button,.studio-release a { font:inherit; color:inherit; text-decoration:underline; background:transparent; border:0; cursor:pointer; padding:.3rem }
+.studio-release button:hover:not(:disabled),.studio-release a:hover { background:var(--app-surface-hover) }
+.studio-release button:disabled { opacity:.6; cursor:wait }
 .studio-release button:focus-visible,.studio-release a:focus-visible { outline:2px solid currentColor }
 </style>
