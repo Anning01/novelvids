@@ -70,3 +70,10 @@ it('distinguishes a configured zero-cost asset tier from missing or incomplete p
   expect(estimateAssetImageCost(model, { ...params, clarity: '4K' }, 0)).toBeNaN()
   expect(estimateAssetImageCost({ ...model, pricing: {type: 'image', currency: 'CNY', billing_unit: 'pixel_tier', prices: {low: .13}} }, params, 0)).toBeNaN()
 })
+
+it('charges one video at the same price for all supported durations', () => {
+  const pricing: ModelPricing = { type: 'video', currency: 'CNY', billing_unit: 'per_video', prices: { '720p': 5 } }
+  for (let duration = 5; duration <= 30; duration++) {
+    expect(estimateVideoCost(pricing, '720p', duration, true, 10, 3)).toBe(5)
+  }
+})

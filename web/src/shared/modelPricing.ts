@@ -76,6 +76,7 @@ export function estimateVideoCost(
   if (!pricing || pricing.type !== 'video') return 0
   const resolutionKey = resolution ?? ''
   const outputPrice = pricing.prices?.[resolutionKey] ?? 0
+  if (pricing.billing_unit === 'per_video') return outputPrice
   const referencePrice = pricing.video_reference_prices?.[resolutionKey] ?? outputPrice
   const imageFee = pricing.input_image
     ? Math.max(0, Number(inputImageCount || 0) - pricing.input_image.first_free) * pricing.input_image.price_per_image

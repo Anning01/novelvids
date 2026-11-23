@@ -95,11 +95,13 @@ def _validate_video_pricing(pricing: dict, model_type, instance=None) -> None:
                 raise HTTPException(status_code=400, detail=localized_message('视频参考分辨率档位 {p1} 的费用必须为非负数字', p1=f'{tier}'))
     model_key = str(model_type)
     expected_unit = VIDEO_PRICING.get(model_key, {}).get("billing_unit", "token")
+    if instance and instance.scope == SYNC_SCOPE:
+        expected_unit = (instance.pricing or {}).get("billing_unit", "token")
     billing_unit = pricing.get("billing_unit", "token")
-    if billing_unit not in {"token", "second"}:
-        raise HTTPException(status_code=400, detail=localized_message('视频计费单位 billing_unit 仅支持 token 或 second'))
+    if billing_unit not in {"token", "second", "per_video"}:
+        raise HTTPException(status_code=400, detail=localized_message('视频计费单位 billing_unit 仅支持 token、second 或 per_video'))
     if billing_unit != expected_unit:
-        unit_label = "按秒" if expected_unit == "second" else "按 token"
+        unit_label = {"second": "按秒", "token": "按 token", "per_video": "按条"}[expected_unit]
         raise HTTPException(status_code=400, detail=localized_message('当前视频模型必须使用{p1}计费', p1=f'{unit_label}'))
     _validate_input_image_pricing(pricing, "视频")
 

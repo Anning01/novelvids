@@ -38,6 +38,17 @@ class CatalogModel(BaseModel):
     processing_options: dict | None = None
 
 
+def video_tariff_error(entry: CatalogModel) -> str | None:
+    raw = entry.pricing or {}
+    if entry.video_model_type and raw.get("type") == "video":
+        unit = raw.get("billing_unit", "token")
+        if unit not in ("token", "second", "call", "per_video"):
+            return f"billing_unit={unit}"
+        if raw.get("currency", "CNY") != "CNY":
+            return f"currency={raw.get('currency')}"
+    return None
+
+
 class Catalog(BaseModel):
     data: list[CatalogModel]
 
@@ -114,7 +125,7 @@ async def validate_model_activation(row: AiModelConfig) -> None:
     """A local switch cannot restore a withdrawn or incompatible remote model."""
     _, _, _, catalog = await _read_platform_catalog()
     entry = next((entry for entry in catalog.data if entry.id == row.model), None)
-    if (entry is None or not entry.is_active or
+    if (entry is None or not entry.is_active or video_tariff_error(entry) or
             entry.image_model_type != row.image_model_type or entry.video_model_type != row.video_model_type or
             not set(entry.task_types).intersection(SYNC_TASK_TYPES)):
         raise HTTPException(409, localized_message("该平台模型当前不可用，请同步模型目录后再试"))
@@ -137,6 +148,9 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
             unknown = [value for value, types in ((entry.image_model_type, ImageModelTypeEnum),
                                                   (entry.video_model_type, VideoGenerationModelTypeEnum))
                        if value is not None and value not in types]
+            tariff_error = video_tariff_error(entry)
+            if tariff_error:
+                unknown.append(tariff_error)
             if unknown:
                 unsupported[entry.id] = ", ".join(unknown)
                 await synced.filter(model=entry.id).update(is_active=False, api_key=key)
@@ -178,9 +192,13 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
                           supports_strict_output=entry.strict_output, text_api=entry.text_api,
                           processing_options=processing_options)
-            tariff = public_tariff(entry.pricing)
+            raw = entry.pricing or {}
+            tariff = public_tariff(raw)
+            if entry.video_model_type and raw.get("type") == "video":
+                unit = raw.get("billing_unit", "token")
+                tariff["billing_unit"] = "per_video" if unit == "call" else unit
             if row:
-                if entry.video_model_type and tariff.get('billing_unit') == 'second' and tariff.get('prices'):
+                if entry.video_model_type and tariff.get('type') == 'video' and tariff.get('prices'):
                     # Refresh base rates and tiers together; keep locally configured markups.
                     local = row.pricing or {}
                     values['pricing'] = {**tariff, **{key: local[key] for key in ('discount', 'discount_description') if key in local}}
