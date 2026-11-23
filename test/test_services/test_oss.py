@@ -217,9 +217,9 @@ def test_normalize_media_url_oss_downgrades_signed_url_to_key():
 
 
 @pytest.mark.asyncio
-async def test_upload_policy_direct_false_when_local(client: AsyncClient):
+async def test_upload_policy_direct_false_when_local(client: AsyncClient, editor_headers):
     response = await client.get(
-        "/api/file/upload-policy",
+        "/api/file/upload-policy", headers=editor_headers,
         params={"filename": "剧本.txt", "content_type": "text/plain"},
     )
     assert response.status_code == 200, response.text
@@ -227,7 +227,9 @@ async def test_upload_policy_direct_false_when_local(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_policy_direct_with_fake_provider(client, monkeypatch):
+async def test_upload_policy_direct_with_fake_provider(client, monkeypatch, editor_headers):
+    from config import settings
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "platform")
     from services.oss import base as oss_base
     from services.oss import oss as real_oss
 
@@ -244,7 +246,7 @@ async def test_upload_policy_direct_with_fake_provider(client, monkeypatch):
     fake = FakeProvider()
     monkeypatch.setattr("api.file.oss", fake)
     response = await client.get(
-        "/api/file/upload-policy",
+        "/api/file/upload-policy", headers=editor_headers,
         params={"filename": "剧本.txt", "content_type": "text/plain"},
     )
     data = response.json()["data"]
@@ -257,7 +259,7 @@ async def test_upload_policy_direct_with_fake_provider(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_oss_finalize_extracts_text_via_fake_provider(client, monkeypatch):
+async def test_oss_finalize_extracts_text_via_fake_provider(client, monkeypatch, editor_headers):
     from services.oss import base as oss_base
 
     class FakeProvider(oss_base.OSSProvider):
@@ -275,7 +277,7 @@ async def test_oss_finalize_extracts_text_via_fake_provider(client, monkeypatch)
     # oss_finalize 现经 services.document.analyze_oss_document 读取对象，需同步替换其 provider
     monkeypatch.setattr("services.document.oss", fake)
     response = await client.post(
-        "/api/file/oss-finalize",
+        "/api/file/oss-finalize", headers=editor_headers,
         json={"key": "uploads/0/20260818/x.txt", "original_filename": "剧本.txt"},
     )
     assert response.status_code == 200, response.text

@@ -42,7 +42,7 @@ async def get_upload_policy(
     model_config_id: int | None = Query(default=None, ge=1),
     ctx: AuthContext = _EDITOR,
 ):
-    if not oss.enabled:
+    if settings.DEPLOYMENT_ROLE == "studio" or not oss.enabled:
         return ResponseSchema(data={"direct": False})
     team_id = ctx.team_id
     if novel_id is not None:

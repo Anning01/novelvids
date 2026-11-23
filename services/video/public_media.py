@@ -35,6 +35,7 @@ class PublicMediaResolver:
         self.model_config = model_config
         self.team_id = team_id
         self._resolved: dict[str, str] = {}
+        self._studio = None
 
     async def resolve(self, source: str) -> str:
         if source in self._resolved:
@@ -42,11 +43,13 @@ class PublicMediaResolver:
         if not source.startswith(("data:", "/media/")):
             return public_media_url(source)
         from services.oss.studio_client import studio_client
-        studio = studio_client(self.team_id, base_url=getattr(self.model_config, "base_url", None),
-                              api_key=getattr(self.model_config, "api_key", None))
-        if studio:
-            # Check expiry and existence even if this resolver is retained between submissions.
-            return await studio.resolve(source)
+        if self._studio is None:
+            self._studio = studio_client(self.team_id, base_url=getattr(self.model_config, "base_url", None),
+                                         api_key=getattr(self.model_config, "api_key", None))
+        if self._studio:
+            if getattr(self.model_config, "api_protocol", None) == "novelvids":
+                return await self._studio.resolve_for_generation(source)
+            return await self._studio.resolve(source)
         if not oss.enabled:
             raise VideoProviderError(localized_message('当前视频接口需要公网参考素材，请配置对象存储或使用公网 URL'))
         if source.startswith("data:"):

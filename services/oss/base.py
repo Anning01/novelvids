@@ -122,7 +122,7 @@ class LocalProvider(OSSProvider):
 
 
 def _build_provider() -> OSSProvider:
-    if settings.OSS_PROVIDER == "aliyun":
+    if settings.DEPLOYMENT_ROLE != "studio" and settings.OSS_PROVIDER == "aliyun":
         from services.oss.aliyun import AliyunProvider
 
         return AliyunProvider(
@@ -141,6 +141,11 @@ oss: OSSProvider = _build_provider()
 
 def resolve_media_url(raw: str | None) -> str | None:
     """对外暴露的媒体地址解析入口：落库存 key，读取时拼接公共读 URL。"""
+    if (settings.DEPLOYMENT_ROLE == "studio" and not oss.enabled and raw
+            and raw.startswith(("uploads/", "remake/")) and settings.OSS_BUCKET and settings.OSS_ENDPOINT):
+        # Keep previously uploaded project references readable while all new originals stay local.
+        base = settings.OSS_PUBLIC_BASE or f"https://{settings.OSS_BUCKET}.{settings.OSS_ENDPOINT}"
+        return f"{base.rstrip('/')}/{raw}"
     return oss.resolve_url(raw)
 
 
