@@ -371,3 +371,39 @@ async def test_refresh_public_h3_channel_uses_advertised_resolution_prices(monke
     with pytest.raises(HTTPException):
         await generator.submit('测试镜头', resolution='2K', duration=6)
     assert send.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('wire_unit', 'local_unit', 'prices', 'cost'), [
+    ('call', 'per_video', {'720p': 5}, 5),
+    ('token', 'token', {'720p': .50}, .108),
+    ('second', 'second', {'480p': .4, '720p': .5}, 5),
+])
+async def test_video_tariff_follows_channel_on_create_and_refresh(monkeypatch, wire_unit, local_unit, prices, cost):
+    from decimal import Decimal
+    from controllers.config import ai_model_config_controller
+    from schemas.config import AiModelConfigPatch
+    from services.billing.pricing import compute_video_cost
+    from services.video.capabilities import capabilities_for_config
+
+    entry = {'id': 'nv-851', 'name': '测试视频渠道', 'task_types': [4], 'video_model_type': 'seedance_2_5',
+             'pricing': {'type': 'video', 'currency': 'CNY', 'billing_unit': wire_unit, 'prices': prices}}
+    client = httpx.AsyncClient
+    monkeypatch.setattr(studio_platform.httpx, 'AsyncClient', lambda **kw: client(**kw,
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json={'data': [entry]}))))
+    await studio_platform.sync_platform_models('nv_test')
+    row = await AiModelConfig.get(model=entry['id'])
+    assert row.pricing['billing_unit'] == local_unit
+    # Reproduce an old client that kept the numbers and lost the billing unit.
+    await AiModelConfig.filter(id=row.id).update(pricing={'type': 'video', 'prices': {'1080p': 7}, 'discount': .8})
+    await studio_platform.sync_platform_models()
+    await row.refresh_from_db()
+    assert row.pricing == {**entry['pricing'], 'billing_unit': local_unit, 'discount': .8}
+    assert capabilities_for_config(row).resolutions == tuple(prices)
+    await ai_model_config_controller.patch(row.id, AiModelConfigPatch(pricing=row.pricing))
+    assert compute_video_cost(10, '720p', row.pricing) == Decimal(str(cost)) * Decimal('.8')
+    entry['pricing']['billing_unit'] = 'unknown-future-unit'
+    result = await studio_platform.sync_platform_models()
+    await row.refresh_from_db()
+    assert result['synced'] == 0 and not row.is_active
+    assert row.pricing['billing_unit'] == local_unit

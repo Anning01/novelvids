@@ -247,7 +247,7 @@ export interface ModelPricing {
   prices?: Record<string, number>
   input_image?: { first_free: number; price_per_image: number }
   video_reference_prices?: Record<string, number>
-  billing_unit?: 'pixel_tier' | 'token' | 'second' | 'minute'
+  billing_unit?: 'pixel_tier' | 'token' | 'second' | 'per_video' | 'minute'
   tiers?: Array<{ short_side_max: number; fps_max: number; price: number }>
   discount?: number
   discount_description?: string

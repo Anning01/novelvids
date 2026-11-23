@@ -191,6 +191,9 @@ class BillingRecorder:
             "has_video_reference": bool(has_video_reference),
             "input_image_count": int(input_image_count or 0),
         }
+        video_count = int(status == TaskStatusEnum.completed.value)
+        if config and (config.pricing or {}).get("billing_unit") == "per_video":
+            usage["video_count"] = video_count
         cost = compute_video_cost(
             seconds,
             resolution,
@@ -198,6 +201,7 @@ class BillingRecorder:
             input_video_seconds=input_video_seconds,
             has_video_reference=has_video_reference,
             input_image_count=input_image_count,
+            video_count=video_count,
         )
         return await self._create(
             novel_id=novel_id,

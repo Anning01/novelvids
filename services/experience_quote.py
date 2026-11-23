@@ -78,21 +78,22 @@ async def clip_quote(payload: ExperienceQuoteIn | ExperienceGenerateIn, ctx: Aut
             selected = video_selection(capabilities_for_config(config), generation_mode='reference', resolution=payload.resolution,
                 aspect_ratio=payload.aspect_ratio, duration=payload.duration, output_format=None, generate_audio=None)
             pricing = _price(config.pricing, 'video', selected.resolution)
-            if pricing.get('billing_unit') != 'second' and selected.resolution not in TOKENS_PER_SECOND:
+            if pricing.get('billing_unit') not in {'second', 'per_video'} and selected.resolution not in TOKENS_PER_SECOND:
                 raise ValueError(localized_message('当前档位无法计算预计价格，请联系管理员'))
             references = _references(payload)
             videos = [item for item in references if item.type == 'video']
-            if any(item.duration is None or not math.isfinite(item.duration) or item.duration <= 0 for item in videos):
+            if pricing.get("billing_unit") != "per_video" and any(item.duration is None or not math.isfinite(item.duration) or item.duration <= 0 for item in videos):
                 raise ValueError(localized_message('参考视频时长尚未确认，暂时无法报价'))
             reference_prices = pricing.get('video_reference_prices')
             if videos and reference_prices:
                 _price({**pricing, 'prices': reference_prices}, 'video', selected.resolution)
+            input_seconds = sum(item.duration or 0 for item in videos)
             total = compute_video_cost(payload.duration, selected.resolution, pricing,
-                input_video_seconds=sum(item.duration for item in videos), has_video_reference=bool(videos),
+                input_video_seconds=input_seconds, has_video_reference=bool(videos),
                 input_image_count=sum(item.type == 'image' for item in references) + int(payload.mode == 'reference'))
             pricing_undiscounted = {**pricing, 'discount': 1}
             original_total = compute_video_cost(payload.duration, selected.resolution, pricing_undiscounted,
-                input_video_seconds=sum(item.duration for item in videos), has_video_reference=bool(videos),
+                input_video_seconds=input_seconds, has_video_reference=bool(videos),
                 input_image_count=sum(item.type == 'image' for item in references) + int(payload.mode == 'reference'))
         else:
             selected = image_selection(config.image_model_type, clarity=payload.resolution, aspect_ratio=payload.aspect_ratio,

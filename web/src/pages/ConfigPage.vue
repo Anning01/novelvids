@@ -259,7 +259,7 @@ const pixelTierLabels: Record<string, string> = {
 const pricingTierOptions = computed<string[]>(() => {
   if (selectedCategoryId.value === 'image' && editedBillingUnit.value === 'pixel_tier') return Object.keys(tierPrices.value)
   if (selectedCategoryId.value === 'image') return generationCapabilities.value.image[form.value.image_model_type] || []
-  if (selectedCategoryId.value === 'video' && editingSyncedPricing.value && editedBillingUnit.value === 'second') {
+  if (selectedCategoryId.value === 'video' && editingSyncedPricing.value) {
     const tiers = Object.keys(tierPrices.value)
     if (tiers.length) return tiers
   }
@@ -272,10 +272,17 @@ const selectedVideoPricingPreset = computed(() => (
     ? generationCapabilities.value.video_pricing?.[form.value.video_model_type]
     : undefined
 ))
-const isSecondBillingVideo = computed(() => (
-  selectedCategoryId.value === 'video'
-  && (editingSyncedPricing.value ? editedBillingUnit.value : selectedVideoPricingPreset.value?.billing_unit) === 'second'
-))
+const videoBillingUnit = computed(() => (editingSyncedPricing.value ? editedBillingUnit.value : selectedVideoPricingPreset.value?.billing_unit) ?? 'token')
+const isSecondBillingVideo = computed(() => videoBillingUnit.value === 'second')
+
+const syncedPricing = computed(() => editingSyncedPricing.value
+  ? configs.value.find(item => item.id === editingConfigId.value)?.pricing : undefined)
+const referenceVideoTiers = computed(() => {
+  if (videoBillingUnit.value === 'per_video') return []
+  return editingSyncedPricing.value ? Object.keys(syncedPricing.value?.video_reference_prices ?? {}) : pricingTierOptions.value
+})
+const showReferenceImagePricing = computed(() => isSecondBillingVideo.value
+  && (!editingSyncedPricing.value || !!syncedPricing.value?.input_image))
 
 function applyVideoPricingPreset() {
   const pricing = selectedVideoPricingPreset.value
@@ -529,8 +536,8 @@ async function saveConfig() {
   creating.value = true
   try {
     const taskTypes = form.value.task_types.map(Number)
-    const tierPriceEntries = (source: Record<string, number>) => Object.fromEntries(
-      pricingTierOptions.value.map(tier => {
+    const tierPriceEntries = (source: Record<string, number>, tiers = pricingTierOptions.value) => Object.fromEntries(
+      tiers.map(tier => {
         const value = source[tier]
         return [tier, typeof value === 'number' && !Number.isNaN(value) ? value : 0]
       })
@@ -567,11 +574,11 @@ async function saveConfig() {
       pricing = {
         type: 'video',
         currency: 'CNY',
-        billing_unit: isSecondBillingVideo.value ? 'second' : 'token',
+        billing_unit: videoBillingUnit.value,
         prices: tierPriceEntries(tierPrices.value),
-        video_reference_prices: tierPriceEntries(videoRefPrices.value),
+        ...(referenceVideoTiers.value.length ? { video_reference_prices: tierPriceEntries(videoRefPrices.value, referenceVideoTiers.value) } : {}),
       }
-      if (isSecondBillingVideo.value) {
+      if (showReferenceImagePricing.value) {
         pricing.input_image = {
           first_free: Number(inputImagePricing.value.first_free) || 0,
           price_per_image: Number(inputImagePricing.value.price_per_image) || 0,
@@ -1020,23 +1027,23 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
           </div>
         </section>
         <section v-else-if="selectedCategoryId === 'video' && pricingTierOptions.length" class="pricing-editor">
-          <span class="pricing-title">{{ isSecondBillingVideo ? tr('生成视频（元 / 秒）') : tr('无视频参考（元 / 百万 token）') }}</span>
+          <span class="pricing-title">{{ videoBillingUnit === 'per_video' ? tr('生成视频（元 / 条）') : isSecondBillingVideo ? tr('生成视频（元 / 秒）') : tr('无视频参考（元 / 百万 token）') }}</span>
           <div class="pricing-grid">
             <label v-for="tier in pricingTierOptions" :key="tier">
               <span>{{ tr('分辨率') }} {{ tier }}</span>
               <input v-model.number="tierPrices[tier]" type="number" min="0" step="0.01" />
             </label>
           </div>
-          <div class="pricing-sub">
+          <div v-if="referenceVideoTiers.length" class="pricing-sub">
             <span class="pricing-title">{{ isSecondBillingVideo ? tr('输入参考视频（元 / 秒，按输入时长）') : tr('有视频参考（元 / 百万 token）') }}</span>
             <div class="pricing-grid">
-              <label v-for="tier in pricingTierOptions" :key="tier">
+              <label v-for="tier in referenceVideoTiers" :key="tier">
                 <span>{{ tr('分辨率') }} {{ tier }}</span>
                 <input v-model.number="videoRefPrices[tier]" type="number" min="0" step="0.01" />
               </label>
             </div>
           </div>
-          <div v-if="isSecondBillingVideo" class="pricing-sub">
+          <div v-if="showReferenceImagePricing" class="pricing-sub">
             <span class="pricing-title">{{ tr('输入参考图片') }}</span>
             <div class="pricing-grid">
               <label><span>{{ tr('免费张数') }}</span><input v-model.number="inputImagePricing.first_free" type="number" min="0" step="1" /></label>

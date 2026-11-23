@@ -200,6 +200,8 @@ def measured(inputs, metadata, rates):
     if not nonnegative(seconds) or seconds <= 0:
         return None
     usage = {**inputs, "seconds":seconds, "duration_source":"provider" if metadata.get("duration") is not None else "order"}
+    if rates.get("billing_unit") == "per_video":
+        return {**usage, "input_video_seconds": 0}
     tokens = raw.get("completion_tokens") if isinstance(raw,dict) else None
     if rates.get("billing_unit") != "second" and type(tokens) is int and tokens > 0:
         return {**usage,"video_tokens":tokens}
