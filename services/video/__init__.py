@@ -14,4 +14,7 @@ def get_generator(config: AiModelConfig) -> BaseVideoGenerator:
 
 def get_record_model_type(config: AiModelConfig) -> VideoModelTypeEnum:
     """返回视频记录使用的兼容供应商枚举。"""
+    if (getattr(config, "scope", None) == "studio_platform" and config.api_protocol == "novelvids"
+            and config.video_model_type not in video_generator_factory.registered_model_types):
+        return VideoModelTypeEnum.platform_video
     return video_generator_factory.record_model_type(config.video_model_type)

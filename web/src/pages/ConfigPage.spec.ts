@@ -1082,7 +1082,8 @@ it.each(['light', 'dark'])('selects the Flash preset with only its supported res
   delete document.documentElement.dataset.appTheme
 })
 
-it.each(['dark', 'light'])('edits the synced H3 channel’s exact resolution tiers and zero input rates (%s)', async theme => {
+it.each([['dark', 'minimax_h3'], ['light', 'minimax_h3'], ['light', 'future_video']])(
+  'edits synced resolution tiers and zero input rates (%s, %s)', async (theme, modelType) => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()
   const pinia = teamAdminStore()
@@ -1092,7 +1093,7 @@ it.each(['dark', 'light'])('edits the synced H3 channel’s exact resolution tie
     prices: { '480p': 0.08, '768p': 0.1 }, video_reference_prices: { '480p': 0, '768p': 0 },
     input_image: { first_free: 9, price_per_image: 0 } }
   const current = { id: 14, scope: 'studio_platform', task_type: 4, task_types: [4], name: 'MiniMax H3',
-    model: 'nv-14', video_model_type: 'minimax_h3', api_protocol: 'novelvids', pricing, concurrency: 1, is_active: true }
+    model: 'nv-14', video_model_type: modelType, api_protocol: 'novelvids', pricing, concurrency: 1, is_active: true }
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [current] } } as never)
   vi.spyOn(api, 'studioPlatform').mockResolvedValue({ data: { connected: true } } as never)
   vi.spyOn(api, 'generationCapabilities').mockResolvedValue({ data: { image: {}, video: { minimax_h3: ['768P', '2K'] } } } as never)

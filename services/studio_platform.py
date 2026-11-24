@@ -12,6 +12,7 @@ from config import settings
 from models.config import AiModelConfig, StudioPlatformConnection
 from services.platform.catalog import PUBLIC_KINDS, public_tariff
 from utils.enums import AiTaskTypeEnum, ImageModelTypeEnum, VideoGenerationModelTypeEnum
+from services.video.capabilities import platform_video_capabilities
 from services.video_enhancement.contract import EnhancementOptions
 from utils.messages import localized_message
 from schemas.platform_billing import PlatformAccountOut
@@ -28,6 +29,7 @@ class CatalogModel(BaseModel):
     task_types: list[int] = Field(min_length=1)
     image_model_type: str | None = None
     video_model_type: str | None = None
+    video_capabilities: object | None = None
     concurrency: int = Field(default=1, ge=1)
     is_active: bool = True
     tool_calls: bool = False
@@ -125,6 +127,15 @@ async def validate_model_activation(row: AiModelConfig) -> None:
     """A local switch cannot restore a withdrawn or incompatible remote model."""
     _, _, _, catalog = await _read_platform_catalog()
     entry = next((entry for entry in catalog.data if entry.id == row.model), None)
+    if entry and entry.video_capabilities is not None:
+        try:
+            current = platform_video_capabilities(entry.video_capabilities).public_dict()
+        except ValueError:
+            raise HTTPException(409, "平台视频能力无效，请重新同步目录") from None
+        if (row.processing_options or {}).get("video_capabilities") != current:
+            raise HTTPException(409, "平台视频能力已变更，请重新同步目录")
+    elif entry and (row.processing_options or {}).get("video_capabilities"):
+        raise HTTPException(409, "平台视频能力已变更，请重新同步目录")
     if (entry is None or not entry.is_active or video_tariff_error(entry) or
             entry.image_model_type != row.image_model_type or entry.video_model_type != row.video_model_type or
             not set(entry.task_types).intersection(SYNC_TASK_TYPES)):
@@ -145,9 +156,19 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
             capabilities = sorted(set(entry.task_types).intersection(SYNC_TASK_TYPES))
             if not entry.is_active or not capabilities or entry.id in seen:
                 continue
-            unknown = [value for value, types in ((entry.image_model_type, ImageModelTypeEnum),
-                                                  (entry.video_model_type, VideoGenerationModelTypeEnum))
-                       if value is not None and value not in types]
+            unknown = []
+            processing_options = {}
+            if entry.image_model_type is not None and entry.image_model_type not in ImageModelTypeEnum:
+                unknown.append(entry.image_model_type)
+            if entry.video_capabilities is not None:
+                try:
+                    if not entry.video_model_type or len(entry.video_model_type) > 40 or AiTaskTypeEnum.video not in capabilities:
+                        raise ValueError
+                    processing_options["video_capabilities"] = platform_video_capabilities(entry.video_capabilities).public_dict()
+                except ValueError:
+                    unknown.append("video_capabilities")
+            elif entry.video_model_type is not None and entry.video_model_type not in VideoGenerationModelTypeEnum:
+                unknown.append(entry.video_model_type)
             tariff_error = video_tariff_error(entry)
             if tariff_error:
                 unknown.append(tariff_error)
@@ -167,13 +188,12 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                     unsupported[entry.id] = "voice_design"
                     await synced.filter(model=entry.id).update(is_active=False, api_key=key)
                     continue
-            processing_options = None
             if AiTaskTypeEnum.video_enhancement.value in capabilities and entry.processing_options is not None:
                 try:
                     options = EnhancementOptions.model_validate({
                         field: value for field, value in entry.processing_options.items() if field in PUBLIC_PROCESSING_FIELDS
                     })
-                    processing_options = options.model_dump(mode="json", include=PUBLIC_PROCESSING_FIELDS)
+                    processing_options.update(options.model_dump(mode="json", include=PUBLIC_PROCESSING_FIELDS))
                 except ValidationError:
                     raise HTTPException(502, localized_message("平台画质增强能力配置无效")) from None
             row = await synced.filter(model=entry.id).select_for_update().first()
@@ -191,7 +211,7 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                           image_model_type=entry.image_model_type, video_model_type=entry.video_model_type,
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
                           supports_strict_output=entry.strict_output, text_api=entry.text_api,
-                          processing_options=processing_options)
+                          processing_options=processing_options or None)
             raw = entry.pricing or {}
             tariff = public_tariff(raw)
             if entry.video_model_type and raw.get("type") == "video":

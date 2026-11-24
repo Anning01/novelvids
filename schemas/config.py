@@ -97,6 +97,8 @@ class AiModelConfigPatch(AiModelConfigProperties):
 class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
     """配置输出。"""
 
+    video_model_type: str | None = Field(None, max_length=40)
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="配置ID")
@@ -153,6 +155,7 @@ class VideoGenerationCapabilitiesOut(BaseModel):
     output_formats: list[str] = Field(..., description="支持的视频输出格式")
     generation_modes: list[str] = Field(..., description="支持的视频生成方式")
     duration_min: int = Field(..., description="最短生成时长（秒）")
+    duration_choices: list[int] = Field(default_factory=list, description="可选的离散时长，空列表表示连续范围")
     duration_max: int = Field(..., description="最长生成时长（秒）")
     supports_auto_duration: bool = Field(..., description="是否支持自动时长 -1")
     supports_audio: bool = Field(..., description="是否支持生成同步音频")
@@ -198,7 +201,7 @@ class VideoGenerationModelOut(BaseModel):
     config_id: int = Field(..., description="模型配置ID")
     name: str = Field(..., description="配置名称")
     model: str = Field(..., description="供应商模型ID")
-    model_type: VideoGenerationModelTypeEnum = Field(..., description="视频生成模型类型")
+    model_type: str = Field(..., description="视频生成模型类型")
     concurrency: int = Field(..., description="并发数")
     pricing: Optional[dict] = None
     capabilities: VideoGenerationCapabilitiesOut = Field(..., description="视频生成参数能力")

@@ -28,7 +28,7 @@ from schemas.video import (
 )
 from controllers.config import ai_model_config_controller
 from models.config import AiModelConfig
-from services.video.capabilities import VideoModelCapabilities, capabilities_for
+from services.video.capabilities import VideoModelCapabilities, capabilities_for_config
 from services.video.reference_media import save_reference_upload
 from utils.enums import AiTaskTypeEnum
 from utils.page import QueryParams, get_list_params
@@ -115,7 +115,7 @@ async def _reference_capabilities(config_id: int, ctx: AuthContext) -> VideoMode
         raise HTTPException(status_code=400, detail=localized_message('所选模型未启用或已被删除'))
     task_type = AiTaskTypeEnum.video if config.video_model_type else AiTaskTypeEnum.reference_image
     config = await ai_model_config_controller.get_active(task_type.value, config_id, team_id=ctx.team_id)
-    return capabilities_for(config.video_model_type, config.api_protocol) if config.video_model_type else IMAGE_REFERENCE_CAPABILITIES
+    return capabilities_for_config(config) if config.video_model_type else IMAGE_REFERENCE_CAPABILITIES
 
 
 @router.post("/reference/oss-finalize", summary="OSS 直传后登记视频或生图参考素材（不再经过服务器）")

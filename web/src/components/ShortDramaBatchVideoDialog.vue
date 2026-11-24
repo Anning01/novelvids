@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelDuration } from '@/shared/videoDuration'
 import BillingPriceTag from '@/components/BillingPriceTag.vue'
 import { estimateVideoCost } from '@/shared/modelPricing'
 import { tr } from '@/i18n'
@@ -93,10 +94,9 @@ const allSelected = computed(() => (
 const selectedGenerationScenes = computed(() => {
   const model = selectedModel.value
   if (!model) return []
-  const { duration_min, duration_max } = model.capabilities
   return eligibleScenes.value
     .filter(scene => selectedIds.value.includes(scene.id))
-    .map(scene => ({ ...scene, duration: Math.max(duration_min, Math.min(duration_max, scene.duration)) }))
+    .map(scene => ({ ...scene, duration: modelDuration(scene.duration, model.capabilities) }))
 })
 const totalDuration = computed(() => selectedGenerationScenes.value.reduce((sum, scene) => sum + scene.duration, 0))
 const estimatedTotal = computed(() => selectedGenerationScenes.value.reduce((sum, scene) => sum + estimateVideoCost(

@@ -404,6 +404,8 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
 }
 
 function openEdit(item: AiModelConfig) {
+  const localVideoType = (Object.keys(VIDEO_MODEL_PRESETS) as VideoGenerationModelType[])
+    .find(type => type === item.video_model_type) || ''
   editingSyncedPricing.value = item.scope === 'studio_platform'
   editedBillingUnit.value = item.pricing?.billing_unit
   const category = categories.find(value => value.taskTypes.includes(item.task_type)) ?? categories[0]
@@ -418,9 +420,9 @@ function openEdit(item: AiModelConfig) {
     base_url: item.base_url || '',
     api_key: item.api_key || '',
     model: item.model || '',
-    api_protocol: item.api_protocol || (category.id === 'video' ? videoProtocolFor(item.video_model_type || '') : 'openai_compatible'),
+    api_protocol: item.api_protocol || (category.id === 'video' ? videoProtocolFor(localVideoType) : 'openai_compatible'),
     image_model_type: item.image_model_type || '',
-    video_model_type: item.video_model_type || '',
+    video_model_type: localVideoType,
     concurrency: item.concurrency,
     supports_tool_calls: item.supports_tool_calls ?? false,
     text_api: item.text_api ?? 'chat_completions',
@@ -524,7 +526,7 @@ async function saveConfig() {
     notice.error(tr('请配置全部清晰度档位的输出图单价'))
     return
   }
-  if (selectedCategoryId.value === 'video' && !form.value.video_model_type) {
+  if (selectedCategoryId.value === 'video' && !editingSyncedPricing.value && !form.value.video_model_type) {
     notice.error(tr('请选择受支持的视频模型'))
     return
   }

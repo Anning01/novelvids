@@ -1,3 +1,4 @@
+import { modelDuration } from '@/shared/videoDuration'
 import type { Scene, VideoGenerationCapabilities } from '@/types'
 
 export const SHOT_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'] as const
@@ -106,7 +107,7 @@ export function shotGenerationOptions(
     : capabilities.default_output_format
   const roundedDuration = Math.round(config.duration)
   const duration = capabilities
-    ? Math.max(capabilities.duration_min, Math.min(capabilities.duration_max, roundedDuration))
+    ? modelDuration(roundedDuration, capabilities)
     : roundedDuration
   return {
     generation_mode: generationMode,

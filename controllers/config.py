@@ -169,6 +169,9 @@ class AiModelConfigController(CRUDBase[AiModelConfig, AiModelConfigCreate, AiMod
         protocol = data.get("api_protocol")
         if protocol is None and instance is not None:
             protocol = instance.api_protocol
+        if instance and instance.scope == SYNC_SCOPE and protocol == "novelvids":
+            configured_video_capabilities(instance)
+            return
         video_capabilities_for(model_type)
         validate_video_protocol(model_type, str(protocol))
         video_generator_factory.validate_model_type(model_type)

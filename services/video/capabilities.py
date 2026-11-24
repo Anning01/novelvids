@@ -7,6 +7,8 @@ from utils.messages import localized_message
 from dataclasses import dataclass, replace
 
 from fastapi import HTTPException
+from pydantic import TypeAdapter
+from schemas.config import VideoGenerationCapabilitiesOut
 
 from utils.enums import VideoGenerationModelTypeEnum
 from utils.image_protocol import ImageApiProtocol
@@ -63,6 +65,7 @@ class VideoModelCapabilities:
     default_aspect_ratio: str = "adaptive"
     default_output_format: str = "mp4"
     default_generate_audio: bool = True
+    duration_choices: tuple[int, ...] = ()
     api_protocol: ImageApiProtocol = ImageApiProtocol.volcengine_ark
 
     def public_dict(self) -> dict:
@@ -75,6 +78,7 @@ class VideoModelCapabilities:
             },
             "output_formats": list(self.output_formats),
             "generation_modes": list(self.generation_modes),
+            "duration_choices": list(self.duration_choices),
             "duration_min": self.duration_min,
             "duration_max": self.duration_max,
             "supports_auto_duration": self.supports_auto_duration,
@@ -376,7 +380,33 @@ def capabilities_for(
         raise HTTPException(status_code=400, detail=localized_message('该视频配置未选择受支持的视频模型类型')) from exc
 
 
+_PLATFORM_CAPABILITIES = TypeAdapter(VideoModelCapabilities)
+
+
+def platform_video_capabilities(raw: object) -> VideoModelCapabilities:
+    """Read only the public video capability fields from the model catalog."""
+    public = VideoGenerationCapabilitiesOut.model_validate(raw, strict=True)
+    if (not 1 <= public.duration_min <= public.duration_max <= 3600
+            or any(not public.duration_min <= item <= public.duration_max for item in public.duration_choices)
+            or public.default_resolution not in public.resolutions or public.default_aspect_ratio not in public.aspect_ratios
+            or public.default_output_format not in public.output_formats or public.output_formats != ["mp4"]
+            or not public.generation_modes or not set(public.generation_modes).issubset(GENERATION_MODES)
+            or any(not public.aspect_ratios_by_mode.get(mode)
+                   or not set(public.aspect_ratios_by_mode[mode]).issubset(public.aspect_ratios)
+                   for mode in public.generation_modes)
+            or min(public.max_reference_images, public.max_reference_videos, public.max_reference_audios) < 0):
+        raise ValueError("无效的平台视频能力")
+    return _PLATFORM_CAPABILITIES.validate_python({**public.model_dump(), "api_protocol": ImageApiProtocol.novelvids})
+
+
 def capabilities_for_config(config) -> VideoModelCapabilities:
+    if getattr(config, "scope", None) == "studio_platform" and config.api_protocol == "novelvids":
+        raw = (getattr(config, "processing_options", None) or {}).get("video_capabilities")
+        if raw is not None:
+            try:
+                return platform_video_capabilities(raw)
+            except ValueError:
+                raise HTTPException(400, "平台视频能力无效，请重新同步目录") from None
     caps = capabilities_for(config.video_model_type, config.api_protocol)
     if getattr(config, 'scope', None) != 'studio_platform':
         return caps
@@ -417,7 +447,7 @@ def protocol_options() -> dict[str, list[dict]]:
             {"value": protocol.value, "label": labels[protocol], "resolutions": list(caps.resolutions)}
             for protocol, caps in [
                 (default.api_protocol, default),
-                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models and protocol != ImageApiProtocol.unified_video),
+                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models and protocol not in (default.api_protocol, ImageApiProtocol.unified_video)),
             ]
         ]
         for model, default in CAPABILITIES.items()
@@ -472,6 +502,9 @@ def validate_selection(
         raise HTTPException(status_code=400, detail=localized_message('所选比例不受当前视频模型支持'))
     if selected_format not in capabilities.output_formats:
         raise HTTPException(status_code=400, detail=localized_message('所选视频格式不受当前视频模型支持'))
+    if capabilities.duration_choices and selected_duration not in capabilities.duration_choices:
+        choices = "、".join(map(str, capabilities.duration_choices))
+        raise HTTPException(400, f"当前视频模型支持的时长为 {choices} 秒")
     if selected_duration != -1 and not capabilities.duration_min <= selected_duration <= capabilities.duration_max:
         raise HTTPException(
             status_code=400,

@@ -15,7 +15,7 @@ from schemas.resource_library import (
 )
 from services.oss import oss
 from services.resource_storage import resource_storage
-from services.video.capabilities import capabilities_for
+from services.video.capabilities import capabilities_for_config
 from utils.enums import AiTaskTypeEnum
 from utils.response_format import ResponseSchema
 
@@ -179,7 +179,7 @@ async def delete_folder(folder_id: int, team: int | None = Depends(library_team)
 @router.post("/selection")
 async def selection(payload: ResourceSelection, team: int | None = Depends(library_team), ctx: AuthContext = _EDITOR):
     config = await ai_model_config_controller.get_active(AiTaskTypeEnum.video.value, payload.model_config_id, team_id=team or None)
-    caps = capabilities_for(config.video_model_type, config.api_protocol)
+    caps = capabilities_for_config(config)
     selected = []
     for resource_id in payload.ids:
         resource = await resource_for(None if ctx.is_super_admin else team, resource_id, kind=None)

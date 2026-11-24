@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelDuration } from '@/shared/videoDuration'
 import { provide } from 'vue'
 import { useCreationAgentStore } from '@/features/creation-agent/store'
 import StoryboardGenerationOptions from '@/components/StoryboardGenerationOptions.vue'
@@ -689,10 +690,7 @@ function sceneAspectRatio(scene: Scene, model: VideoGenerationModel | null = sel
 function sceneDuration(scene: Scene, model: VideoGenerationModel | null = selectedVideoModelConfig.value) {
   const draftDuration = Math.round(Number(draftFor(scene).duration) || 0)
   if (!model) return Math.max(1, draftDuration)
-  return Math.max(
-    model.capabilities.duration_min,
-    Math.min(model.capabilities.duration_max, draftDuration),
-  )
+  return modelDuration(draftDuration, model.capabilities)
 }
 
 function sceneVideoEstimate(scene: Scene) {

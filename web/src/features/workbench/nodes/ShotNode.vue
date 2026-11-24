@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelDuration } from '@/shared/videoDuration'
 import { tr } from '@/i18n'
 
 import type { NodeProps } from '@vue-flow/core'
@@ -493,7 +494,7 @@ watch([selectedModel, generationMode], ([model]) => {
       ? capabilities.default_aspect_ratio
       : ratios[0]) as ShotWorkbenchConfig['aspectRatio']
   }
-  config.value.duration = Math.max(capabilities.duration_min, Math.min(capabilities.duration_max, config.value.duration))
+  config.value.duration = modelDuration(config.value.duration, capabilities)
   if (!capabilities.output_formats.includes(config.value.outputFormat)) {
     config.value.outputFormat = capabilities.default_output_format
   }

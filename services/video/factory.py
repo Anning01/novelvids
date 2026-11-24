@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from models.config import AiModelConfig
 from services.video.autodl import AutoDLVideoGenerator
 from services.video.base import BaseVideoGenerator
-from services.video.capabilities import capabilities_for
+from services.video.capabilities import capabilities_for, capabilities_for_config
 from services.video.minimax import MiniMaxH3Generator
 from services.video.seedance import SeedanceGenerator
 from services.video.unified import UnifiedVideoGenerator
@@ -58,6 +58,9 @@ class VideoGeneratorFactory:
             raise HTTPException(status_code=400, detail=localized_message('该视频模型尚未配置请求适配器')) from exc
 
     def create(self, config: AiModelConfig) -> BaseVideoGenerator:
+        if getattr(config, "scope", None) == "studio_platform" and config.api_protocol == ImageApiProtocol.novelvids:
+            capabilities_for_config(config)
+            return UnifiedVideoGenerator(config)
         capabilities_for(config.video_model_type, config.api_protocol)
         self.validate_model_type(config.video_model_type)
         model_type = VideoGenerationModelTypeEnum(config.video_model_type)

@@ -140,6 +140,9 @@ class VideoModelTypeEnum(NicknameIntEnum):
     veo3 = 4, "Veo3"
     minimax = 5, "MiniMax"
     wan = 6, "Wan/万相"
+    muse = 7, "Muse"
+    grok = 8, "Grok Imagine"
+    platform_video = 9, "平台视频"
 
 
 @enum_description
