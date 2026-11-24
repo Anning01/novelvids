@@ -165,7 +165,7 @@ export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_c
 export type ImageModelType = 'seedream_5_5' | 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
 export interface ImageGenerationCapabilities { sizes?: Record<string, string[]>; clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
-export type VideoGenerationModelType = 'muse_video' | 'grok_imagine_video_1_5' | 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'seedance_2_5_flash' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
+export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'seedance_2_5_flash' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
 export interface VideoGenerationOptions {
   auto_enhancement?: AutoEnhancement | null
   generation_mode?: 'reference' | 'keyframes'
@@ -236,7 +236,7 @@ export interface VideoGenerationCapabilities {
   default_output_format: string
   default_generate_audio: boolean
 }
-export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: VideoGenerationModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
+export interface VideoGenerationModel { config_id: number; name: string; model: string; model_type: string; concurrency: number; pricing?: ModelPricing | null; capabilities: VideoGenerationCapabilities }
 export interface ModelPricing {
   type: 'text' | 'image' | 'video' | 'media_processing' | 'asr' | 'voice_design'
   currency: string
@@ -263,7 +263,7 @@ export interface GenerationCapabilities {
   video_protocols?: Partial<Record<VideoGenerationModelType, Array<{ value: ImageApiProtocol; label: string; resolutions: string[] }>>>
   video_pricing?: Partial<Record<VideoGenerationModelType, ModelPricing>>
 }
-export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: VideoGenerationModelType | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; supports_strict_output?: boolean; text_api?: 'chat_completions' | 'responses'; max_context_characters?: number | null; thinking?: string | null; reasoning_effort?: string | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team' | 'studio_platform'; team_id?: number | null; created_at: string; updated_at: string }
+export interface AiModelConfig { id: number; task_type: number; task_types?: number[]; name: string; base_url?: string; api_key?: string; model?: string; api_protocol: ImageApiProtocol; image_model_type?: ImageModelType | null; video_model_type?: string | null; is_active: boolean; concurrency: number; supports_json_output: boolean; supports_tool_calls?: boolean; supports_strict_output?: boolean; text_api?: 'chat_completions' | 'responses'; max_context_characters?: number | null; thinking?: string | null; reasoning_effort?: string | null; max_tokens?: number | null; pricing?: ModelPricing | null; processing_options?: Record<string, unknown> | null; scope?: 'official' | 'team' | 'studio_platform'; team_id?: number | null; created_at: string; updated_at: string }
 export interface GeneralConfig { id: number; prompt_language: 'zh' | 'en'; created_at: string; updated_at: string }
 export interface AudioReference { id: number; nickname: string; gender: string; audio_url: string; avatar_url: string; asset_id: string; source?: 'system' | 'upload'; duration?: number | null; team_id?: number | null; is_active: boolean; created_at: string; updated_at: string }
 export interface DigitalHuman { id: number; country: string; age: number; gender: string; occupation: string; asset_id: string; image_url: string; is_active: boolean; created_at: string; updated_at: string }

@@ -97,6 +97,8 @@ class AiModelConfigPatch(AiModelConfigProperties):
 class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
     """配置输出。"""
 
+    video_model_type: str | None = Field(None, max_length=40)
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="配置ID")
@@ -199,7 +201,7 @@ class VideoGenerationModelOut(BaseModel):
     config_id: int = Field(..., description="模型配置ID")
     name: str = Field(..., description="配置名称")
     model: str = Field(..., description="供应商模型ID")
-    model_type: VideoGenerationModelTypeEnum = Field(..., description="视频生成模型类型")
+    model_type: str = Field(..., description="视频生成模型类型")
     concurrency: int = Field(..., description="并发数")
     pricing: Optional[dict] = None
     capabilities: VideoGenerationCapabilitiesOut = Field(..., description="视频生成参数能力")
