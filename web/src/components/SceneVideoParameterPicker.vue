@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelDuration } from '@/shared/videoDuration'
 import { tr } from '@/i18n'
 
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
@@ -53,9 +54,9 @@ const selectedResolution = computed(() => capabilities.value?.resolutions.includ
   ? props.resolution
   : capabilities.value?.default_resolution || capabilities.value?.resolutions[0] || '720p')
 const selectedDuration = computed(() => {
-  const minimum = capabilities.value?.duration_min || 4
-  const maximum = capabilities.value?.duration_max || 30
-  return Math.max(minimum, Math.min(maximum, Math.round(props.duration || minimum)))
+  const caps = capabilities.value
+  const seconds = Math.round(props.duration || caps?.duration_min || 4)
+  return caps ? modelDuration(seconds, caps) : Math.max(4, Math.min(30, seconds))
 })
 const summary = computed(() => tr('{p0}秒 · {p1} · {p2}', { p0: selectedDuration.value, p1: selectedRatio.value === 'adaptive' ? tr('自适应') : selectedRatio.value, p2: selectedResolution.value }) + (props.autoEnhancement ? ` → ${props.autoEnhancement.resolution.toUpperCase()}` : ''))
 const summaryIconStyle = computed(() => {
@@ -207,7 +208,10 @@ onBeforeUnmount(close)
           <div><TimerReset :size="15" /><strong>{{ tr('视频时长') }}</strong></div>
           <b>{{ tr('当前') }} {{ selectedDuration }} {{ tr('秒') }}</b>
         </header>
-        <input
+        <select v-if="capabilities?.duration_choices?.length" :value="selectedDuration" :aria-label="tr('视频时长')" @change="updateDuration">
+          <option v-for="seconds in capabilities.duration_choices" :key="seconds" :value="seconds">{{ seconds }} {{ tr('秒') }}</option>
+        </select>
+        <input v-else
           class="duration-slider"
           type="range"
           :min="capabilities?.duration_min || 4"

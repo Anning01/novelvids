@@ -140,6 +140,8 @@ class VideoModelTypeEnum(NicknameIntEnum):
     veo3 = 4, "Veo3"
     minimax = 5, "MiniMax"
     wan = 6, "Wan/万相"
+    muse = 7, "Muse"
+    grok = 8, "Grok Imagine"
 
 
 @enum_description
@@ -153,6 +155,8 @@ class VideoGenerationModelTypeEnum(NicknameStrEnum):
     seedance_2_5_flash = "seedance_2_5_flash", "Doubao Seedance 2.5 Flash"
     minimax_h3 = "minimax_h3", "MiniMax H3"
     minimax_h3_autodl = "minimax_h3_autodl", "MiniMax H3 · AutoDL"
+    muse_video = "muse_video", "Muse Video"
+    grok_imagine_video_1_5 = "grok_imagine_video_1_5", "Grok Imagine Video 1.5"
     wan_3 = "wan_3", "Wan 3.0"
 
 

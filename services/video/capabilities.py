@@ -63,6 +63,7 @@ class VideoModelCapabilities:
     default_aspect_ratio: str = "adaptive"
     default_output_format: str = "mp4"
     default_generate_audio: bool = True
+    duration_choices: tuple[int, ...] = ()
     api_protocol: ImageApiProtocol = ImageApiProtocol.volcengine_ark
 
     def public_dict(self) -> dict:
@@ -75,6 +76,7 @@ class VideoModelCapabilities:
             },
             "output_formats": list(self.output_formats),
             "generation_modes": list(self.generation_modes),
+            "duration_choices": list(self.duration_choices),
             "duration_min": self.duration_min,
             "duration_max": self.duration_max,
             "supports_auto_duration": self.supports_auto_duration,
@@ -339,6 +341,24 @@ CAPABILITIES[VideoGenerationModelTypeEnum.minimax_h3_autodl] = replace(
 )
 
 
+CAPABILITIES[VideoGenerationModelTypeEnum.muse_video] = VideoModelCapabilities(
+    api_protocol=ImageApiProtocol.novelvids, resolutions=("720p",), aspect_ratios=("16:9", "9:16"),
+    aspect_ratios_by_mode={"reference": ("16:9", "9:16")}, generation_modes=("reference",),
+    output_formats=("mp4",), duration_min=5, duration_max=10, duration_choices=(5, 6, 8, 10),
+    supports_auto_duration=False, supports_audio=False, default_generate_audio=False, supports_return_last_frame=False,
+    default_aspect_ratio="16:9", max_reference_images=1, max_reference_videos=0, max_reference_audios=0,
+    reference_video_duration_max=0, reference_video_total_duration_max=0, reference_audio_duration_max=0,
+    reference_audio_total_duration_max=0, reference_audio_duration_min=0, max_request_size_mb=8,
+    reference_image_formats=("png", "jpg", "jpeg", "webp"), reference_image_max_size_mb=8,
+    supports_temporary_file_upload=True,
+)
+CAPABILITIES[VideoGenerationModelTypeEnum.grok_imagine_video_1_5] = replace(
+    CAPABILITIES[VideoGenerationModelTypeEnum.muse_video], resolutions=("480p", "720p", "1080p"),
+    aspect_ratios=("adaptive",), aspect_ratios_by_mode={"reference": ("adaptive",)},
+    default_aspect_ratio="adaptive", duration_min=1, duration_max=15, duration_choices=(),
+)
+
+
 PROTOCOL_CAPABILITIES = {
     ImageApiProtocol.unified_video: {
         model_type: replace(
@@ -417,7 +437,7 @@ def protocol_options() -> dict[str, list[dict]]:
             {"value": protocol.value, "label": labels[protocol], "resolutions": list(caps.resolutions)}
             for protocol, caps in [
                 (default.api_protocol, default),
-                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models and protocol != ImageApiProtocol.unified_video),
+                *((protocol, models[model]) for protocol, models in PROTOCOL_CAPABILITIES.items() if model in models and protocol not in (default.api_protocol, ImageApiProtocol.unified_video)),
             ]
         ]
         for model, default in CAPABILITIES.items()
@@ -472,6 +492,9 @@ def validate_selection(
         raise HTTPException(status_code=400, detail=localized_message('所选比例不受当前视频模型支持'))
     if selected_format not in capabilities.output_formats:
         raise HTTPException(status_code=400, detail=localized_message('所选视频格式不受当前视频模型支持'))
+    if capabilities.duration_choices and selected_duration not in capabilities.duration_choices:
+        choices = "、".join(map(str, capabilities.duration_choices))
+        raise HTTPException(400, f"当前视频模型支持的时长为 {choices} 秒")
     if selected_duration != -1 and not capabilities.duration_min <= selected_duration <= capabilities.duration_max:
         raise HTTPException(
             status_code=400,

@@ -44,12 +44,17 @@ const gifIntervalStep = computed(() => imageModel.value?.capabilities.frame_dura
 const gifIntervalValid = computed(() => Number.isInteger(Number(frameInterval.value)) && Number(frameInterval.value) >= gifIntervalMin.value && Number(frameInterval.value) <= gifIntervalMax.value)
 const gifParametersValid = computed(() => !gifEnabled.value || (gifFrameCounts.value.includes(Number(frameCount.value)) && gifIntervalValid.value))
 const gifParameters = computed(() => gifEnabled.value ? { frame_count: Number(frameCount.value), frame_duration_ms: Number(frameInterval.value) } : {})
-const ratios = computed(() => model.value?.capabilities.aspect_ratios.filter(value => value !== 'adaptive') ?? [])
+const ratios = computed(() => {
+  const supported = model.value?.capabilities.aspect_ratios ?? []
+  const fixed = supported.filter(value => value !== 'adaptive')
+  return fixed.length ? fixed : supported
+})
 const resolutions = computed(() => taskType.value === 'video' ? videoModel.value?.capabilities.resolutions ?? []
   : imageModel.value?.capabilities.clarities_by_format?.[outputFormat.value] ?? imageModel.value?.capabilities.clarities ?? [])
 const durations = computed(() => {
   const caps = videoModel.value?.capabilities
   if (!caps) return []
+  if (caps.duration_choices?.length) return caps.duration_choices.map(String)
   return Array.from({ length: caps.duration_max - caps.duration_min + 1 }, (_, index) => String(index + caps.duration_min))
 })
 const quoteInput = computed(() => {
@@ -256,7 +261,7 @@ async function create() {
           </div>
           <div class="composer-controls">
             <div class="composer-settings">
-              <div><span>{{ tr('比例') }}</span><AppSelect menu-class="home-select-menu" v-model="ratio" :options="ratios.length ? ratios : [{ value: '', label: '—' }]" :ariaLabel="tr('画面比例')" density="compact" :disabled="!model" /></div>
+              <div><span>{{ tr('比例') }}</span><AppSelect menu-class="home-select-menu" v-model="ratio" :options="ratios.length ? ratios.map(value => ({value, label: value === 'adaptive' ? tr('自适应') : value})) : [{ value: '', label: '—' }]" :ariaLabel="tr('画面比例')" density="compact" :disabled="!model" /></div>
               <div v-if="!gifEnabled"><span>{{ tr('清晰度') }}</span><AppSelect menu-class="home-select-menu" v-model="resolution" :options="resolutions.length ? resolutions : [{ value: '', label: '—' }]" :ariaLabel="tr('清晰度')" density="compact" :disabled="!model" /></div>
               <div v-if="taskType === 'image' && imageFormats.includes('gif')"><span>{{ tr('格式') }}</span><AppSelect menu-class="home-select-menu" v-model="outputFormat" :options="[{value:'png',label:tr('PNG 静态图')},{value:'gif',label:tr('GIF 动图')}]" :ariaLabel="tr('图片格式')" density="compact" :disabled="!model" /></div>
               <div v-if="taskType === 'video'"><span>{{ tr('时长') }}</span><AppSelect menu-class="home-select-menu" v-model="duration" :options="durations.length ? durations.map(value => ({value, label: `${value}s`})) : [{ value: duration, label: '—' }]" :ariaLabel="tr('片段时长')" density="compact" :disabled="!model" /></div>

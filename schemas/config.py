@@ -153,6 +153,7 @@ class VideoGenerationCapabilitiesOut(BaseModel):
     output_formats: list[str] = Field(..., description="支持的视频输出格式")
     generation_modes: list[str] = Field(..., description="支持的视频生成方式")
     duration_min: int = Field(..., description="最短生成时长（秒）")
+    duration_choices: list[int] = Field(default_factory=list, description="可选的离散时长，空列表表示连续范围")
     duration_max: int = Field(..., description="最长生成时长（秒）")
     supports_auto_duration: bool = Field(..., description="是否支持自动时长 -1")
     supports_audio: bool = Field(..., description="是否支持生成同步音频")

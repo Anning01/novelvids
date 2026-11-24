@@ -33,6 +33,21 @@ const model = {
 } satisfies VideoGenerationModel
 
 describe('SceneVideoParameterPicker', () => {
+  it('offers only the supported Muse durations and emits the selected seconds', async () => {
+    const wrapper = mount(SceneVideoParameterPicker, {
+      props: { model: { ...model, capabilities: { ...model.capabilities, duration_min: 5,
+        duration_max: 10, duration_choices: [5, 6, 8, 10] } },
+        mode: 'reference', duration: 7, aspectRatio: '16:9', resolution: '720p', returnLastFrame: false },
+      global: { stubs: { Teleport: true } },
+    })
+    await wrapper.get('button').trigger('click')
+    const select = wrapper.get('select[aria-label="视频时长"]')
+    expect(select.findAll('option').map(option => option.element.value)).toEqual(['5', '6', '8', '10'])
+    await select.setValue('8')
+    expect(wrapper.emitted('update:duration')).toEqual([[8]])
+    wrapper.unmount()
+  })
+
   it('can select an enhancement target from a nested teleported menu without closing the parameter panel', async () => {
     const host = document.createElement('div')
     document.body.append(host)

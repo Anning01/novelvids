@@ -165,7 +165,7 @@ export type ImageApiProtocol = 'novelvids' | 'openai_compatible' | 'openrouter_c
 export type ImageModelType = 'seedream_5_5' | 'seedream_5_lite' | 'seedream_5_pro' | 'seedream_5_flash' | 'gpt_image_2' | 'gpt_image_2_5' | 'gpt_image_2_6' | 'gpt_image_2_6_sunburst' | 'gpt_image_2_6_flare'
 export interface ImageGenerationCapabilities { sizes?: Record<string, string[]>; clarities: string[]; aspect_ratios: string[]; output_formats: string[]; generation_counts: number[]; default_clarity: string; default_aspect_ratio: string; default_output_format: string; default_generation_count: number; frame_counts?: number[]; default_frame_count?: number; frame_duration_ms_min?: number; frame_duration_ms_max?: number; frame_duration_ms_step?: number; default_frame_duration_ms?: number; clarities_by_format?: Record<string, string[]> }
 export interface ImageGenerationModel { config_id: number; name: string; model: string; model_type: ImageModelType; concurrency: number; pricing?: ModelPricing | null; capabilities: ImageGenerationCapabilities }
-export type VideoGenerationModelType = 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'seedance_2_5_flash' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
+export type VideoGenerationModelType = 'muse_video' | 'grok_imagine_video_1_5' | 'seedance_2' | 'seedance_2_fast' | 'seedance_2_mini' | 'seedance_2_5' | 'seedance_2_5_flash' | 'minimax_h3' | 'minimax_h3_autodl' | 'wan_3'
 export interface VideoGenerationOptions {
   auto_enhancement?: AutoEnhancement | null
   generation_mode?: 'reference' | 'keyframes'
@@ -195,6 +195,7 @@ export interface VideoGenerationCapabilities {
   aspect_ratios_by_mode: Record<string, string[]>
   output_formats: string[]
   generation_modes: string[]
+  duration_choices?: number[]
   duration_min: number
   duration_max: number
   supports_auto_duration: boolean

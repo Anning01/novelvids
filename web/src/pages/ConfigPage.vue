@@ -99,6 +99,8 @@ const VIDEO_MODEL_PRESETS: Record<VideoGenerationModelType, { baseUrl: string; m
   seedance_2_5_flash: { baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seedance-2-5-flash-261115', protocol: 'volcengine_ark' },
   minimax_h3_autodl: { baseUrl: 'https://autodl.art/api/v1/comfyui', model: 'minimax_h3_zm_u24', protocol: 'autodl' },
   minimax_h3: { baseUrl: 'https://api.minimaxi.com', model: 'MiniMax-H3', protocol: 'minimax' },
+  muse_video: { baseUrl: '', model: 'muse-video', protocol: 'novelvids' },
+  grok_imagine_video_1_5: { baseUrl: '', model: 'grok-imagine-video-1.5', protocol: 'novelvids' },
   wan_3: { baseUrl: 'https://YOUR_WORKSPACE_ID.cn-beijing.maas.aliyuncs.com', model: 'wan3.0-video', protocol: 'dashscope' },
 }
 

@@ -95,6 +95,8 @@ video_generator_factory = VideoGeneratorFactory({
     VideoGenerationModelTypeEnum.minimax_h3_autodl: VideoGeneratorAdapterSpec(
         AutoDLVideoGenerator, VideoModelTypeEnum.minimax
     ),
+    VideoGenerationModelTypeEnum.muse_video: VideoGeneratorAdapterSpec(UnifiedVideoGenerator, VideoModelTypeEnum.muse),
+    VideoGenerationModelTypeEnum.grok_imagine_video_1_5: VideoGeneratorAdapterSpec(UnifiedVideoGenerator, VideoModelTypeEnum.grok),
     VideoGenerationModelTypeEnum.wan_3: VideoGeneratorAdapterSpec(
         Wan3Generator, VideoModelTypeEnum.wan
     ),
