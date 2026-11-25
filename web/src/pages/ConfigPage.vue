@@ -182,12 +182,13 @@ const editingSyncedPricing = ref(false)
 const editedBillingUnit = ref<ModelPricing['billing_unit']>()
 const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
-const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' })
+const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, schema_in_prompt: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' })
 const outputMode = computed({
   get: () => form.value.supports_strict_output ? 'json_schema' : 'text',
   set: (value: string) => {
     form.value.supports_json_output = value !== 'text'
     form.value.supports_strict_output = value === 'json_schema'
+    if (!form.value.supports_strict_output) form.value.schema_in_prompt = false
   },
 })
 
@@ -375,7 +376,7 @@ function openCreate(categoryId: ModelCategoryId = selectedCategoryId.value) {
   editingSyncedPricing.value = false
   selectedCategoryId.value = categoryId
   const category = categories.find(item => item.id === categoryId) ?? categories[0]
-  form.value = { task_types: [String(category.id === 'llm' ? 7 : category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
+  form.value = { task_types: [String(category.id === 'llm' ? 7 : category.taskTypes[0])], name: '', base_url: category.id === 'video' ? 'https://ark.cn-beijing.volces.com/api/v3' : '', api_key: '', model: '', api_protocol: category.id === 'image' || category.id === 'video' ? 'volcengine_ark' : 'openai_compatible', image_model_type: category.id === 'image' ? 'seedream_5_lite' : '', video_model_type: category.id === 'video' ? 'seedance_2' : '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, schema_in_prompt: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' }
   const asrPreset = generationCapabilities.value.audio_recognition
   voiceDesignPrice.value = ''
   if (category.id === 'voice_design') form.value.api_protocol = 'mimo_voice_design'
@@ -428,6 +429,7 @@ function openEdit(item: AiModelConfig) {
     text_api: item.text_api ?? 'chat_completions',
     supports_json_output: item.supports_json_output ?? false,
     supports_strict_output: item.supports_strict_output ?? false,
+    schema_in_prompt: item.schema_in_prompt ?? false,
     max_context_characters: item.max_context_characters ?? '',
     thinking: item.thinking ?? '',
     reasoning_effort: item.reasoning_effort ?? '',
@@ -935,6 +937,14 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
             <AppSelect v-model="outputMode" :ariaLabel="tr('结构化输出')" :menu-z-index="2000"
               :options="[{ value: 'text', label: tr('不支持') }, { value: 'json_schema', label: 'JSON Schema' }]" />
             <small>{{ tr('文本创作任务仅使用 JSON Schema 严格字段约束。') }}</small>
+          </label>
+          <label v-if="selectedCategory.id === 'llm' && form.supports_strict_output" class="json-capability-field is-full">
+            <span class="json-capability-copy">
+              <strong :id="`${reasoningControlId}-schema-label`">{{ tr('在提示词中附加 JSON Schema') }}</strong>
+              <small :id="`${reasoningControlId}-schema-help`">{{ tr('当网关接受 JSON Schema 却返回错误字段时开启。') }}</small>
+            </span>
+            <input v-model="form.schema_in_prompt" name="schema_in_prompt" type="checkbox" role="switch"
+              :aria-labelledby="`${reasoningControlId}-schema-label`" :aria-describedby="`${reasoningControlId}-schema-help`" />
           </label>
         </div>
 

@@ -55,7 +55,8 @@ async def prepare_trial(body: SkillTrialInput, ctx):
         except ValueError as error:
             raise HTTPException(400, localized_message(str(error))) from None
     instructions, content = render_text_task(language=language, skill=skill,
-        context={'input': body.input, 'episode_pacing': body.episode_pacing.model_dump()})
+        context={'input': body.input, 'episode_pacing': body.episode_pacing.model_dump()},
+        output_schema=contract['schema'] if chosen.schema_in_prompt else None)
     context_size = len(instructions) + len(content) + len(json.dumps(contract, ensure_ascii=False))
     if chosen.max_context_characters and context_size > chosen.max_context_characters:
         raise HTTPException(400, localized_message('内容超过模型上下文上限，请缩短技能或测试输入'))

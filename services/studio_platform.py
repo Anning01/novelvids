@@ -36,6 +36,7 @@ class CatalogModel(BaseModel):
     json_output: bool = False
     text_api: Literal["chat_completions", "responses"] = "chat_completions"
     strict_output: bool = False
+    schema_in_prompt: bool = False
     pricing: dict | None = None
     processing_options: dict | None = None
 
@@ -210,7 +211,7 @@ async def sync_platform_models(replacement: str | None = None) -> dict:
                           base_url=base_url, api_key=key, api_protocol="novelvids", is_active=row.local_enabled if row else True, concurrency=entry.concurrency,
                           image_model_type=entry.image_model_type, video_model_type=entry.video_model_type,
                           supports_tool_calls=entry.tool_calls, supports_json_output=entry.json_output,
-                          supports_strict_output=entry.strict_output, text_api=entry.text_api,
+                          supports_strict_output=entry.strict_output, schema_in_prompt=entry.schema_in_prompt, text_api=entry.text_api,
                           processing_options=processing_options or None)
             raw = entry.pricing or {}
             tariff = public_tariff(raw)

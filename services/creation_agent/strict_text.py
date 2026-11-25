@@ -123,7 +123,7 @@ async def generate(execution, facts: dict) -> dict:
         skill=params['creative_method'], context={
             'input': facts, 'user_request': await user_instruction(params),
             'project': project_facts},
-        output_schema=contract['schema'] if getattr(chosen, 'schema_in_prompt', False) else None)
+        output_schema=contract['schema'] if chosen.schema_in_prompt else None)
     messages = [ModelRequest(parts=[SystemPromptPart(instructions), UserPromptPart(content)])]
     request = ModelRequestParameters()
     if operation in {'assets', 'storyboard', 'screenplay'}:

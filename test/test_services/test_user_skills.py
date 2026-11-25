@@ -121,7 +121,7 @@ asyncio.run(run())
 '''
     subprocess.run([sys.executable, '-c', script], check=True, env={**os.environ, 'DATABASE_URL': f'sqlite://{path}'})
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT id,name,supports_strict_output,text_api FROM ai_model_configs').fetchall() == [(1, 'existing', 0, 'chat_completions')]
+        assert db.execute('SELECT id,name,supports_strict_output,schema_in_prompt,text_api FROM ai_model_configs').fetchall() == [(1, 'existing', 0, 0, 'chat_completions')]
         assert db.execute('SELECT COUNT(*) FROM user_skills').fetchone() == (0,)
         assert db.execute('SELECT COUNT(*) FROM task_skill_preferences').fetchone() == (0,)
 
@@ -139,6 +139,7 @@ async def test_postgres_upgrade_uses_safe_additive_statements(monkeypatch):
     await ensure_text_task_schema()
     sql = '\n'.join(call.args[0] for call in connection.execute_script.await_args_list)
     assert 'ADD COLUMN IF NOT EXISTS supports_strict_output BOOL NOT NULL DEFAULT FALSE' in sql
+    assert 'ADD COLUMN IF NOT EXISTS schema_in_prompt BOOL NOT NULL DEFAULT FALSE' in sql
     assert "ADD COLUMN IF NOT EXISTS files JSONB NOT NULL DEFAULT '[]'::jsonb" in sql
     assert 'DROP' not in sql and 'DELETE' not in sql
     assert all(call.kwargs['safe'] for call in generator._get_table_sql.call_args_list)

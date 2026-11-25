@@ -84,7 +84,7 @@ it.each([
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 32, name: '结构化模型', task_type: 7, task_types: [7],
     scope: 'team', team_id: 9, model: 'structured', api_protocol: 'openai_compatible', base_url: 'https://upstream.invalid', api_key: 'fixture',
-    is_active: true, concurrency: 1, supports_json_output: jsonOutput, supports_strict_output: strict,
+    is_active: true, concurrency: 1, supports_json_output: jsonOutput, supports_strict_output: strict, schema_in_prompt: strict,
     pricing: { type: 'text', input_price_per_1m: 1, output_price_per_1m: 2 } }] } } as never)
   const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
   const wrapper = mountPage(teamAdminStore())
@@ -94,12 +94,17 @@ it.each([
     const form = wrapper.get('form.model-modal')
     const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
     expect(format.props('modelValue')).toBe(strict ? 'json_schema' : 'text')
+    const toggle = 'input[name="schema_in_prompt"]'
+    expect(form.find(toggle).exists()).toBe(strict)
     format.vm.$emit('update:modelValue', 'json_schema')
+    await flushPromises()
+    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(strict)
+    await form.get(toggle).setValue(!strict)
     form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '文本接口')!.vm.$emit('update:modelValue', 'responses')
     await form.trigger('submit')
     await flushPromises()
     expect(update).toHaveBeenCalledWith(32, expect.objectContaining({
-      supports_json_output: true, supports_strict_output: true, text_api: 'responses',
+      supports_json_output: true, supports_strict_output: true, schema_in_prompt: !strict, text_api: 'responses',
     }))
   } finally {
     wrapper.unmount()
@@ -207,6 +212,17 @@ it.each(['light', 'dark'])('defaults a new text model to the creation purpose wi
     expect(form.text()).toContain('剧本、设定和分镜文本使用「创作助手」用途')
     const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
     expect(format.props('modelValue')).toBe('text')
+    format.vm.$emit('update:modelValue', 'json_schema')
+    await flushPromises()
+    const toggle = 'input[name="schema_in_prompt"]'
+    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(false)
+    await form.get(toggle).setValue(true)
+    format.vm.$emit('update:modelValue', 'text')
+    await flushPromises()
+    expect(form.find(toggle).exists()).toBe(false)
+    format.vm.$emit('update:modelValue', 'json_schema')
+    await flushPromises()
+    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(false)
   } finally {
     wrapper.unmount()
     delete document.documentElement.dataset.appTheme

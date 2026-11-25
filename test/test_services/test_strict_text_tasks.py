@@ -437,4 +437,3 @@ async def test_schema_reaches_the_prompt_only_when_the_gateway_ignores_strict(
 async def test_schema_in_prompt_off_by_default(strict_model):
     """默认关闭：既有部署升级后行为不变。"""
     assert strict_model.schema_in_prompt is False
-
