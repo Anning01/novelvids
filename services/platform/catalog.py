@@ -44,7 +44,7 @@ def public_tariff(raw):
 
 async def model_catalog():
     rows = await AiModelConfig.filter(scope="official", team_id__isnull=True, is_active=True).exclude(api_protocol="novelvids").order_by("id").values(
-        "id","name","created_at","image_model_type","video_model_type","api_protocol","task_type","task_types","pricing","supports_tool_calls","supports_json_output","supports_strict_output")
+        "id","name","created_at","image_model_type","video_model_type","api_protocol","task_type","task_types","pricing","supports_tool_calls","supports_json_output","supports_strict_output","schema_in_prompt")
     models = []
     for row in rows:
         task_types = row["task_types"] or [row["task_type"]]
@@ -59,6 +59,6 @@ async def model_catalog():
             "reference_image_urls": bool(row["image_model_type"] and row["api_protocol"] in {"volcengine_ark", "openrouter_compatible"}),
             "pricing": public_tariff(row["pricing"]), "tool_calls": row["supports_tool_calls"],
             "json_output": row["supports_json_output"],
-            "strict_output": row["supports_strict_output"],
+            "strict_output": row["supports_strict_output"], "schema_in_prompt": row["schema_in_prompt"],
         })
     return models

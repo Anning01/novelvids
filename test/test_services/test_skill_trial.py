@@ -128,9 +128,10 @@ async def test_endpoint_rejects_unknown_models_and_schema_injection():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('text_api', ['chat_completions', 'responses'])
-async def test_trial_endpoint_sends_one_strict_request_through_each_configured_protocol(monkeypatch, text_api):
+@pytest.mark.parametrize('schema_in_prompt', [False, True])
+async def test_trial_endpoint_sends_one_strict_request_through_each_configured_protocol(monkeypatch, text_api, schema_in_prompt):
     from test.test_services.test_strict_text_tasks import mock_model
-    chosen = await config(text_api=text_api)
+    chosen = await config(text_api=text_api, schema_in_prompt=schema_in_prompt)
     payload = {'book_types': ['悬疑'], 'story_outline': '船工发现秘密。', 'key_characters': []}
     requests = mock_model(monkeypatch, payload)
     app = FastAPI()
@@ -140,8 +141,13 @@ async def test_trial_endpoint_sends_one_strict_request_through_each_configured_p
         response = await client.post('/skills/trial', json=body(chosen.id, thinking='disabled', reasoning_effort='low').model_dump())
     assert response.status_code == 200 and '"type": "done"' in response.text
     assert len(requests) == 1
-    assert 'output_schema=' not in json.dumps(requests[0], ensure_ascii=False)
     output_format = requests[0]['text']['format'] if text_api == 'responses' else requests[0]['response_format']['json_schema']
+    messages = requests[0]['input'] if text_api == 'responses' else requests[0]['messages']
+    instructions = next(message['content'] for message in messages if message['role'] == 'system')
+    if schema_in_prompt:
+        assert json.loads(instructions.split('output_schema=', 1)[1]) == output_format['schema']
+    else:
+        assert 'output_schema=' not in instructions
     assert output_format['strict'] is True and output_format['schema']['additionalProperties'] is False
     assert (await ModelUsageRecord.get()).usage['input_tokens'] == 24
 

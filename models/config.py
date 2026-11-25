@@ -64,6 +64,10 @@ class AiModelConfig(AbstractBaseModel):
     supports_tool_calls = fields.BooleanField(default=False, description="是否支持多轮工具调用")
     text_api = fields.CharField(max_length=24, default="chat_completions", description="文本调用接口")
     supports_strict_output = fields.BooleanField(default=False, description="是否支持严格 JSON Schema 输出")
+    schema_in_prompt = fields.BooleanField(
+        default=False,
+        description="是否把 JSON Schema 同时写进提示词；部分第三方网关不执行 response_format=json_schema 时靠它约束字段名",
+    )
     max_context_characters = fields.IntField(
         null=True,
         description="四层业务消息允许的最大总字符数；留空表示不预检",
