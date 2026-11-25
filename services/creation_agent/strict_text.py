@@ -117,10 +117,13 @@ async def generate(execution, facts: dict) -> dict:
             audiovisual_guidance=audiovisual_guidance(project.audiovisual_guidance, execution.language))
         if operation == 'storyboard':
             project_facts['storyboard_strategy'] = json.loads(read_skill('strategies'))[params.get('storyboard_strategy') or project.storyboard_strategy or 'cinematic']
+    # 原生 response_format 已随请求下发；部分第三方网关不实际执行 strict 约束，
+    # 模型仍会自造字段名。这类模型可开启 schema_in_prompt，让字段定义同时进入提示词。
     instructions, content = render_text_task(language=execution.language,
         skill=params['creative_method'], context={
             'input': facts, 'user_request': await user_instruction(params),
-            'project': project_facts})
+            'project': project_facts},
+        output_schema=contract['schema'] if getattr(chosen, 'schema_in_prompt', False) else None)
     messages = [ModelRequest(parts=[SystemPromptPart(instructions), UserPromptPart(content)])]
     request = ModelRequestParameters()
     if operation in {'assets', 'storyboard', 'screenplay'}:

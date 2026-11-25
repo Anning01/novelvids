@@ -84,10 +84,13 @@ async def ensure_text_task_schema() -> None:
             await connection.execute_script("ALTER TABLE ai_model_configs ADD COLUMN text_api VARCHAR(24) NOT NULL DEFAULT 'chat_completions';")
         if columns and 'supports_strict_output' not in {row['name'] for row in columns}:
             await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN supports_strict_output INT NOT NULL DEFAULT 0;')
+        if columns and 'schema_in_prompt' not in {row['name'] for row in columns}:
+            await connection.execute_script('ALTER TABLE ai_model_configs ADD COLUMN schema_in_prompt INT NOT NULL DEFAULT 0;')
     else:
         await connection.execute_script("ALTER TABLE IF EXISTS user_skills ADD COLUMN IF NOT EXISTS files JSONB NOT NULL DEFAULT '[]'::jsonb;")
         await connection.execute_script("ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS text_api VARCHAR(24) NOT NULL DEFAULT 'chat_completions';")
         await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS supports_strict_output BOOL NOT NULL DEFAULT FALSE;')
+        await connection.execute_script('ALTER TABLE IF EXISTS ai_model_configs ADD COLUMN IF NOT EXISTS schema_in_prompt BOOL NOT NULL DEFAULT FALSE;')
     generator = connection.schema_generator(connection)
     for model in (UserSkill, TaskSkillPreference):
         await connection.execute_script(generator._get_table_sql(model, safe=True)['table_creation_string'])

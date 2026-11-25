@@ -39,6 +39,10 @@ class AiModelConfigProperties(BaseModel):
     supports_tool_calls: bool = Field(False, description="是否支持多轮工具调用")
     text_api: Literal["chat_completions", "responses"] = "chat_completions"
     supports_strict_output: bool = Field(False, description="是否支持 response_format=json_schema 且 strict=true")
+    schema_in_prompt: bool = Field(
+        False,
+        description="是否把 JSON Schema 同时写进提示词；用于不实际执行 strict 的第三方网关",
+    )
     max_context_characters: Optional[int] = Field(
         None,
         description="四层业务消息允许的最大总字符数",
@@ -108,6 +112,10 @@ class AiModelConfigOut(AiModelConfigProperties, BaseResponse):
     is_active: bool = Field(..., description="是否启用")
     concurrency: int = Field(..., description="并发数")
     supports_json_output: bool = Field(False, description="是否支持结构化 JSON 输出")
+    schema_in_prompt: bool = Field(
+        False,
+        description="是否把 JSON Schema 同时写进提示词",
+    )
     max_context_characters: Optional[int] = Field(
         None,
         description="四层业务消息允许的最大总字符数",

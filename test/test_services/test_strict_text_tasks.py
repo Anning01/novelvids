@@ -408,3 +408,33 @@ async def test_storyboard_sends_one_narrative_source_and_scene_grouping_rules(st
     fields = requests[0]['response_format']['json_schema']['schema']['properties']['shots']['items']['properties']
     assert '观看重点' in fields['segments']['description']
     assert '剪辑点' in fields['transition']['description']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('schema_in_prompt', [False, True])
+async def test_schema_reaches_the_prompt_only_when_the_gateway_ignores_strict(
+    strict_model, monkeypatch, schema_in_prompt,
+):
+    """不执行 strict 的网关会让模型自造字段名；开关开启后字段定义随提示词下发。"""
+    strict_model.schema_in_prompt = schema_in_prompt
+    await strict_model.save()
+    novel = await Novel.create(name='网关兜底')
+    chapter = await Chapter.create(novel=novel, number=1, name='渡口', content='船工守着渡口。')
+    requests = mock_model(monkeypatch, {'screenplay': '1-1 渡口 外 夜\n△ 船工停下。'})
+    task = await submit_screenplay(chapter.id, AuthContext())
+    await ai_task_executor.run(task)
+    await task.refresh_from_db()
+    assert task.status == 3, task.error_message
+    serialized = json.dumps(requests[0], ensure_ascii=False)
+    if schema_in_prompt:
+        assert 'output_schema=' in serialized
+        assert 'screenplay' in serialized
+    else:
+        assert 'output_schema=' not in serialized
+
+
+@pytest.mark.asyncio
+async def test_schema_in_prompt_off_by_default(strict_model):
+    """默认关闭：既有部署升级后行为不变。"""
+    assert strict_model.schema_in_prompt is False
+
