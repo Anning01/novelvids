@@ -16,7 +16,7 @@ from models.config import AiModelConfig
 from services.oss.temporary import TemporaryBucket
 from services.platform.access import create_key
 from services.platform.temporary_media import expire_uploads
-from services.video.public_media import PublicMediaResolver
+from services.oss.studio_client import StudioMediaClient
 from test.test_auth import issue_test_session
 
 PUT_HEADERS = {"content-type":"image/png", "content-length":"8", "content-md5":"bW9jay1jaGVja3N1bS0wMA==",
@@ -117,7 +117,7 @@ async def test_studio_key_uploads_directly_reuses_refreshes_and_reclaims(monkeyp
     monkeypatch.setattr(httpx,"AsyncClient",lambda *a,**kw: orig(*a,**kw,transport=httpx.MockTransport(dispatch)))
     source=tmp_path/"media"/"frame.png"
     source.parent.mkdir(); source.write_bytes(content)
-    resolver=PublicMediaResolver(team_id=team.id)
+    resolver=StudioMediaClient("https://platform.example/v1", key, team.id)
     refs=await asyncio.gather(*(resolver.resolve("/media/frame.png") for _ in range(3)))
     assert len(set(refs))==1 and len(posts)==1
     assert parse_qs(urlsplit(refs[0]).query)["x-oss-expires"]==["172800"]
@@ -130,7 +130,7 @@ async def test_studio_key_uploads_directly_reuses_refreshes_and_reclaims(monkeyp
     second=await resolver.resolve("/media/frame.png")
     assert second!=refs[0] and len(posts)==2
     data=json.loads(cache.read_text());data["expires_at"]=0;cache.write_text(json.dumps(data))
-    third=await PublicMediaResolver(team_id=team.id).resolve("data:image/png;base64,"+base64.b64encode(content).decode())
+    third=await StudioMediaClient("https://platform.example/v1", key, team.id).resolve("data:image/png;base64,"+base64.b64encode(content).decode())
     assert third!=second and len(posts)==3 and len(objects)==2
     await StudioMediaLease.filter(object_key=urlsplit(second).path.lstrip("/")).update(expires_epoch=int(datetime.now(timezone.utc).timestamp())-1)
     await expire_uploads()
@@ -172,23 +172,25 @@ def test_signed_query_is_not_written_to_http_log():
     assert record.getMessage()=="HTTP Request: GET https://bucket.example/file"
 
 
-async def test_direct_image_model_forwards_inline_without_platform_upload(monkeypatch):
-    from unittest.mock import AsyncMock
+@pytest.mark.parametrize("protocol", ["volcengine_ark", "openrouter_compatible"])
+async def test_direct_image_model_forwards_inline_without_platform_upload(monkeypatch, protocol):
     from services.image_generation.gateway import generate_images
-    from services.oss import studio_client as local
-    reader=AsyncMock()
-    reader.resolve.return_value="https://example.invalid/signed-file.png"
-    monkeypatch.setattr(local,"studio_client",lambda *a,**kw:reader)
-    original=httpx.AsyncClient
+
+    def unexpected_cat_client(*args, **kwargs):
+        pytest.fail("Custom image models must not request Cat upload tickets")
+
+    monkeypatch.setattr("services.oss.studio_client.studio_client", unexpected_cat_client)
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "nv_platform")
+    original = httpx.AsyncClient
     def vendor(req):
-        body=json.loads(req.content)
-        assert body['image']==["data:image/png;base64,YQ=="]
-        return httpx.Response(200,json={"data":[{"url":"https://example.invalid/result.png"}]})
-    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:original(**kw,transport=httpx.MockTransport(vendor)))
-    results=await generate_images(base_url="https://example.invalid/v3",api_key="custom-test",model="model",prompt="test",
-        api_protocol="volcengine_ark",extra_body={"image":["data:image/png;base64,YQ=="]})
+        assert req.url.host == "custom.example"
+        assert req.headers["authorization"] == "Bearer nv_custom"
+        assert json.loads(req.content)["image"] == ["data:image/png;base64,YQ=="]
+        return httpx.Response(200, json={"data": [{"url": "https://custom.example/result.png"}]})
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**kw, transport=httpx.MockTransport(vendor)))
+    results = await generate_images(base_url="https://custom.example/v3", api_key="nv_custom",
+        model="nv-custom", prompt="test", api_protocol=protocol, extra_body={"image": ["data:image/png;base64,YQ=="]})
     assert results[0].url.endswith("/result.png")
-    reader.resolve.assert_not_awaited()
 
 
 @pytest.mark.parametrize("use_oss", [False, True])
