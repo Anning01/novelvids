@@ -77,14 +77,15 @@ describe('reasoning parameter controls', () => {
 })
 
 it.each([
-  { theme: 'light', jsonOutput: false, strict: true },
-  { theme: 'dark', jsonOutput: true, strict: false },
-])('saves text API and preferred output format in $theme', async ({ theme, strict, jsonOutput }) => {
+  { theme: 'light', strict: true, inPrompt: false, initial: 'json_schema', next: 'json_schema_prompt' },
+  { theme: 'dark', strict: true, inPrompt: true, initial: 'json_schema_prompt', next: 'text' },
+  { theme: 'dark', strict: false, inPrompt: false, initial: 'text', next: 'json_schema' },
+])('loads $initial and saves $next in $theme', async ({ theme, strict, inPrompt, initial, next }) => {
   document.documentElement.dataset.appTheme = theme
   baseMocks()
   vi.spyOn(api, 'configs').mockResolvedValue({ data: { items: [{ id: 32, name: '结构化模型', task_type: 7, task_types: [7],
     scope: 'team', team_id: 9, model: 'structured', api_protocol: 'openai_compatible', base_url: 'https://upstream.invalid', api_key: 'fixture',
-    is_active: true, concurrency: 1, supports_json_output: jsonOutput, supports_strict_output: strict, schema_in_prompt: strict,
+    is_active: true, concurrency: 1, supports_json_output: true, supports_strict_output: strict, schema_in_prompt: inPrompt,
     pricing: { type: 'text', input_price_per_1m: 1, output_price_per_1m: 2 } }] } } as never)
   const update = vi.spyOn(api, 'updateConfig').mockResolvedValue({ data: {} } as never)
   const wrapper = mountPage(teamAdminStore())
@@ -93,18 +94,15 @@ it.each([
     await wrapper.get('[aria-label="编辑配置"]').trigger('click')
     const form = wrapper.get('form.model-modal')
     const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
-    expect(format.props('modelValue')).toBe(strict ? 'json_schema' : 'text')
-    const toggle = 'input[name="schema_in_prompt"]'
-    expect(form.find(toggle).exists()).toBe(strict)
-    format.vm.$emit('update:modelValue', 'json_schema')
-    await flushPromises()
-    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(strict)
-    await form.get(toggle).setValue(!strict)
+    expect(format.props('modelValue')).toBe(initial)
+    expect(form.find('input[name="schema_in_prompt"]').exists()).toBe(false)
+    format.vm.$emit('update:modelValue', next)
     form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '文本接口')!.vm.$emit('update:modelValue', 'responses')
     await form.trigger('submit')
     await flushPromises()
     expect(update).toHaveBeenCalledWith(32, expect.objectContaining({
-      supports_json_output: true, supports_strict_output: true, schema_in_prompt: !strict, text_api: 'responses',
+      supports_json_output: next !== 'text', supports_strict_output: next !== 'text',
+      schema_in_prompt: next === 'json_schema_prompt', text_api: 'responses',
     }))
   } finally {
     wrapper.unmount()
@@ -212,17 +210,11 @@ it.each(['light', 'dark'])('defaults a new text model to the creation purpose wi
     expect(form.text()).toContain('剧本、设定和分镜文本使用「创作助手」用途')
     const format = form.findAllComponents(AppSelect).find((select: VueWrapper<InstanceType<typeof AppSelect>>) => select.props('ariaLabel') === '结构化输出')!
     expect(format.props('modelValue')).toBe('text')
-    format.vm.$emit('update:modelValue', 'json_schema')
-    await flushPromises()
-    const toggle = 'input[name="schema_in_prompt"]'
-    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(false)
-    await form.get(toggle).setValue(true)
-    format.vm.$emit('update:modelValue', 'text')
-    await flushPromises()
-    expect(form.find(toggle).exists()).toBe(false)
-    format.vm.$emit('update:modelValue', 'json_schema')
-    await flushPromises()
-    expect(form.get<HTMLInputElement>(toggle).element.checked).toBe(false)
+    expect(format.props('options')).toEqual([
+      { value: 'text', label: '不支持' },
+      { value: 'json_schema', label: 'JSON Schema' },
+      { value: 'json_schema_prompt', label: 'JSON Schema（兼容模式）' },
+    ])
   } finally {
     wrapper.unmount()
     delete document.documentElement.dataset.appTheme

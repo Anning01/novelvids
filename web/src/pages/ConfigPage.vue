@@ -184,11 +184,14 @@ const showApiKey = ref(false)
 const selectedCategoryId = ref<ModelCategoryId>('llm')
 const form = ref({ task_types: ['1'], name: '', base_url: '', api_key: '', model: '', api_protocol: 'openai_compatible' as ImageApiProtocol, image_model_type: '' as ImageModelType | '', video_model_type: '' as VideoGenerationModelType | '', concurrency: 1, supports_tool_calls: false, text_api: 'chat_completions' as 'chat_completions' | 'responses', supports_json_output: false, supports_strict_output: false, schema_in_prompt: false, max_context_characters: '' as number | '', thinking: '', reasoning_effort: '', max_tokens: '' as number | '' })
 const outputMode = computed({
-  get: () => form.value.supports_strict_output ? 'json_schema' : 'text',
+  get: () => {
+    if (!form.value.supports_strict_output) return 'text'
+    return form.value.schema_in_prompt ? 'json_schema_prompt' : 'json_schema'
+  },
   set: (value: string) => {
     form.value.supports_json_output = value !== 'text'
-    form.value.supports_strict_output = value === 'json_schema'
-    if (!form.value.supports_strict_output) form.value.schema_in_prompt = false
+    form.value.supports_strict_output = value !== 'text'
+    form.value.schema_in_prompt = value === 'json_schema_prompt'
   },
 })
 
@@ -935,16 +938,12 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
           <label v-if="selectedCategory.id === 'llm'">
             <span>{{ tr('结构化输出') }}</span>
             <AppSelect v-model="outputMode" :ariaLabel="tr('结构化输出')" :menu-z-index="2000"
-              :options="[{ value: 'text', label: tr('不支持') }, { value: 'json_schema', label: 'JSON Schema' }]" />
-            <small>{{ tr('文本创作任务仅使用 JSON Schema 严格字段约束。') }}</small>
-          </label>
-          <label v-if="selectedCategory.id === 'llm' && form.supports_strict_output" class="json-capability-field is-full">
-            <span class="json-capability-copy">
-              <strong :id="`${reasoningControlId}-schema-label`">{{ tr('在提示词中附加 JSON Schema') }}</strong>
-              <small :id="`${reasoningControlId}-schema-help`">{{ tr('当网关接受 JSON Schema 却返回错误字段时开启。') }}</small>
-            </span>
-            <input v-model="form.schema_in_prompt" name="schema_in_prompt" type="checkbox" role="switch"
-              :aria-labelledby="`${reasoningControlId}-schema-label`" :aria-describedby="`${reasoningControlId}-schema-help`" />
+              :options="[
+                { value: 'text', label: tr('不支持') },
+                { value: 'json_schema', label: 'JSON Schema' },
+                { value: 'json_schema_prompt', label: tr('JSON Schema（兼容模式）') },
+              ]" />
+            <small v-if="outputMode === 'json_schema_prompt'">{{ tr('同时把字段定义写入提示词，适用于未按 Schema 返回字段的网关。') }}</small>
           </label>
         </div>
 
@@ -1179,15 +1178,6 @@ onUnmounted(() => window.removeEventListener('keydown', onWindowKeydown))
 .model-form-grid input:-webkit-autofill,
 .model-form-grid input:-webkit-autofill:hover,
 .model-form-grid input:-webkit-autofill:focus { border-color: var(--app-border-strong); -webkit-text-fill-color: var(--app-text); caret-color: var(--app-text); box-shadow: 0 0 0 1000px var(--app-surface-muted) inset; }
-.json-capability-field { display: flex !important; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px !important; padding: 12px 14px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-surface-muted); }
-.json-capability-copy { display: grid; gap: 4px; }
-.json-capability-copy strong { color: var(--app-text); font-size: 11px; }
-.json-capability-copy small { color: var(--app-text-muted); font-size: 9px; line-height: 1.5; }
-.model-form-grid .json-capability-field > input { position: relative; width: 38px; min-width: 38px; height: 22px; min-height: 22px; margin: 0; padding: 0; border: 0; border-radius: 999px; appearance: none; background: var(--app-border-strong); cursor: pointer; transition: background .16s ease; }
-.model-form-grid .json-capability-field > input::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--app-surface); box-shadow: 0 1px 4px rgb(0 0 0 / 24%); content: ''; transition: transform .16s ease; }
-.model-form-grid .json-capability-field > input:checked { background: var(--app-accent); }
-.model-form-grid .json-capability-field > input:checked::after { transform: translateX(16px); }
-.model-form-grid .json-capability-field > input:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; box-shadow: none; }
 .input-with-icon { position: relative; display: flex; align-items: center; }
 .input-with-icon > svg { position: absolute; left: 11px; z-index: 1; color: var(--app-text-muted); }
 .input-with-icon > input { padding-left: 34px; }
