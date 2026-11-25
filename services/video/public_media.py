@@ -18,9 +18,11 @@ from utils.messages import localized_message
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 
 
-def public_media_url(value: str) -> str:
+def public_media_url(value: str, *, https_only: bool = False) -> str:
     try:
         parsed = _HTTP_URL.validate_python(value)
+        if https_only and parsed.scheme != "https":
+            raise VideoProviderError("Cat API 参考素材需要公网 HTTPS 地址")
         if parsed.username or parsed.password:
             raise ValueError
     except (ValidationError, ValueError):
@@ -40,16 +42,17 @@ class PublicMediaResolver:
     async def resolve(self, source: str) -> str:
         if source in self._resolved:
             return self._resolved[source]
+        platform = getattr(self.model_config, "api_protocol", None) == "novelvids"
         if not source.startswith(("data:", "/media/")):
-            return public_media_url(source)
-        from services.oss.studio_client import studio_client
-        if self._studio is None:
-            self._studio = studio_client(self.team_id, base_url=getattr(self.model_config, "base_url", None),
-                                         api_key=getattr(self.model_config, "api_key", None))
-        if self._studio:
-            if getattr(self.model_config, "api_protocol", None) == "novelvids":
-                return await self._studio.resolve_for_generation(source)
-            return await self._studio.resolve(source)
+            return public_media_url(source, https_only=platform)
+        if platform:
+            from services.oss.studio_client import studio_client
+            if self._studio is None:
+                self._studio = studio_client(self.team_id, base_url=self.model_config.base_url,
+                                             api_key=self.model_config.api_key)
+            if self._studio is None:
+                raise VideoProviderError("本地猫影的平台密钥尚未配置")
+            return await self._studio.resolve_for_generation(source)
         if not oss.enabled:
             raise VideoProviderError(localized_message('当前视频接口需要公网参考素材，请配置对象存储或使用公网 URL'))
         if source.startswith("data:"):

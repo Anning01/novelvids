@@ -47,6 +47,8 @@ def open_source(source):
         except (ValueError, binascii.Error):
             raise VideoProviderError("参考素材编码无效") from None
         mime = header[5:-7]
+        if mime == "audio/mp3":
+            mime = "audio/mpeg"
     else:
         root = Path(settings.MEDIA_PATH).resolve()
         path = (root / source.removeprefix("/media/")).resolve()
@@ -110,11 +112,7 @@ class StudioMediaClient:
             parts.scheme == "https" or parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}
         ):
             raise VideoProviderError("本地猫影的平台地址无效")
-        self.base_url = base_url.rstrip("/")
-        self.endpoint = self.base_url + "/studio/media-lease"
-        self._inline_supported = None
-        # Cat API accepts 16 MiB of JSON, including up to 1 MiB of metadata.
-        self._inline_remaining = 15 * 1024**2
+        self.endpoint = base_url.rstrip("/") + "/studio/media-lease"
         self.api_key = api_key
         root = Path(settings.STUDIO_MEDIA_CACHE_PATH).resolve()
         if root.is_relative_to(Path(settings.MEDIA_PATH).resolve()):
@@ -137,27 +135,21 @@ class StudioMediaClient:
             r"https://cat-media\.invalid/studio-temporary/v1/[1-9][0-9]*/[a-f0-9]{32}\.[a-z0-9]{2,5}", value)
 
     async def resolve_for_generation(self, source):
-        """Old Cat API requires upload tickets even for an inline image or video."""
-        if not isinstance(source, str) or not source.startswith("data:") or len(source) > self._inline_remaining:
-            return await self.resolve(source)
-        if self._inline_supported is None:
-            try:
-                async with httpx.AsyncClient(timeout=8, follow_redirects=False) as http:
-                    reply = await http.get(self.base_url + "/openapi.json")
-                    reply.raise_for_status()
-                    props = reply.json()["components"]["schemas"]["UploadTicket"]["properties"]
-                    self._inline_supported = isinstance(props, dict) and "media_ref" in props
-            except (httpx.HTTPError, ValueError, KeyError, TypeError):
-                # Upload tickets work with both generations and never submit a model task.
-                self._inline_supported = False
-        if self._inline_supported:
-            self._inline_remaining -= len(source)
-            return source
-        return await self.resolve(source)
+        """Cat generation accepts HTTPS references, including account-owned media_ref values."""
+        if isinstance(source, str) and source.startswith(("https://", "http://")):
+            from services.video.public_media import public_media_url
+            return public_media_url(source, https_only=True)
+        try:
+            return await self._upload(source, require_media_ref=True)
+        except OSError:
+            raise VideoProviderError("本地参考素材读取或暂存失败") from None
 
     async def resolve(self, source):
         if isinstance(source, str) and source.startswith(("https://", "http://")):
             return source
+        return await self._upload(source, require_media_ref=False)
+
+    async def _upload(self, source, *, require_media_ref):
         obj = await asyncio.to_thread(retain_original, source, self.directory / "originals")
         identity = sha256((obj.path.name + "\0" + obj.content_type).encode()).hexdigest()
         cache = self.directory / (identity + ".json")
@@ -174,7 +166,7 @@ class StudioMediaClient:
                     url = saved.get("url", "")
                     if saved.get("expires_at", 0) > time.time() + 60 and self.private_ref(url):
                         return url
-                    if saved.get("expires_at", 0) > time.time() + 60 and trusted_object(url):
+                    if not require_media_ref and saved.get("expires_at", 0) > time.time() + 60 and trusted_object(url):
                         # GET signatures are method-specific. A range read checks the actual object.
                         async with http.stream("GET", url, headers={"Range":"bytes=0-0"}) as check:
                             if check.status_code in (200, 206):
@@ -187,12 +179,15 @@ class StudioMediaClient:
                     raise VideoProviderError(f"平台未签发本地素材上传凭证（HTTP {result.status_code}）")
                 ticket = result.json()
                 put = ticket["upload_url"]
-                get = ticket.get("media_ref") or ticket.get("read_url")
+                get = ticket.get("media_ref")
+                if not get and not require_media_ref:
+                    get = ticket.get("read_url")
                 if self.private_ref(get):
                     key = urlsplit(get).path.removeprefix("/studio-temporary/v1/")
-                    valid = self.trusted_upload(put) and urlsplit(put).path.endswith("/" + key)
+                    allowed_upload = trusted_object(put) if require_media_ref else self.trusted_upload(put)
+                    valid = allowed_upload and urlsplit(put).path.endswith("/" + key)
                 else:
-                    valid = (isinstance(get, str) and trusted_object(put) and trusted_object(get)
+                    valid = (not require_media_ref and isinstance(get, str) and trusted_object(put) and trusted_object(get)
                              and put.partition("?")[0] == get.partition("?")[0])
                 if not valid:
                     raise VideoProviderError("平台返回的临时素材地址无效")

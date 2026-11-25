@@ -16,7 +16,7 @@ from models.config import AiModelConfig
 from services.oss.temporary import TemporaryBucket
 from services.platform.access import create_key
 from services.platform.temporary_media import expire_uploads
-from services.video.public_media import PublicMediaResolver
+from services.oss.studio_client import StudioMediaClient
 from test.test_auth import issue_test_session
 
 PUT_HEADERS = {"content-type":"image/png", "content-length":"8", "content-md5":"bW9jay1jaGVja3N1bS0wMA==",
@@ -117,7 +117,7 @@ async def test_studio_key_uploads_directly_reuses_refreshes_and_reclaims(monkeyp
     monkeypatch.setattr(httpx,"AsyncClient",lambda *a,**kw: orig(*a,**kw,transport=httpx.MockTransport(dispatch)))
     source=tmp_path/"media"/"frame.png"
     source.parent.mkdir(); source.write_bytes(content)
-    resolver=PublicMediaResolver(team_id=team.id)
+    resolver=StudioMediaClient("https://platform.example/v1", key, team.id)
     refs=await asyncio.gather(*(resolver.resolve("/media/frame.png") for _ in range(3)))
     assert len(set(refs))==1 and len(posts)==1
     assert parse_qs(urlsplit(refs[0]).query)["x-oss-expires"]==["172800"]
@@ -130,7 +130,7 @@ async def test_studio_key_uploads_directly_reuses_refreshes_and_reclaims(monkeyp
     second=await resolver.resolve("/media/frame.png")
     assert second!=refs[0] and len(posts)==2
     data=json.loads(cache.read_text());data["expires_at"]=0;cache.write_text(json.dumps(data))
-    third=await PublicMediaResolver(team_id=team.id).resolve("data:image/png;base64,"+base64.b64encode(content).decode())
+    third=await StudioMediaClient("https://platform.example/v1", key, team.id).resolve("data:image/png;base64,"+base64.b64encode(content).decode())
     assert third!=second and len(posts)==3 and len(objects)==2
     await StudioMediaLease.filter(object_key=urlsplit(second).path.lstrip("/")).update(expires_epoch=int(datetime.now(timezone.utc).timestamp())-1)
     await expire_uploads()
@@ -172,23 +172,25 @@ def test_signed_query_is_not_written_to_http_log():
     assert record.getMessage()=="HTTP Request: GET https://bucket.example/file"
 
 
-async def test_direct_image_model_forwards_inline_without_platform_upload(monkeypatch):
-    from unittest.mock import AsyncMock
+@pytest.mark.parametrize("protocol", ["volcengine_ark", "openrouter_compatible"])
+async def test_direct_image_model_forwards_inline_without_platform_upload(monkeypatch, protocol):
     from services.image_generation.gateway import generate_images
-    from services.oss import studio_client as local
-    reader=AsyncMock()
-    reader.resolve.return_value="https://example.invalid/signed-file.png"
-    monkeypatch.setattr(local,"studio_client",lambda *a,**kw:reader)
-    original=httpx.AsyncClient
+
+    def unexpected_cat_client(*args, **kwargs):
+        pytest.fail("Custom image models must not request Cat upload tickets")
+
+    monkeypatch.setattr("services.oss.studio_client.studio_client", unexpected_cat_client)
+    monkeypatch.setattr(settings, "STUDIO_PLATFORM_API_KEY", "nv_platform")
+    original = httpx.AsyncClient
     def vendor(req):
-        body=json.loads(req.content)
-        assert body['image']==["data:image/png;base64,YQ=="]
-        return httpx.Response(200,json={"data":[{"url":"https://example.invalid/result.png"}]})
-    monkeypatch.setattr(httpx,"AsyncClient",lambda **kw:original(**kw,transport=httpx.MockTransport(vendor)))
-    results=await generate_images(base_url="https://example.invalid/v3",api_key="custom-test",model="model",prompt="test",
-        api_protocol="volcengine_ark",extra_body={"image":["data:image/png;base64,YQ=="]})
+        assert req.url.host == "custom.example"
+        assert req.headers["authorization"] == "Bearer nv_custom"
+        assert json.loads(req.content)["image"] == ["data:image/png;base64,YQ=="]
+        return httpx.Response(200, json={"data": [{"url": "https://custom.example/result.png"}]})
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**kw, transport=httpx.MockTransport(vendor)))
+    results = await generate_images(base_url="https://custom.example/v3", api_key="nv_custom",
+        model="nv-custom", prompt="test", api_protocol=protocol, extra_body={"image": ["data:image/png;base64,YQ=="]})
     assert results[0].url.endswith("/result.png")
-    reader.resolve.assert_not_awaited()
 
 
 @pytest.mark.parametrize("use_oss", [False, True])
@@ -227,45 +229,121 @@ async def test_studio_sends_provider_file_to_selected_backend_only(tmp_path, mon
     assert sent == ["POST", "PUT"] and (root/"novel.txt").exists()
 
 
-@pytest.mark.parametrize("backend", ["legacy_oss", "oss", "local", "legacy_without_schema"])
-async def test_inline_input_selects_wire_contract_before_generation(tmp_path, monkeypatch, backend):
+
+@pytest.mark.parametrize("kind", ["image", "video"])
+@pytest.mark.parametrize("failure", [None, "lease", "upload", "missing_ref", "disk_ticket"])
+async def test_cat_generation_sends_only_uploaded_references(tmp_path, monkeypatch, kind, failure):
+    from services.image_generation.gateway import generate_images, ImageGenerationError
+    from services.video.base import VideoProviderError
+    from services.video.unified import UnifiedVideoGenerator
+
+    root = tmp_path / "media"
+    root.mkdir()
+    monkeypatch.setattr(settings, "MEDIA_PATH", str(root))
+    monkeypatch.setattr(settings, "STUDIO_MEDIA_CACHE_PATH", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings, "DEPLOYMENT_ROLE", "studio")
+    local_image = b"x" * (1024**2 + 1)
+    (root / "second.png").write_bytes(local_image)
+    public = "https://cdn.example/reference.png"
+    images = ["data:image/png;base64,YQ==", public, "/media/second.png"]
+    media = [("image/png", b"a"), ("image/png", local_image)]
+    if kind == "video":
+        media.extend([("video/mp4", b"video"), ("audio/mpeg", b"audio")])
+
+    refs, uploads, submissions = [], [], []
+    def dispatch(request):
+        if request.url.path == "/v1/openapi.json":
+            pytest.fail("Cat generation must not infer inline support from the ticket schema")
+        if request.url.path == "/v1/studio/media-lease":
+            index = len(refs)
+            mime, content = media[index]
+            assert request.headers["authorization"] == "Bearer nv_test"
+            assert json.loads(request.content) == {
+                "byte_length": len(content), "content_type": mime,
+                "content_md5": base64.b64encode(md5(content, usedforsecurity=False).digest()).decode(),
+            }
+            extension = {"image/png":"png", "audio/mpeg":"mp3", "video/mp4":"mp4"}[mime]
+            key = f"studio-temporary/v1/1/{index:032x}.{extension}"
+            ref = "https://cat-media.invalid/" + key
+            put = "https://test-bucket.oss-cn-guangzhou.aliyuncs.com/" + key
+            refs.append(ref)
+            if index == 1 and failure == "lease":
+                return httpx.Response(503)
+            ticket = {"upload_url": put + "?write=test", "headers": {"content-type": mime},
+                      "media_ref": ref, "expires_at": 4102444800}
+            if index == 1 and failure == "disk_ticket":
+                ticket["upload_url"] = "https://cat.example/v1/media/temporary/" + key.split("/", 2)[2]
+            if index == 1 and failure == "missing_ref":
+                del ticket["media_ref"]
+                ticket["read_url"] = put + "?read=test"
+            return httpx.Response(200, json=ticket)
+        if request.method == "PUT":
+            assert request.url.host == "test-bucket.oss-cn-guangzhou.aliyuncs.com"
+            assert "authorization" not in request.headers
+            assert request.content == media[len(uploads)][1]
+            uploads.append(request.content)
+            return httpx.Response(503 if failure == "upload" and len(uploads) == 2 else 204)
+        assert request.url.path == ("/v1/images/generations" if kind == "image" else "/v1/videos")
+        submissions.append(request.content)
+        assert request.headers["content-type"] == "application/json"
+        assert b"data:" not in request.content and len(request.content) < 1024**2
+        body = json.loads(request.content)
+        expected = [refs[0], public, *refs[1:]]
+        if kind == "image":
+            assert body["image"] == expected
+            return httpx.Response(200, json={"data":[{"url":"https://cdn.example/result.png"}]})
+        assert [ref["url"] for ref in body["references"]] == expected
+        assert [ref["type"] for ref in body["references"]] == ["image"] * 3 + ["video", "audio"]
+        return httpx.Response(200, json={"id":"video-task"})
+
+    original = httpx.AsyncClient
+    def mock_client(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(dispatch)
+        return original(**kwargs)
+    monkeypatch.setattr(httpx, "AsyncClient", mock_client)
+    config = dict(api_protocol="novelvids", base_url="https://cat.example/v1", api_key="nv_test", model="nv-test")
+    if kind == "image":
+        submit = generate_images(**config, prompt="test", extra_body={"image": images})
+    else:
+        generator = UnifiedVideoGenerator(AiModelConfig(**config, video_model_type="seedance_2"))
+        submit = generator.submit(prompt="test", reference_images=images,
+            reference_videos=["data:video/mp4;base64,dmlkZW8="], reference_audios=["data:audio/mp3;base64,YXVkaW8="])
+    if failure:
+        with pytest.raises(ImageGenerationError if kind == "image" else VideoProviderError) as caught:
+            await submit
+        assert not caught.value.submission_uncertain
+        assert len(refs) == 2 and len(uploads) == (2 if failure == "upload" else 1)
+        assert not submissions
+    else:
+        await submit
+        assert len(uploads) == len(media) and len(submissions) == 1
+
+
+async def test_generation_replaces_cached_legacy_read_url(tmp_path, monkeypatch):
     from services.oss.studio_client import StudioMediaClient
 
     monkeypatch.setattr(settings, "STUDIO_MEDIA_CACHE_PATH", str(tmp_path / "cache"))
-    client = StudioMediaClient("https://cat.example/v1", "nv_test", 1)
-    private = backend in {"oss", "local"}
-    object_key = "studio-temporary/v1/1/" + "a"*32 + ".png"
-    oss_url = "https://example.oss-cn-guangzhou.aliyuncs.com/" + object_key
-    put = ("https://cat.example/v1/media/temporary/1/" + "a"*32 + ".png" if backend == "local" else oss_url) + "?write=1"
-    read = "https://cat-media.invalid/" + object_key if private else oss_url + "?read=1"
-    calls = []
-    pixels = b"\x89PNG\r\n\x1a\nexample"
-    uri = "data:image/png;base64," + base64.b64encode(pixels).decode()
-
+    client = StudioMediaClient("https://cat.example/v1", "nv_test", None)
+    source = "data:image/png;base64,YQ=="
+    key = "studio-temporary/v1/1/" + "b" * 32 + ".png"
+    obj = "https://test-bucket.oss-cn-guangzhou.aliyuncs.com/" + key
+    ref = "https://cat-media.invalid/" + key
+    requests = []
     def dispatch(request):
-        calls.append(request.method)
-        if request.url.path == "/v1/openapi.json":
-            assert "authorization" not in request.headers
-            if backend == "legacy_without_schema":
-                return httpx.Response(404)
-            fields = {"media_ref" if private else "read_url": {"type":"string"}}
-            return httpx.Response(200, json={"components":{"schemas":{"UploadTicket":{"properties":fields}}}})
-        if request.url.path == "/v1/studio/media-lease":
-            assert request.headers["authorization"] == "Bearer nv_test"
-            return httpx.Response(200, json={"upload_url":put, "media_ref" if private else "read_url":read,
-                                            "headers":{"content-type":"image/png"}, "expires_at":4102444800})
-        assert str(request.url) == put and request.content == pixels and "authorization" not in request.headers
-        return httpx.Response(204)
+        requests.append(request.method)
+        if request.method == "PUT":
+            return httpx.Response(204)
+        assert request.url.path.endswith("/studio/media-lease")
+        ticket = {"upload_url": obj + "?write=test", "headers": {}, "expires_at": 4102444800}
+        if len(requests) == 1:
+            ticket["read_url"] = obj + "?read=test"
+        else:
+            ticket["media_ref"] = ref
+        return httpx.Response(200, json=ticket)
 
     original = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(dispatch), **kw))
-    assert await client.resolve_for_generation("https://user.example/image.png") == "https://user.example/image.png"
-    assert not calls
-    assert await client.resolve_for_generation(uri) == (uri if private else read)
-    if private:
-        assert calls == ["GET"]
-        assert not (tmp_path / "cache").exists()
-        # After spending the request's inline budget the same input travels by ticket.
-        client._inline_remaining = 0
-        assert await client.resolve_for_generation(uri) == read
-    assert calls == ["GET", "POST", "PUT"]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(**kw, transport=httpx.MockTransport(dispatch)))
+    assert await client.resolve(source) == obj + "?read=test"
+    assert await client.resolve_for_generation(source) == ref
+    assert await client.resolve_for_generation(source) == ref
+    assert requests == ["POST", "PUT", "POST", "PUT"]

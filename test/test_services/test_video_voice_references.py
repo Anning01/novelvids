@@ -123,6 +123,17 @@ async def test_local_upload_voice_uses_lowercase_audio_base64(monkeypatch, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_cat_local_voice_uses_ticket_even_when_model_requires_urls():
+    from dataclasses import replace
+    from services.video.voice_references import _provider_audio_url
+
+    caps = replace(capabilities_for("minimax_h3", "novelvids"),
+                   supports_audio_data_uri=False, supports_temporary_file_upload=False)
+    source = "/media/audio-references/voice.mp3"
+    assert await _provider_audio_url(AudioReference(audio_url=source), caps, team_id=None) == source
+
+
+@pytest.mark.asyncio
 async def test_wan3_local_voice_is_prepared_for_temporary_file_upload(monkeypatch, tmp_path):
     audio_dir = tmp_path / "audio-references"
     audio_dir.mkdir()

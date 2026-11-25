@@ -140,6 +140,29 @@ def test_public_error_extraction_never_uses_credentials_as_a_request_id(identifi
     assert "Request id" not in message
 
 
+@pytest.mark.parametrize("credentials", [
+    {"base_url": "https://custom.example/v1", "api_key": "nv_custom"},
+    {"base_url": "", "api_key": ""},
+])
+async def test_custom_video_media_never_requests_cat_tickets(monkeypatch, credentials):
+    from types import SimpleNamespace
+    from services.video.public_media import PublicMediaResolver
+
+    def unexpected_cat_client(*args, **kwargs):
+        pytest.fail("Custom video references must stay on the provider's own storage path")
+
+    monkeypatch.setattr("services.oss.studio_client.studio_client", unexpected_cat_client)
+    monkeypatch.setattr("services.video.public_media.settings.STUDIO_PLATFORM_API_KEY", "nv_platform")
+    storage = SimpleNamespace(enabled=True, put_bytes=AsyncMock(),
+                              public_url=lambda key: f"https://custom-cdn.example/{key}")
+    monkeypatch.setattr("services.video.public_media.oss", storage)
+    config = SimpleNamespace(api_protocol="volcengine_ark", model="nv-custom", **credentials)
+    resolver = PublicMediaResolver(team_id=9, model_config=config)
+    assert (await resolver.resolve("data:image/png;base64,YQ==")).startswith("https://custom-cdn.example/")
+    storage.put_bytes.assert_awaited_once()
+    assert await resolver.resolve("http://custom-cdn.example/image.png") == "http://custom-cdn.example/image.png"
+
+
 async def test_unified_uploads_local_images_through_existing_object_storage(monkeypatch):
     from services.video.public_media import PublicMediaResolver
 

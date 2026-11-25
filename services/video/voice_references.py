@@ -94,6 +94,8 @@ async def _provider_audio_url(
     team_id: int | None,
 ) -> str:
     url = resolve_media_url(reference.audio_url) or reference.audio_url
+    if capabilities.api_protocol == "novelvids" and url.startswith(("/media/", "data:audio/")):
+        return url  # The Cat client uploads the original before submitting the video.
     if url.startswith("/media/"):
         if not capabilities.supports_audio_data_uri:
             if not oss.enabled and capabilities.supports_temporary_file_upload:

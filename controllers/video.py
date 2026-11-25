@@ -499,7 +499,7 @@ class VideoController(CRUDBase[Video, dict, dict]):
             reference_video_duration += float(duration_value)
             reference_video_names.append(reference.name or f"参考视频 {reference_index}")
             if reference.url.startswith("/media/"):
-                if capabilities.supports_temporary_file_upload:
+                if config.api_protocol == "novelvids" or capabilities.supports_temporary_file_upload:
                     reference_videos.append(reference.url)
                 elif not media_base_url:
                     raise HTTPException(400, detail=localized_message('本地参考视频缺少可访问的媒体地址'))

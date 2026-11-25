@@ -447,7 +447,7 @@ async def test_studio_remake_sends_media_link_with_sampling_rate(tmp_path, monke
     video.write_bytes(b"test video")
     url = "https://bucket.oss-cn-beijing.aliyuncs.com/studio-temporary/v1/test.mp4?signature=test"
     upload = AsyncMock(return_value=url)
-    monkeypatch.setattr("services.oss.studio_client.studio_client", lambda *args, **kwargs: SimpleNamespace(resolve=upload))
+    monkeypatch.setattr("services.oss.studio_client.studio_client", lambda *args, **kwargs: SimpleNamespace(resolve_for_generation=upload))
     config = _config(api_protocol="novelvids", model="nv-9", api_key="nv_test")
     client = _Client([_completion({'characters': [], 'scenes': [], 'objects': []})])
     gateway = RemakeVideoAnalysisGateway(config, client=client)
