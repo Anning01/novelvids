@@ -33,7 +33,7 @@ class PlatformMediaKitClient(MediaKitClient):
             client = studio_client(self.snapshot.get('team_id'), base_url=self.base_url, api_key=self.api_key)
             if client is None:
                 raise MediaKitError(localized_message('增强服务不可用'), definite_rejection=True)
-            return await client.resolve(path)
+            return await client.resolve_for_generation(path)
         except VideoProviderError:
             raise MediaKitError(localized_message('MediaKit 原片临时上传失败')) from None
 

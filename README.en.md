@@ -134,7 +134,7 @@ This repository runs the creative workspace with `NOVELVIDS_ROLE=studio` by defa
 
 Create a key for **Local Cat Shadow Studio** in the platform console. As a studio super administrator, open **Model configuration → Connect to the platform**, enter the key, and sync the models. The studio uses `https://shortdramas.xiazq.com/v1` by default. Set `STUDIO_PLATFORM_BASE_URL` to use a different platform address. The studio downloads completed videos directly to local storage.
 
-When a model needs a temporary file, the studio follows the Cat API upload ticket to either server storage or OSS. Cat API selects the backend with `OSS_PROVIDER`. The studio needs no OSS credentials. User-provided public URLs pass through, and platforms with inline media support can receive Base64 directly. Older Cat API servers use OSS upload tickets. Novels and project originals stay on the workstation.
+For Cat API generation, the studio uploads local files and Base64 inputs directly to OSS with an upload ticket, then sends the ticket’s `media_ref` in the generation request. User-provided public HTTPS URLs pass through. The studio needs no OSS credentials. Novels and project originals stay on the workstation.
 
 ## Creative workflow
 

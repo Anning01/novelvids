@@ -306,15 +306,21 @@ async def test_生成视频_传递并记录参考图片和视频():
 
 
 @pytest.mark.asyncio
-async def test_wan3_本地参考视频交给适配器临时上传而不依赖媒体公网地址():
+@pytest.mark.parametrize("protocol", ["dashscope", "novelvids"])
+async def test_local_reference_video_is_passed_to_upload_adapter(protocol):
+    from services.video.capabilities import capabilities_for
+
     local_url = "/media/video-references/motion.mp4"
     scene, config = await _create_scene_with_config(
         prompt=f"使用 {reference_mention_syntax('video', local_url)} 作为动作参考",
-        model_name="wan3",
-        video_model_type="wan_3",
-        api_protocol="dashscope",
-        base_url="https://workspace.cn-beijing.maas.aliyuncs.com",
+        model_name="wan3", video_model_type="wan_3", api_protocol=protocol,
     )
+    if protocol == "novelvids":
+        catalog = capabilities_for("wan_3", protocol).public_dict()
+        catalog["supports_temporary_file_upload"] = False
+        config.scope = "studio_platform"
+        config.processing_options = {"video_capabilities": catalog}
+        await config.save()
     req = VideoGenerateRequest(
         scene_id=scene.id,
         model_config_id=config.id,

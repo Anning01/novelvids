@@ -158,11 +158,16 @@ async def generate_images(
     images = (extra_body or {}).get("image")
     if images and api_protocol == ImageApiProtocol.novelvids.value:
         from services.oss.studio_client import studio_client
+        from services.video.base import VideoProviderError
+
         studio = studio_client(None, base_url=base_url, api_key=api_key)
         if not studio:
-            raise ImageGenerationError("本地猫影的平台密钥尚未配置")
+            raise ImageGenerationError("本地猫影的平台密钥尚未配置", submission_uncertain=False)
         refs = [images] if isinstance(images, str) else images
-        resolved = [await studio.resolve_for_generation(ref) for ref in refs]
+        try:
+            resolved = [await studio.resolve_for_generation(ref) for ref in refs]
+        except VideoProviderError as exc:
+            raise ImageGenerationError(str(exc), submission_uncertain=False) from exc
         extra_body = {**extra_body, "image":resolved[0] if isinstance(images, str) else resolved}
     elif images and api_protocol in {ImageApiProtocol.openrouter_compatible.value, ImageApiProtocol.volcengine_ark.value}:
         # A directly configured provider cannot resolve Cat account-private references.

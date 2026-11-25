@@ -518,7 +518,7 @@ class RemakeVideoAnalysisGateway:
         client = studio_client(team_id, base_url=self.config.base_url, api_key=self.config.api_key)
         if client is None:
             raise RemakeVideoAnalysisError(localized_message("本地猫影的平台密钥尚未配置"))
-        return await client.resolve(path)
+        return await client.resolve_for_generation(path)
 
     def _build_video_input(self, path: Path) -> dict[str, Any]:
         data, mime = self._read_video(path)

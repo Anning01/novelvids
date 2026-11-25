@@ -64,7 +64,7 @@ async def test_private_export_upload_uses_platform_lease_without_public_copy(tmp
     path = tmp_path / 'private-exports' / 'source.mp4'
     path.parent.mkdir(); path.write_bytes(b'private-video')
     resolve = AsyncMock(return_value='https://media.example/temporary.mp4')
-    factory = lambda team, **kw: SimpleNamespace(resolve=resolve)
+    factory = lambda team, **kw: SimpleNamespace(resolve_for_generation=resolve)
     monkeypatch.setattr('services.oss.studio_client.studio_client', factory)
     client = MediaKitClient.for_snapshot(task.request_params['config_snapshot'], config, http=None)
     assert isinstance(client, PlatformMediaKitClient)
