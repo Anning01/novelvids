@@ -56,11 +56,11 @@
 欢迎加入 **猫影短剧 · NovelVids 微信交流群**，交流 AI 漫剧、短剧制作、模型使用与开源部署。
 
 <p align="center">
-  <a href="docs/images/wechat-group-qr.jpg"><img src="docs/images/wechat-group-qr.jpg" width="320" alt="猫影短剧 NovelVids 微信交流群二维码，2026 年 11 月 29 日前有效"></a>
+  <a href="docs/images/wechat-group-qr.jpg"><img src="docs/images/wechat-group-qr.jpg" width="320" alt="猫影短剧 NovelVids 微信交流群二维码，2026 年 12 月 5 日前有效"></a>
 </p>
 
 <p align="center">
-  微信扫码入群 · <strong>当前二维码于 2026 年 11 月 22 日更新，11 月 29 日前有效。</strong><br>
+  微信扫码入群 · <strong>当前二维码于 2026 年 11 月 28 日更新，12 月 5 日前有效。</strong><br>
   二维码有效期为 7 天；如已失效，请查看仓库首页的最新版本。
 </p>
 
